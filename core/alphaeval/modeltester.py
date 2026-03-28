@@ -43,6 +43,9 @@ class AlphaEval:
         self.test_end_date = test_end_date
         self.daily_normalize = daily_normalize
 
+        qlib_data_path = os.getenv("QLIB_DATA_PATH", "~/.qlib/qlib_data/cn_data")
+        qlib.init(provider_uri=qlib_data_path, region="cn")
+
         # If the user does not specify the market, CSI300 is taken by default
         self.instruments = (
             instruments
@@ -51,9 +54,6 @@ class AlphaEval:
                 market="csi300"
             )
         )
-
-        qlib_data_path = os.getenv("QLIB_DATA_PATH", "~/.qlib/qlib_data/cn_data")
-        qlib.init(provider_uri=qlib_data_path, region="cn")
 
         self.label_expr = "Ref($close, -1)/$close - 1"
 
@@ -353,7 +353,7 @@ class AlphaEval:
             print(i)
             try:
                 data = self.factor_data[f].copy()
-                all_data = data.join(self.label_data, how="inner").join(self.noise_factor_data1[f].copy(), how="inner").join(self.noise_factor_data2, how="inner").dropna()
+                all_data = data.join(self.label_data, how="inner").join(self.noise_factor_data1[f].copy(), how="inner").join(self.noise_factor_data2[f].copy(), how="inner").dropna()
                 all_data.columns = ["factor", "label", "noisy1", "noisy2"]
                 ic_series = all_data.groupby(level="datetime").apply(
                     lambda x: x["factor"].corr(x["label"])

@@ -26,7 +26,7 @@ def route_after_eval(state: AlphaMinerState) -> str:
     return "end"
 
 def increment_iteration(state: AlphaMinerState):
-    return {"iteration": state.get("iteration", 1) + 1}
+    return {"iteration": state.get("iteration", 1) + 1, "error": None}
 
 def build_workflow():
     # Initialize shared resources
