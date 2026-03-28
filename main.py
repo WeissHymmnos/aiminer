@@ -9,6 +9,7 @@ load_dotenv()
 from workflow.graph import build_workflow
 
 def setup_logging():
+    os.makedirs("logs", exist_ok=True)
     logger.add("logs/aiminer_{time}.log", rotation="10 MB", retention="10 days", level="DEBUG")
 
 def main():

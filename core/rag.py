@@ -23,7 +23,7 @@ class RAGModule:
         self.embeddings_model = OpenAIEmbeddings(
             api_key=api_key,
             model="text-embedding-3-small",
-            openai_api_base="https://api.gptsapi.net/v1"
+            base_url="https://api.gptsapi.net/v1"
         )
         
         # Initialize ChromaDB
@@ -165,8 +165,8 @@ class RAGModule:
             
             metadata = {
                 "is_effective": is_effective,
-                "sharpe": metrics.get("sharpe", 0.0),
-                "ic": metrics.get("information_coefficient", 0.0)
+                "ic": metrics.get("information_coefficient", 0.0),
+                "rank_ic": metrics.get("rank_ic", 0.0)
             }
             
             self.experiences_col.add(

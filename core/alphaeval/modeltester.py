@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pandas as pd
 from openai import OpenAI
@@ -51,7 +52,8 @@ class AlphaEval:
             )
         )
 
-        qlib.init(provider_uri="path/to/your/qlib_data", region="cn")
+        qlib_data_path = os.getenv("QLIB_DATA_PATH", "~/.qlib/qlib_data/cn_data")
+        qlib.init(provider_uri=qlib_data_path, region="cn")
 
         self.label_expr = "Ref($close, -1)/$close - 1"
 
@@ -369,7 +371,7 @@ class AlphaEval:
                 factor_mat = (
                     data
                     .reset_index()
-                    .pivot(index="datetime", columns="instrument", values="alphacombo")
+                    .pivot(index="datetime", columns="instrument", values=f)
                 )
                 ranks = factor_mat.rank(axis=1)
                 probs = ranks.div(ranks.sum(axis=1), axis=0)
