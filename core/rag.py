@@ -1,10 +1,11 @@
 import os
 import json
 import glob
+import uuid
 from typing import List, Dict, Any, Optional
 import chromadb
 from chromadb.config import Settings
-from langchain_openai import OpenAIEmbeddings
+from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 from loguru import logger
 
 class RAGModule:
@@ -18,20 +19,24 @@ class RAGModule:
         api_key = os.getenv("ClaudeCode_KEY")
         if not api_key:
             logger.warning("ClaudeCode_KEY not found. RAG operations requiring embeddings will fail.")
-            
-        # Assuming the proxy provides OpenAI-compatible embeddings endpoint at /v1
-        self.embeddings_model = OpenAIEmbeddings(
+
+        # Use ChromaDB-native OpenAI embedding function so collections actually use it
+        self.embedding_fn = OpenAIEmbeddingFunction(
             api_key=api_key,
-            model="text-embedding-3-small",
-            base_url="https://api.gptsapi.net/v1"
+            model_name="text-embedding-3-small",
+            api_base="https://api.gptsapi.net/v1"
         )
         
         # Initialize ChromaDB
         self.client = chromadb.PersistentClient(path=self.db_dir)
         
-        # Get or create collections
-        self.experiences_col = self.client.get_or_create_collection("experiences")
-        self.knowledge_col = self.client.get_or_create_collection("knowledge_base")
+        # Get or create collections with the embedding function
+        self.experiences_col = self.client.get_or_create_collection(
+            "experiences", embedding_function=self.embedding_fn
+        )
+        self.knowledge_col = self.client.get_or_create_collection(
+            "knowledge_base", embedding_function=self.embedding_fn
+        )
         
         self._init_knowledge_base()
 
@@ -152,7 +157,7 @@ class RAGModule:
     def add_experience(self, hypothesis: str, code: str, metrics: Dict[str, float], is_effective: bool, review: str):
         """Embed and store backtesting experience into ChromaDB."""
         try:
-            exp_id = f"exp_{self.experiences_col.count() + 1}"
+            exp_id = f"exp_{uuid.uuid4().hex}"
             
             # Create a rich document representation
             document = (

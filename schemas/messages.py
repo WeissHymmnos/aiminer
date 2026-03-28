@@ -1,3 +1,4 @@
+from typing import Dict
 from pydantic import BaseModel, Field
 
 class HypothesisOutput(BaseModel):
@@ -9,7 +10,7 @@ class HypothesisOutput(BaseModel):
 class FormalizationOutput(BaseModel):
     \"\"\"Structured output for mathematical formalization.\"\"\"
     math_formula: str = Field(description="The formal mathematical formula representing the hypothesis.")
-    variables_defined: dict[str, str] = Field(description="Dictionary explaining each variable in the formula.")
+    variables_defined: Dict[str, str] = Field(description="Dictionary explaining each variable in the formula.")
 
 class ImplementationOutput(BaseModel):
     \"\"\"Structured output for code implementation.\"\"\"

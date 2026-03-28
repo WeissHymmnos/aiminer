@@ -33,7 +33,7 @@ class AlphaEval:
     ):
         self.alphacombo: pd.DataFrame
         self.factor_expressions = factor_expressions
-        if weights:
+        if weights is not None:
             self.weights = weights
         else:
             self.weights = WeightCalculator(self.factor_expressions, train_start_date, train_end_date, instruments).fit()
@@ -126,7 +126,7 @@ class AlphaEval:
         if self.daily_normalize:
             self.factor_data = (
                 self.factor_data
-                .groupby(level=1, group_keys=False)
+                .groupby(level=0, group_keys=False)
                 .apply(zscore)
                 .replace([np.inf, -np.inf], np.nan)
                 .replace(np.nan, 0)
@@ -134,7 +134,7 @@ class AlphaEval:
 
             self.noise_factor_data1 = (
                 self.noise_factor_data1
-                .groupby(level=1, group_keys=False)
+                .groupby(level=0, group_keys=False)
                 .apply(zscore)
                 .replace([np.inf, -np.inf], np.nan)
                 .replace(np.nan, 0)
@@ -142,7 +142,7 @@ class AlphaEval:
 
             self.noise_factor_data2 = (
                 self.noise_factor_data2
-                .groupby(level=1, group_keys=False)
+                .groupby(level=0, group_keys=False)
                 .apply(zscore)
                 .replace([np.inf, -np.inf], np.nan)
                 .replace(np.nan, 0)
@@ -158,7 +158,8 @@ class AlphaEval:
         self.noisecombo2 = self.noisecombo2.to_frame(name="noisecombo2")
 
     def calculate_pnl(self) -> None:
-        self.fetch_data()
+        if not hasattr(self, 'alphacombo'):
+            self.fetch_data()
         all_data = self.alphacombo.join(self.label_data, how="inner").dropna()
         all_data.columns = ["factor", "label"]
         records = []
@@ -205,7 +206,7 @@ class AlphaEval:
         if not self.daily_normalize:
             clean_df = (
                 self.factor_data
-                .groupby(level=1, group_keys=False)
+                .groupby(level=0, group_keys=False)
                 .apply(zscore)
                 .replace([np.inf, -np.inf], np.nan)
                 .replace(np.nan, 0)
@@ -224,7 +225,8 @@ class AlphaEval:
         eigs = np.clip(eigs, a_min=0, a_max=None)
         total = eigs.sum()
         if total <= 0:
-            return np.nan
+            self.diversity = np.nan
+            return
         p = eigs / total
         p = p[p > 0]
         self.diversity = -(p * np.log(p)).sum()
@@ -345,7 +347,8 @@ class AlphaEval:
 
 
     def run_single_factor(self):
-        self.fetch_data()
+        if not hasattr(self, 'alphacombo'):
+            self.fetch_data()
         print("Finish fetching data.")
         self.LLM_scores()
         res = []
@@ -368,10 +371,11 @@ class AlphaEval:
                     lambda x: x["factor"].corr(x["noisy2"])
                 )
 
+                col_name = data.name if hasattr(data, 'name') else f
                 factor_mat = (
                     data
                     .reset_index()
-                    .pivot(index="datetime", columns="instrument", values=f)
+                    .pivot(index="datetime", columns="instrument", values=col_name)
                 )
                 ranks = factor_mat.rank(axis=1)
                 probs = ranks.div(ranks.sum(axis=1), axis=0)
@@ -386,8 +390,8 @@ class AlphaEval:
                 pfs1 = round(pfs1_series.mean(), 6)
                 pfs2 = round(pfs2_series.mean(), 6)
                 res.append({"factor":f, "ic":ic, "rankic":rankic, "RRE":rre, "PFS1":pfs1, "PFS2":pfs2, "LLM":self.llm_scores[i]})
-            except Exception:
-                print(f"{f}, error!!!")
+            except Exception as e:
+                print(f"{f}, error: {e}")
 
         return res
             
