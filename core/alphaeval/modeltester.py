@@ -4,11 +4,8 @@ import pandas as pd
 from openai import OpenAI
 import re
 import json
-import qlib
-from qlib.data import D
 from typing import List, Optional
 from .combo import WeightCalculator
-from qlib.data.data import LocalDatasetProvider
 
 # import warnings
 # warnings.filterwarnings("ignore")
@@ -31,6 +28,9 @@ class AlphaEval:
         instruments: Optional[List[str]] = None,
         daily_normalize: bool = True
     ):
+        import qlib
+        from qlib.data import D
+
         self.alphacombo = None
         self.factor_expressions = factor_expressions
         if weights is not None:
@@ -52,10 +52,14 @@ class AlphaEval:
         else:
             self.instruments = D.instruments(market="csi300")
 
+        self._D = D
+
         self.label_expr = "Ref($close, -1)/$close - 1"
 
     def fetch_data(self):
-        self.factor_data = D.features(
+        from qlib.data.data import LocalDatasetProvider
+
+        self.factor_data = self._D.features(
             self.instruments,
             self.factor_expressions,
             start_time=self.test_start_date,
@@ -64,7 +68,7 @@ class AlphaEval:
         )
         self.factor_data.replace([np.inf, -np.inf], np.nan, inplace=True)
         print("Factor data done.")
-        df = D.features(
+        df = self._D.features(
             instruments=["SH000300"],
             fields=["$close"],
             start_time=self.train_start_date,
@@ -111,7 +115,7 @@ class AlphaEval:
         )
         self.noise_factor_data2.replace([np.inf, -np.inf], np.nan, inplace=True)
         print("Noise data2 done.")
-        self.label_data = D.features(
+        self.label_data = self._D.features(
             self.instruments,
             [self.label_expr],
             start_time=self.test_start_date,

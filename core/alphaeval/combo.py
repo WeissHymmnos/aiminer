@@ -2,8 +2,6 @@ import os
 import numpy as np
 import pandas as pd
 from scipy.optimize import differential_evolution
-import qlib
-from qlib.data import D
 from typing import Dict, List, Optional
 
 # import warnings
@@ -22,15 +20,18 @@ class WeightCalculator:
         self.start_date = start_date
         self.end_date = end_date
 
+        import qlib
+        from qlib.data import D
+
+        qlib_data_path = os.getenv("QLIB_DATA_PATH", "~/.qlib/qlib_data/cn_data")
+        qlib.init(provider_uri=qlib_data_path, region="cn")
+
         if instruments is not None:
             self.instruments = instruments
         else:
             self.instruments = D.instruments(
                 market="csi300", filter_pipe=None
             )
-
-        qlib_data_path = os.getenv("QLIB_DATA_PATH", "~/.qlib/qlib_data/cn_data")
-        qlib.init(provider_uri=qlib_data_path, region="cn")
 
         self.label_expr = "Ref($close, -1)/$close - 1"
 
@@ -42,6 +43,8 @@ class WeightCalculator:
 
 
     def fetch_data(self, start_time: str, end_time: str):
+        from qlib.data import D
+
         fdf = D.features(
             self.instruments,
             self.factor_expressions,
