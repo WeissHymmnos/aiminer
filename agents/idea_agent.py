@@ -7,11 +7,11 @@ from core.llm import get_llm
 from schemas.messages import HypothesisOutput
 
 class IdeaAgent:
-    \"\"\"
+    """
     IdeaAgent is responsible for proposing market hypotheses.
     It uses RAG to fetch Qlib docs, Alpha/Academic Library, Market MetaData, and Past Experiences,
     then reasons over this context using a structured LLM call.
-    \"\"\"
+    """
     def __init__(self, rag_module: RAGModule):
         self.rag = rag_module
         self.llm = get_llm(temperature=0.7)

@@ -6,10 +6,10 @@ from core.llm import get_llm
 from schemas.messages import FormalizationOutput, ImplementationOutput
 
 class FactorAgent:
-    \"\"\"
+    """
     FactorAgent translates the market hypothesis into executable code.
     It contains Formalization (hypothesis -> math) and Implementation (math -> code).
-    \"\"\"
+    """
     def __init__(self):
         # We might use a lower temp for math/coding tasks
         self.llm = get_llm(temperature=0.2)
