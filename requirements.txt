@@ -1,0 +1,16 @@
+langchain>=0.1.0
+langchain-community
+langchain-anthropic
+langchain-chroma
+langgraph
+chromadb
+tiktoken
+numpy
+pandas
+pyqlib
+typing_extensions
+pydantic>=2.0.0
+python-dotenv
+loguru
+anthropic
+langchain-openai

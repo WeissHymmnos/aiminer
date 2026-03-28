@@ -1,0 +1,25 @@
+name: aiminer
+channels:
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge/
+  - https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main/
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+      - langchain>=0.1.0
+      - langchain-community
+      - langchain-anthropic
+      - langchain-chroma
+      - langgraph
+      - chromadb
+      - tiktoken
+      - numpy
+      - pandas
+      - pyqlib
+      - typing_extensions
+      - pydantic>=2.0.0
+      - python-dotenv
+      - loguru
+      - anthropic
+      - langchain-openai
