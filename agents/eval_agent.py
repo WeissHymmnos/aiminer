@@ -85,7 +85,7 @@ class EvalAgent:
                 ("system", "You are a quantitative research director reviewing factor backtest results. "
                            "Analyze the evaluation metrics (IC, Rank IC, RRE, PFS, Diversity, LLM Score) against the original hypothesis. "
                            "Determine if the factor is effective (e.g., IC > 0.02, good Rank IC) and suggest actionable improvements."),
-                ("user", "Hypothesis: {hypothesis}\\nCode: {code}\\nMetrics: {metrics}\\n\\n"
+                ("user", "Hypothesis: {hypothesis}\nCode: {code}\nMetrics: {metrics}\n\n"
                          "Provide the review and conclusion.")
             ])
             review_chain = review_prompt | self.review_llm

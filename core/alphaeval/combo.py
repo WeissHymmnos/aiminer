@@ -1,9 +1,10 @@
+import os
 import numpy as np
 import pandas as pd
 from scipy.optimize import differential_evolution
 import qlib
 from qlib.data import D
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 # import warnings
 # warnings.filterwarnings("ignore")
@@ -21,23 +22,23 @@ class WeightCalculator:
         self.start_date = start_date
         self.end_date = end_date
 
-        self.instruments = (
-            instruments
-            if instruments is not None
-            else D.list_instruments(
-                market="csi300", start_time=start_date, end_time=end_date
+        if instruments is not None:
+            self.instruments = instruments
+        else:
+            self.instruments = D.instruments(
+                market="csi300", filter_pipe=None
             )
-        )
 
-        qlib.init(provider_uri="path/to/your/qlib_data", region="cn")
+        qlib_data_path = os.getenv("QLIB_DATA_PATH", "~/.qlib/qlib_data/cn_data")
+        qlib.init(provider_uri=qlib_data_path, region="cn")
 
         self.label_expr = "Ref($close, -1)/$close - 1"
 
-        self.w_opt: np.ndarray = None
-        self.ic_train_single: dict[str, float] = {}
-        self.ic_test_single:  dict[str, float] = {}
-        self.ic_train_comb:    float = None
-        self.ic_test_comb:     float = None
+        self.w_opt: Optional[np.ndarray] = None
+        self.ic_train_single: Dict[str, float] = {}
+        self.ic_test_single:  Dict[str, float] = {}
+        self.ic_train_comb:   Optional[float] = None
+        self.ic_test_comb:    Optional[float] = None
 
 
     def fetch_data(self, start_time: str, end_time: str):
@@ -62,7 +63,7 @@ class WeightCalculator:
 
         fdf = (
             fdf
-            .groupby(level=1, group_keys=False)
+            .groupby(level="datetime", group_keys=False)
             .apply(zscore)
             .replace([np.inf, -np.inf], np.nan)
             .replace(np.nan, 0)

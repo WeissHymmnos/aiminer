@@ -1,7 +1,7 @@
 from typing import TypedDict, Annotated, List, Dict, Any, Optional
 import operator
 
-class AlphaMinerState(TypedDict):
+class AlphaMinerState(TypedDict, total=False):
     # Core tracking
     iteration: int
     max_iterations: int

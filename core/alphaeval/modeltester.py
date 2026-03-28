@@ -31,7 +31,7 @@ class AlphaEval:
         instruments: Optional[List[str]] = None,
         daily_normalize: bool = True
     ):
-        self.alphacombo: pd.DataFrame
+        self.alphacombo = None
         self.factor_expressions = factor_expressions
         if weights is not None:
             self.weights = weights
@@ -47,13 +47,10 @@ class AlphaEval:
         qlib.init(provider_uri=qlib_data_path, region="cn")
 
         # If the user does not specify the market, CSI300 is taken by default
-        self.instruments = (
-            instruments
-            if instruments is not None
-            else D.list_instruments(
-                market="csi300"
-            )
-        )
+        if instruments is not None:
+            self.instruments = instruments
+        else:
+            self.instruments = D.instruments(market="csi300")
 
         self.label_expr = "Ref($close, -1)/$close - 1"
 
@@ -77,7 +74,7 @@ class AlphaEval:
 
         close = (
             df["$close"]
-            .droplevel(1) 
+            .droplevel("instrument") 
         )
         close = close.dropna()
         close = (close - close.min())/(close.max() - close.min())
@@ -92,7 +89,7 @@ class AlphaEval:
             freq="day",
             inst_processors=[
                 {
-                    "class": "noise_proc.NoiseInjection",
+                    "class": "core.alphaeval.noise_proc.NoiseInjection",
                     "kwargs": {"var": variance},
                 }
             ],
@@ -107,7 +104,7 @@ class AlphaEval:
             freq="day",
             inst_processors=[
                 {
-                    "class": "noise_proc.NoiseInjection_t",
+                    "class": "core.alphaeval.noise_proc.NoiseInjection_t",
                     "kwargs": {"var": variance, "dof": 3},
                 }
             ],
@@ -126,7 +123,7 @@ class AlphaEval:
         if self.daily_normalize:
             self.factor_data = (
                 self.factor_data
-                .groupby(level=0, group_keys=False)
+                .groupby(level="datetime", group_keys=False)
                 .apply(zscore)
                 .replace([np.inf, -np.inf], np.nan)
                 .replace(np.nan, 0)
@@ -134,7 +131,7 @@ class AlphaEval:
 
             self.noise_factor_data1 = (
                 self.noise_factor_data1
-                .groupby(level=0, group_keys=False)
+                .groupby(level="datetime", group_keys=False)
                 .apply(zscore)
                 .replace([np.inf, -np.inf], np.nan)
                 .replace(np.nan, 0)
@@ -142,7 +139,7 @@ class AlphaEval:
 
             self.noise_factor_data2 = (
                 self.noise_factor_data2
-                .groupby(level=0, group_keys=False)
+                .groupby(level="datetime", group_keys=False)
                 .apply(zscore)
                 .replace([np.inf, -np.inf], np.nan)
                 .replace(np.nan, 0)
@@ -158,7 +155,7 @@ class AlphaEval:
         self.noisecombo2 = self.noisecombo2.to_frame(name="noisecombo2")
 
     def calculate_pnl(self) -> None:
-        if not hasattr(self, 'alphacombo'):
+        if self.alphacombo is None:
             self.fetch_data()
         all_data = self.alphacombo.join(self.label_data, how="inner").dropna()
         all_data.columns = ["factor", "label"]
@@ -206,7 +203,7 @@ class AlphaEval:
         if not self.daily_normalize:
             clean_df = (
                 self.factor_data
-                .groupby(level=0, group_keys=False)
+                .groupby(level="datetime", group_keys=False)
                 .apply(zscore)
                 .replace([np.inf, -np.inf], np.nan)
                 .replace(np.nan, 0)
@@ -298,7 +295,8 @@ class AlphaEval:
 
 
     def run(self):
-        self.fetch_data()
+        if self.alphacombo is None:
+            self.fetch_data()
 
         all_data = self.alphacombo.join(self.label_data, how="inner").join(self.noisecombo1, how="inner").join(self.noisecombo2, how="inner").dropna()
         all_data.columns = ["factor", "label", "noisy1", "noisy2"]
@@ -347,7 +345,7 @@ class AlphaEval:
 
 
     def run_single_factor(self):
-        if not hasattr(self, 'alphacombo'):
+        if self.alphacombo is None:
             self.fetch_data()
         print("Finish fetching data.")
         self.LLM_scores()
@@ -355,9 +353,13 @@ class AlphaEval:
         for i, f in enumerate(self.factor_expressions):
             print(i)
             try:
-                data = self.factor_data[f].copy()
-                all_data = data.join(self.label_data, how="inner").join(self.noise_factor_data1[f].copy(), how="inner").join(self.noise_factor_data2[f].copy(), how="inner").dropna()
-                all_data.columns = ["factor", "label", "noisy1", "noisy2"]
+                data = self.factor_data[[f]].copy()
+                data.columns = ["factor"]
+                noise1 = self.noise_factor_data1[[f]].copy()
+                noise1.columns = ["noisy1"]
+                noise2 = self.noise_factor_data2[[f]].copy()
+                noise2.columns = ["noisy2"]
+                all_data = data.join(self.label_data, how="inner").join(noise1, how="inner").join(noise2, how="inner").dropna()
                 ic_series = all_data.groupby(level="datetime").apply(
                     lambda x: x["factor"].corr(x["label"])
                 )
@@ -371,11 +373,10 @@ class AlphaEval:
                     lambda x: x["factor"].corr(x["noisy2"])
                 )
 
-                col_name = data.name if hasattr(data, 'name') else f
                 factor_mat = (
                     data
                     .reset_index()
-                    .pivot(index="datetime", columns="instrument", values=col_name)
+                    .pivot(index="datetime", columns="instrument", values="factor")
                 )
                 ranks = factor_mat.rank(axis=1)
                 probs = ranks.div(ranks.sum(axis=1), axis=0)

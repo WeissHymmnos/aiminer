@@ -29,8 +29,8 @@ class IdeaAgent:
         # 2. Reason Module: Formulate hypothesis
         prompt = ChatPromptTemplate.from_messages([
             ("system", "You are an elite quantitative researcher designing alpha factors for a high-frequency or statistical arbitrage fund. "
-                       "Use the provided context to inspire a novel hypothesis. Do not repeat failed past experiences.\\n\\n"
-                       "Context:\\n{context}"),
+                       "Use the provided context to inspire a novel hypothesis. Do not repeat failed past experiences.\n\n"
+                       "Context:\n{context}"),
             ("user", "Propose a new factor hypothesis for iteration {iteration}. "
                      "Explain the economic rationale clearly.")
         ])
