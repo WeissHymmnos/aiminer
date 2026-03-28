@@ -1,4 +1,5 @@
 from langgraph.graph import StateGraph, END
+from loguru import logger
 from workflow.state import AlphaMinerState
 from agents.idea_agent import IdeaAgent
 from agents.factor_agent import FactorAgent
@@ -11,26 +12,36 @@ def route_after_idea(state: AlphaMinerState) -> str:
     return "factor_agent"
 
 def route_after_factor(state: AlphaMinerState) -> str:
-    if state.get("error") or not state.get("is_valid_syntax", True):
-        # We could route back to IdeaAgent here, but for simplicity we'll end or skip to eval
-        # In a highly robust system, if syntax is invalid, route back to factor_agent to retry
-        return "end" if state.get("error") else "eval_agent"
+    if state.get("error"):
+        return "end"
+    if not state.get("is_valid_syntax", True):
+        logger.warning("[Router] Invalid syntax detected — skipping to eval with caveat.")
+    return "eval_agent"
 
 def route_after_eval(state: AlphaMinerState) -> str:
-    # Check if we should iterate
+    """Route after eval: check if we should loop for another iteration.
+    
+    Note: increment runs *after* this routing, so we compare against
+    max_iterations using the current (not yet incremented) iteration.
+    """
     iteration = state.get("iteration", 1)
     max_iterations = state.get("max_iterations", 1)
     
     if iteration < max_iterations:
-        return "idea_agent"
+        return "increment"
     return "end"
 
 def increment_iteration(state: AlphaMinerState):
-    return {"iteration": state.get("iteration", 1) + 1, "error": None}
+    """Increment iteration counter and clear transient error state."""
+    return {
+        "iteration": state.get("iteration", 1) + 1,
+        "error": None,
+        "is_valid_syntax": True,  # Reset for next iteration
+    }
 
-def build_workflow():
+def build_workflow(rebuild_rag: bool = False):
     # Initialize shared resources
-    rag_module = RAGModule()
+    rag_module = RAGModule(rebuild=rebuild_rag)
     
     # Initialize agents
     idea_agent = IdeaAgent(rag_module)
@@ -55,16 +66,18 @@ def build_workflow():
     workflow.add_conditional_edges("idea_agent", route_after_idea, {"factor_agent": "factor_agent", "end": END})
     workflow.add_conditional_edges("factor_agent", route_after_factor, {"eval_agent": "eval_agent", "end": END})
     
-    workflow.add_edge("eval_agent", "increment")
-    
+    # After eval, decide whether to loop or end
     workflow.add_conditional_edges(
-        "increment",
+        "eval_agent",
         route_after_eval,
         {
-            "idea_agent": "idea_agent",
+            "increment": "increment",
             "end": END
         }
     )
+    
+    # After incrementing, always go back to idea_agent
+    workflow.add_edge("increment", "idea_agent")
 
     # Compile the graph
     app = workflow.compile()

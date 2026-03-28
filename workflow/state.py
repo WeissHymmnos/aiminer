@@ -25,6 +25,7 @@ class AlphaMinerState(TypedDict, total=False):
     review_summary: str
     is_effective: bool
     suggested_improvements: str
+    is_simulated: bool  # True when backtest used fallback/simulated metrics
     
     # Control flow & History
     error: Optional[str]

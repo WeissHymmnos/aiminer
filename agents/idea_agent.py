@@ -19,18 +19,28 @@ class IdeaAgent:
 
     def __call__(self, state: AlphaMinerState) -> Dict[str, Any]:
         iteration = state.get("iteration", 0)
+        previous_improvements = state.get("suggested_improvements", "")
+        previous_hypothesis = state.get("hypothesis_name", "")
         logger.info(f"[IdeaAgent] Starting iteration {iteration}")
         
-        # 1. RAG Module: Retrieve context
-        query = f"Generate a novel quantitative trading alpha factor hypothesis. Focus on robustness and high Information Coefficient (IC)."
+        # 1. RAG Module: Retrieve context — incorporate feedback from prior iteration
+        base_query = "Generate a novel quantitative trading alpha factor hypothesis. Focus on robustness and high Information Coefficient (IC)."
+        if previous_improvements and iteration > 1:
+            query = f"{base_query} Previous attempt '{previous_hypothesis}' had these suggestions: {previous_improvements}"
+        else:
+            query = base_query
         rag_context = self.rag.retrieve(query)
         logger.debug(f"[IdeaAgent] Retrieved Context Length: {len(rag_context)}")
         
         # 2. Reason Module: Formulate hypothesis
+        system_msg = ("You are an elite quantitative researcher designing alpha factors for a high-frequency or statistical arbitrage fund. "
+                      "Use the provided context to inspire a novel hypothesis. Do not repeat failed past experiences.\n\n"
+                      "Context:\n{context}")
+        if previous_improvements and iteration > 1:
+            system_msg += f"\n\nFeedback from previous iteration: {previous_improvements}"
+        
         prompt = ChatPromptTemplate.from_messages([
-            ("system", "You are an elite quantitative researcher designing alpha factors for a high-frequency or statistical arbitrage fund. "
-                       "Use the provided context to inspire a novel hypothesis. Do not repeat failed past experiences.\n\n"
-                       "Context:\n{context}"),
+            ("system", system_msg),
             ("user", "Propose a new factor hypothesis for iteration {iteration}. "
                      "Explain the economic rationale clearly.")
         ])

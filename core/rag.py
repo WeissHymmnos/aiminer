@@ -9,9 +9,10 @@ from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 from loguru import logger
 
 class RAGModule:
-    def __init__(self, db_dir: str = "data/chroma_db", docs_dir: str = "data/rag_docs"):
+    def __init__(self, db_dir: str = "data/chroma_db", docs_dir: str = "data/rag_docs", rebuild: bool = False):
         self.db_dir = db_dir
         self.docs_dir = docs_dir
+        self.rebuild = rebuild
         os.makedirs(self.db_dir, exist_ok=True)
         os.makedirs(self.docs_dir, exist_ok=True)
         
@@ -66,6 +67,13 @@ class RAGModule:
 
     def _init_knowledge_base(self):
         """Loads actual markdown/rst/txt docs from data/rag_docs into ChromaDB."""
+        if self.rebuild and self.knowledge_col.count() > 0:
+            logger.info("Rebuilding knowledge base: deleting existing documents...")
+            self.client.delete_collection("knowledge_base")
+            self.knowledge_col = self.client.get_or_create_collection(
+                "knowledge_base", embedding_function=self.embedding_fn
+            )
+
         if self.knowledge_col.count() > 0:
             logger.info(f"Knowledge base already initialized with {self.knowledge_col.count()} documents.")
             return
@@ -117,20 +125,22 @@ class RAGModule:
             except Exception as e:
                 logger.error(f"Failed to populate knowledge base: {e}")
 
+    def _safe_query(self, collection, query: str, n_results: int):
+        """Query a collection safely, handling empty collections."""
+        count = collection.count()
+        if count == 0:
+            return None
+        actual_n = min(n_results, count)
+        return collection.query(query_texts=[query], n_results=actual_n)
+
     def retrieve(self, query: str, n_results: int = 3) -> str:
         """Retrieve relevant context from knowledge and experiences based on query."""
         try:
-            # Retrieve knowledge
-            k_results = self.knowledge_col.query(
-                query_texts=[query],
-                n_results=n_results
-            )
+            # Retrieve knowledge (safe against empty collections)
+            k_results = self._safe_query(self.knowledge_col, query, n_results)
             
-            # Retrieve experiences
-            e_results = self.experiences_col.query(
-                query_texts=[query],
-                n_results=n_results
-            )
+            # Retrieve experiences (safe against empty collections)
+            e_results = self._safe_query(self.experiences_col, query, n_results)
             
             context_parts = []
             

@@ -1,3 +1,4 @@
+import re
 from typing import Dict, Any
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
@@ -10,11 +11,44 @@ class FactorAgent:
     FactorAgent translates the market hypothesis into executable code.
     It contains Formalization (hypothesis -> math) and Implementation (math -> code).
     """
+    # Known Qlib operators and fields for basic syntax validation
+    QLIB_OPERATORS = {
+        "Ref", "Mean", "Std", "Rank", "Max", "Min", "Sum", "Abs",
+        "Log", "Sign", "Power", "Corr", "Cov", "Delta", "Delay",
+        "Ts_Rank", "Ts_Min", "Ts_Max", "Ts_ArgMax", "Ts_ArgMin",
+        "WMA", "EMA", "If", "Greater", "Less",
+    }
+    QLIB_FIELDS = {"$close", "$open", "$high", "$low", "$volume", "$vwap", "$turn", "$factor"}
+
     def __init__(self):
         # We might use a lower temp for math/coding tasks
         self.llm = get_llm(temperature=0.2)
         self.formalization_llm = self.llm.with_structured_output(FormalizationOutput)
         self.implementation_llm = self.llm.with_structured_output(ImplementationOutput)
+
+    @staticmethod
+    def _validate_qlib_expression(expr: str) -> tuple[bool, str]:
+        """Basic syntax validation for Qlib expressions."""
+        if not expr or not expr.strip():
+            return False, "Expression is empty."
+        
+        # Check balanced parentheses
+        depth = 0
+        for ch in expr:
+            if ch == '(':
+                depth += 1
+            elif ch == ')':
+                depth -= 1
+            if depth < 0:
+                return False, "Unbalanced parentheses: extra closing ')'."
+        if depth != 0:
+            return False, f"Unbalanced parentheses: {depth} unclosed '('."
+        
+        # Check that it contains at least one $ field reference
+        if '$' not in expr:
+            return False, "Expression contains no Qlib field references (e.g., $close)."
+        
+        return True, "OK"
 
     def __call__(self, state: AlphaMinerState) -> Dict[str, Any]:
         hypothesis_desc = state.get("hypothesis_description", "")
@@ -57,15 +91,24 @@ class FactorAgent:
             })
             
             logger.info(f"[FactorAgent] Implemented Code: {impl_result.code_expression}")
+            
+            # Validate the expression independently of LLM's self-assessment
+            is_valid, validation_msg = self._validate_qlib_expression(impl_result.code_expression)
+            if not is_valid:
+                logger.warning(f"[FactorAgent] Syntax validation failed: {validation_msg}")
+            
+            # Use AND of LLM's assessment and our validation
+            final_valid = impl_result.is_valid_syntax and is_valid
 
             return {
                 "math_formula": form_result.math_formula,
                 "variables_defined": form_result.variables_defined,
                 "code_expression": impl_result.code_expression,
-                "is_valid_syntax": impl_result.is_valid_syntax,
+                "is_valid_syntax": final_valid,
                 "messages": [
                     f"[FactorAgent] Math: {form_result.math_formula}",
-                    f"[FactorAgent] Code: {impl_result.code_expression}"
+                    f"[FactorAgent] Code: {impl_result.code_expression}",
+                    f"[FactorAgent] Valid: {final_valid} (LLM={impl_result.is_valid_syntax}, Check={is_valid}: {validation_msg})"
                 ]
             }
 

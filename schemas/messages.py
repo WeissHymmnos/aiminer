@@ -19,6 +19,6 @@ class ImplementationOutput(BaseModel):
 
 class ReflexiveReviewOutput(BaseModel):
     """Structured output for the evaluation and review phase."""
-    review_summary: str = Field(description="Summary analysis of the backtest results and whether the hypothesis holds.")
-    is_effective: bool = Field(description="True if the factor shows positive efficacy (e.g., IC > 0.02, Sharpe > 0.5).")
-    suggested_improvements: str = Field(description="Actionable suggestions for future iterations based on these results.")
+    review_summary: str = Field(description="Summary analysis of the backtest results and whether the hypothesis holds. Include specific metric values in your analysis.")
+    is_effective: bool = Field(description="True if the factor shows positive efficacy: IC > 0.02 AND Rank IC > 0.02. False otherwise.")
+    suggested_improvements: str = Field(description="Specific, actionable suggestions for the next iteration. Include concrete changes to the formula or approach, not generic advice.")

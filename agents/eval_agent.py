@@ -1,5 +1,6 @@
 from typing import Dict, Any
 import random
+import hashlib
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
 from workflow.state import AlphaMinerState
@@ -55,15 +56,19 @@ class EvalAgent:
             logger.warning(f"AlphaEval backtest failed (possibly missing Qlib data or env issue): {e}")
             logger.info("Falling back to simulated AlphaEval metrics for workflow demonstration.")
             
-            # Mocking the backtest metrics to allow workflow iteration without data setup
+            # Use a deterministic seed based on the code expression for reproducibility
+            seed = int(hashlib.md5(code.encode()).hexdigest()[:8], 16)
+            rng = random.Random(seed)
+            
             return {
-                "information_coefficient": round(random.uniform(-0.05, 0.15), 3),
-                "rank_ic": round(random.uniform(-0.05, 0.15), 3),
-                "rre": round(random.uniform(0.0, 1.0), 3),
-                "pfs1": round(random.uniform(0.0, 1.0), 6),
-                "pfs2": round(random.uniform(0.0, 1.0), 6),
-                "diversity": round(random.uniform(0.0, 1.0), 3),
-                "llm_score": round(random.uniform(50.0, 100.0), 2)
+                "information_coefficient": round(rng.uniform(-0.05, 0.15), 3),
+                "rank_ic": round(rng.uniform(-0.05, 0.15), 3),
+                "rre": round(rng.uniform(0.0, 1.0), 3),
+                "pfs1": round(rng.uniform(0.0, 1.0), 6),
+                "pfs2": round(rng.uniform(0.0, 1.0), 6),
+                "diversity": round(rng.uniform(0.0, 1.0), 3),
+                "llm_score": round(rng.uniform(50.0, 100.0), 2),
+                "_simulated": True
             }
 
     def __call__(self, state: AlphaMinerState) -> Dict[str, Any]:
@@ -78,7 +83,10 @@ class EvalAgent:
         try:
             # 1. Backtesting Module with AlphaEval
             metrics = self._execute_alphaeval_backtest(code)
-            logger.info(f"[EvalAgent] Backtest Metrics: {metrics}")
+            is_simulated = metrics.pop("_simulated", False)
+            if is_simulated:
+                logger.warning("[EvalAgent] Using SIMULATED metrics — results are not real backtest data.")
+            logger.info(f"[EvalAgent] Backtest Metrics (simulated={is_simulated}): {metrics}")
             
             # 2. Reflexive Review Module
             review_prompt = ChatPromptTemplate.from_messages([
@@ -110,9 +118,11 @@ class EvalAgent:
                 "backtest_metrics": metrics,
                 "review_summary": review_result.review_summary,
                 "is_effective": review_result.is_effective,
+                "is_simulated": is_simulated,
                 "suggested_improvements": review_result.suggested_improvements,
                 "messages": [
-                    f"[EvalAgent] IC: {metrics['information_coefficient']}, Rank IC: {metrics['rank_ic']}",
+                    f"[EvalAgent] IC: {metrics['information_coefficient']}, Rank IC: {metrics['rank_ic']}, Simulated: {is_simulated}",
+                    f"[EvalAgent] Effective: {review_result.is_effective}",
                     f"[EvalAgent] Review: {review_result.review_summary}"
                 ]
             }
