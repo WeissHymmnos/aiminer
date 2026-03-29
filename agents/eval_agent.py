@@ -97,11 +97,11 @@ class EvalAgent:
                          "Provide the review and conclusion.")
             ])
             review_chain = review_prompt | self.review_llm
-            review_result: ReflexiveReviewOutput = review_chain.invoke({
                 "hypothesis": hypothesis_desc,
                 "code": code,
                 "metrics": str(metrics)
-            })
+            })cleaned_review_json = self._strip_markdown_json(raw_review_response.content)
+            review_result = ReflexiveReviewOutput.model_validate_json(cleaned_review_json)
             
             logger.info(f"[EvalAgent] Review Summary: {review_result.review_summary}")
             
