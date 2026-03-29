@@ -104,15 +104,20 @@ class EvalAgent:
             review_prompt = ChatPromptTemplate.from_messages([
                 ("system", "You are a quantitative research director reviewing factor backtest results. "
                            "Analyze the evaluation metrics (IC, Rank IC, RRE, PFS, Diversity, LLM Score) against the original hypothesis. "
-                           "Determine if the factor is effective (e.g., IC > 0.02, good Rank IC) and suggest actionable improvements."),
+                           "Determine if the factor is effective (e.g., IC > 0.02, good Rank IC) and suggest actionable improvements. "
+                           "You MUST respond with valid JSON only, no markdown, no explanations."),
                 ("user", "Hypothesis: {hypothesis}\nCode: {code}\nMetrics: {metrics}\n\n"
-                         "Provide the review and conclusion.")
+                         "Return ONLY valid JSON matching this exact schema:\n"
+                         '{{"review_summary": "string", "is_effective": boolean, "suggested_improvements": "string"}}\n\n'
+                         "Do not include markdown code blocks or any other text.")
             ])
-            review_chain = review_prompt | self.review_llm
+            review_chain = review_prompt | self.llm
+            raw_review_response = review_chain.invoke({
                 "hypothesis": hypothesis_desc,
                 "code": code,
                 "metrics": str(metrics)
-            })cleaned_review_json = self._strip_markdown_json(raw_review_response.content)
+            })
+            cleaned_review_json = self._strip_markdown_json(raw_review_response.content)
             review_result = ReflexiveReviewOutput.model_validate_json(cleaned_review_json)
             
             logger.info(f"[EvalAgent] Review Summary: {review_result.review_summary}")
