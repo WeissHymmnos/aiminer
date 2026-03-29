@@ -35,6 +35,12 @@ class IdeaAgent:
         # 2. Reason Module: Formulate hypothesis
         system_msg = ("You are an elite quantitative researcher designing alpha factors for a high-frequency or statistical arbitrage fund. "
                       "Use the provided context to inspire a novel hypothesis. Do not repeat failed past experiences.\n\n"
+                      "You must respond with valid JSON matching this schema:\n"
+                      "{\n"
+                      '  "hypothesis_name": "string",\n'
+                      '  "hypothesis_description": "string",\n'
+                      '  "rationale": "string"\n'
+                      "}\n\n"
                       "Context:\n{context}")
         if previous_improvements and iteration > 1:
             system_msg += f"\n\nFeedback from previous iteration: {previous_improvements}"
@@ -42,7 +48,7 @@ class IdeaAgent:
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_msg),
             ("user", "Propose a new factor hypothesis for iteration {iteration}. "
-                     "Explain the economic rationale clearly.")
+                     "Explain the economic rationale clearly. Return only valid JSON.")
         ])
         
         chain = prompt | self.structured_llm
