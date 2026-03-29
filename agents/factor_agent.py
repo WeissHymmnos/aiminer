@@ -74,15 +74,20 @@ class FactorAgent:
             form_prompt = ChatPromptTemplate.from_messages([
                 ("system", "You are a quantitative researcher expert in mathematics and statistics. "
                            "Convert the given financial hypothesis into a strict mathematical formula. "
-                           "Clearly define each variable."),
+                           "Clearly define each variable. "
+                           "You MUST respond with valid JSON only, no markdown, no explanations."),
                 ("user", "Hypothesis: {hypothesis}\nRationale: {rationale}\n\n"
-                         "Provide the mathematical formula and define all variables.")
+                         "Return ONLY valid JSON matching this exact schema:\n"
+                         '{{"math_formula": "string", "variables_defined": {{"var": "definition"}}}}\n\n'
+                         "Do not include markdown code blocks or any other text.")
             ])
-            form_chain = form_prompt | self.llm.with_structured_output(FormalizationOutput)
-            form_result = form_chain.invoke({
+            form_chain = form_prompt | self.llm
+            raw_form_response = form_chain.invoke({
                 "hypothesis": hypothesis_desc,
                 "rationale": rationale
             })
+            cleaned_form_json = self._strip_markdown_json(raw_form_response.content)
+            form_result = FormalizationOutput.model_validate_json(cleaned_form_json)
             
             logger.info(f"[FactorAgent] Formalized Math: {form_result.math_formula}")
             
@@ -90,15 +95,19 @@ class FactorAgent:
             impl_prompt = ChatPromptTemplate.from_messages([
                 ("system", "You are an expert Qlib developer. Convert the following mathematical formula into a syntactically correct Qlib Alpha158 expression. "
                            "Qlib expressions use operators like Rank(), Ref(), Mean(), Std(), and fields like $close, $volume, $open, $high, $low, $vwap. "
-                           "Return the code expression and a boolean indicating if you believe the syntax is 100% valid Qlib syntax."),
+                           "You MUST respond with valid JSON only, no markdown, no explanations."),
                 ("user", "Mathematical Formula: {math_formula}\nVariables: {variables}\n\n"
-                         "Provide the Qlib Alpha158 expression.")
+                         "Return ONLY valid JSON matching this exact schema:\n"
+                         '{{"code_expression": "string", "is_valid_syntax": boolean}}\n\n'
+                         "Do not include markdown code blocks or any other text.")
             ])
-            impl_chain = impl_prompt | self.llm.with_structured_output(ImplementationOutput)
-            impl_result = impl_chain.invoke({
+            impl_chain = impl_prompt | self.llm
+            raw_impl_response = impl_chain.invoke({
                 "math_formula": form_result.math_formula,
                 "variables": str(form_result.variables_defined)
             })
+            cleaned_impl_json = self._strip_markdown_json(raw_impl_response.content)
+            impl_result = ImplementationOutput.model_validate_json(cleaned_impl_json)
             
             logger.info(f"[FactorAgent] Implemented Code: {impl_result.code_expression}")
             

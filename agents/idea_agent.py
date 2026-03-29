@@ -60,7 +60,8 @@ class IdeaAgent:
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_msg),
             ("user", "Propose a new factor hypothesis for iteration {iteration}. "
-                     "Explain the economic rationale clearly. Return only valid JSON.")
+                     "Explain the economic rationale clearly. "
+                     "Return ONLY valid JSON, no markdown code blocks, no extra text.")
         ])
         
         chain = prompt | self.llm
