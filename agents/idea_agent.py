@@ -1,5 +1,4 @@
 from typing import Dict, Any
-import re
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
 from workflow.state import AlphaMinerState

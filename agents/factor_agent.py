@@ -1,6 +1,6 @@
-import re
 from typing import Dict, Any
 from langchain_core.prompts import ChatPromptTemplate
+import re
 from loguru import logger
 from workflow.state import AlphaMinerState
 from core.llm import get_llm
@@ -37,7 +37,7 @@ class FactorAgent:
         return text.strip()
 
     @staticmethod
-    def _validate_qlib_expression(expr: str) -> tuple[bool, str]:
+    def _validate_qlib_expression(expr: str) -> tuple:
         """Basic syntax validation for Qlib expressions."""
         if not expr or not expr.strip():
             return False, "Expression is empty."

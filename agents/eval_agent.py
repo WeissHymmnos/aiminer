@@ -1,7 +1,7 @@
 from typing import Dict, Any
+from langchain_core.prompts import ChatPromptTemplate
 import random
 import hashlib
-from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
 from workflow.state import AlphaMinerState
 from core.rag import RAGModule
