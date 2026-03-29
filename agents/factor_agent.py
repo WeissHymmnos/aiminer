@@ -23,8 +23,17 @@ class FactorAgent:
     def __init__(self):
         # We might use a lower temp for math/coding tasks
         self.llm = get_llm(temperature=0.2)
-        self.formalization_llm = self.llm.with_structured_output(FormalizationOutput)
-        self.implementation_llm = self.llm.with_structured_output(ImplementationOutput)
+    
+    @staticmethod
+    def _strip_markdown_json(text: str) -> str:
+        """Remove markdown code block wrapper from JSON response."""
+        text = text.strip()
+        if text.startswith("```json"):
+            text = re.sub(r'^```json\s*', '', text)text = re.sub(r'\s*```$', '', text)
+        elif text.startswith("```"):
+            text = re.sub(r'^```\s*', '', text)
+            text = re.sub(r'\s*```$', '', text)
+        return text.strip()
 
     @staticmethod
     def _validate_qlib_expression(expr: str) -> tuple[bool, str]:
@@ -84,11 +93,13 @@ class FactorAgent:
                 ("user", "Mathematical Formula: {math_formula}\nVariables: {variables}\n\n"
                          "Provide the Qlib Alpha158 expression.")
             ])
-            impl_chain = impl_prompt | self.implementation_llm
-            impl_result: ImplementationOutput = impl_chain.invoke({
+            impl_chain = impl_prompt | self.llm
+            raw_impl_response = impl_chain.invoke({
                 "math_formula": form_result.math_formula,
                 "variables": str(form_result.variables_defined)
             })
+            cleaned_impl_json = self._strip_markdown_json(raw_impl_response.content)
+            impl_result = ImplementationOutput.model_validate_json(cleaned_impl_json)
             
             logger.info(f"[FactorAgent] Implemented Code: {impl_result.code_expression}")
             
