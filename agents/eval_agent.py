@@ -2,6 +2,7 @@ from typing import Dict, Any
 from langchain_core.prompts import ChatPromptTemplate
 import random
 import hashlib
+import re
 from loguru import logger
 from workflow.state import AlphaMinerState
 from core.rag import RAGModule
@@ -18,7 +19,18 @@ class EvalAgent:
     def __init__(self, rag_module: RAGModule):
         self.rag = rag_module
         self.llm = get_llm(temperature=0.4)
-        self.review_llm = self.llm.with_structured_output(ReflexiveReviewOutput)
+    
+    @staticmethod
+    def _strip_markdown_json(text: str) -> str:
+        """Remove markdown code block wrapper from JSON response."""
+        text = text.strip()
+        if text.startswith("```json"):
+            text = re.sub(r'^```json\s*', '', text)
+            text = re.sub(r'\s*```$', '', text)
+        elif text.startswith("```"):
+            text = re.sub(r'^```\s*', '', text)
+            text = re.sub(r'\s*```$', '', text)
+        return text.strip()
 
     def _execute_alphaeval_backtest(self, code: str) -> Dict[str, float]:
         """
