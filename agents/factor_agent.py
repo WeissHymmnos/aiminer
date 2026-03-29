@@ -78,11 +78,13 @@ class FactorAgent:
                 ("user", "Hypothesis: {hypothesis}\nRationale: {rationale}\n\n"
                          "Provide the mathematical formula and define all variables.")
             ])
-            form_chain = form_prompt | self.formalization_llm
-            form_result: FormalizationOutput = form_chain.invoke({
+            form_chain = form_prompt | self.llm
+            raw_form_response = form_chain.invoke({
                 "hypothesis": hypothesis_desc,
                 "rationale": rationale
             })
+            cleaned_form_json = self._strip_markdown_json(raw_form_response.content)
+            form_result = FormalizationOutput.model_validate_json(cleaned_form_json)
             
             logger.info(f"[FactorAgent] Formalized Math: {form_result.math_formula}")
             
