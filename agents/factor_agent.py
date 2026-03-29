@@ -78,13 +78,11 @@ class FactorAgent:
                 ("user", "Hypothesis: {hypothesis}\nRationale: {rationale}\n\n"
                          "Provide the mathematical formula and define all variables.")
             ])
-            form_chain = form_prompt | self.llm
-            raw_form_response = form_chain.invoke({
+            form_chain = form_prompt | self.llm.with_structured_output(FormalizationOutput)
+            form_result = form_chain.invoke({
                 "hypothesis": hypothesis_desc,
                 "rationale": rationale
             })
-            cleaned_form_json = self._strip_markdown_json(raw_form_response.content)
-            form_result = FormalizationOutput.model_validate_json(cleaned_form_json)
             
             logger.info(f"[FactorAgent] Formalized Math: {form_result.math_formula}")
             
@@ -96,13 +94,11 @@ class FactorAgent:
                 ("user", "Mathematical Formula: {math_formula}\nVariables: {variables}\n\n"
                          "Provide the Qlib Alpha158 expression.")
             ])
-            impl_chain = impl_prompt | self.llm
-            raw_impl_response = impl_chain.invoke({
+            impl_chain = impl_prompt | self.llm.with_structured_output(ImplementationOutput)
+            impl_result = impl_chain.invoke({
                 "math_formula": form_result.math_formula,
                 "variables": str(form_result.variables_defined)
             })
-            cleaned_impl_json = self._strip_markdown_json(raw_impl_response.content)
-            impl_result = ImplementationOutput.model_validate_json(cleaned_impl_json)
             
             logger.info(f"[FactorAgent] Implemented Code: {impl_result.code_expression}")
             
