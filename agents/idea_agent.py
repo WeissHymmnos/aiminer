@@ -36,11 +36,11 @@ class IdeaAgent:
         system_msg = ("You are an elite quantitative researcher designing alpha factors for a high-frequency or statistical arbitrage fund. "
                       "Use the provided context to inspire a novel hypothesis. Do not repeat failed past experiences.\n\n"
                       "You must respond with valid JSON matching this schema:\n"
-                      "{\n"
+                      "{{\n"
                       '  "hypothesis_name": "string",\n'
                       '  "hypothesis_description": "string",\n'
                       '  "rationale": "string"\n'
-                      "}\n\n"
+                      "}}\n\n"
                       "Context:\n{context}")
         if previous_improvements and iteration > 1:
             system_msg += f"\n\nFeedback from previous iteration: {previous_improvements}"
