@@ -129,7 +129,8 @@ def main():
         
     except KeyboardInterrupt:
         logger.warning("Execution interrupted by user.")
-        save_results(final_state)print_summary(final_state)
+        save_results(final_state)
+        print_summary(final_state)
     except Exception as e:
         logger.exception(f"Workflow execution failed: {e}")
         save_results(final_state)
