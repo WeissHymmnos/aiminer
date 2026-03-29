@@ -16,7 +16,6 @@ class IdeaAgent:
     def __init__(self, rag_module: RAGModule):
         self.rag = rag_module
         self.llm = get_llm(temperature=0.7)
-        self.structured_llm = self.llm.with_structured_output(HypothesisOutput)
     
     @staticmethod
     def _strip_markdown_json(text: str) -> str:
