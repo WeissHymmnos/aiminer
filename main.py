@@ -1,6 +1,8 @@
 import os
 import sys
 import argparse
+import json
+from datetime import datetime
 from dotenv import load_dotenv
 from loguru import logger
 
@@ -14,6 +16,40 @@ def setup_logging(verbose: bool = False):
     logger.add("logs/aiminer_{time}.log", rotation="10 MB", retention="10 days", level="DEBUG")
     if verbose:
         logger.add(sys.stderr, level="DEBUG")
+
+def save_results(final_state: dict, output_file: str = "results/results.json"):
+    """Save execution results to JSON file."""
+    os.makedirs("results", exist_ok=True)
+    
+    result_entry = {
+        "timestamp": datetime.now().isoformat(),
+        "iteration": final_state.get("iteration"),
+        "max_iterations": final_state.get("max_iterations"),
+        "hypothesis_name": final_state.get("hypothesis_name"),
+        "hypothesis_description": final_state.get("hypothesis_description"),
+        "code_expression": final_state.get("code_expression"),
+        "backtest_metrics": final_state.get("backtest_metrics", {}),
+        "is_simulated": final_state.get("is_simulated", False),
+        "is_effective": final_state.get("is_effective"),
+        "review_summary": final_state.get("review_summary"),
+        "suggested_improvements": final_state.get("suggested_improvements"),
+        "error": final_state.get("error")
+    }
+    
+    # Load existing results
+    results = {"results": []}
+    if os.path.exists(output_file):
+        with open(output_file, 'r', encoding='utf-8') as f:
+            results = json.load(f)
+    
+    # Append new result
+    results["results"].append(result_entry)
+    
+    # Save back
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(results, f, indent=2, ensure_ascii=False)
+    
+    logger.info(f"Results saved to {output_file}")
 
 def print_summary(final_state: dict):
     """Print a human-readable summary of the final workflow state."""
@@ -88,13 +124,15 @@ def main():
                     logger.error(f"Error in {node_name}: {state_update['error']}")
                     
         logger.info("=== Execution Complete ===")
+        save_results(final_state)
         print_summary(final_state)
         
     except KeyboardInterrupt:
         logger.warning("Execution interrupted by user.")
-        print_summary(final_state)
+        save_results(final_state)print_summary(final_state)
     except Exception as e:
         logger.exception(f"Workflow execution failed: {e}")
+        save_results(final_state)
         print_summary(final_state)
 
 if __name__ == "__main__":
