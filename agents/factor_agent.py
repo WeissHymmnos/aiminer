@@ -29,7 +29,8 @@ class FactorAgent:
         """Remove markdown code block wrapper from JSON response."""
         text = text.strip()
         if text.startswith("```json"):
-            text = re.sub(r'^```json\s*', '', text)text = re.sub(r'\s*```$', '', text)
+            text = re.sub(r'^```json\s*', '', text)
+            text = re.sub(r'\s*```$', '', text)
         elif text.startswith("```"):
             text = re.sub(r'^```\s*', '', text)
             text = re.sub(r'\s*```$', '', text)
