@@ -1,4 +1,5 @@
 from typing import Dict, Any
+import re
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
 from workflow.state import AlphaMinerState
@@ -16,6 +17,17 @@ class IdeaAgent:
         self.rag = rag_module
         self.llm = get_llm(temperature=0.7)
         self.structured_llm = self.llm.with_structured_output(HypothesisOutput)
+    
+    @staticmethod
+    def _strip_markdown_json(text: str) -> str:
+        """Remove markdown code block wrapper from JSON response."""
+        text = text.strip()
+        if text.startswith("```json"):
+            text = re.sub(r'^```json\s*', '', text)text = re.sub(r'\s*```$', '', text)
+        elif text.startswith("```"):
+            text = re.sub(r'^```\s*', '', text)
+            text = re.sub(r'\s*```$', '', text)
+        return text.strip()
 
     def __call__(self, state: AlphaMinerState) -> Dict[str, Any]:
         iteration = state.get("iteration", 0)
@@ -51,13 +63,15 @@ class IdeaAgent:
                      "Explain the economic rationale clearly. Return only valid JSON.")
         ])
         
-        chain = prompt | self.structured_llm
+        chain = prompt | self.llm
         
         try:
-            result: HypothesisOutput = chain.invoke({
+            raw_response = chain.invoke({
                 "context": rag_context,
                 "iteration": iteration
             })
+            cleaned_json = self._strip_markdown_json(raw_response.content)
+            result = HypothesisOutput.model_validate_json(cleaned_json)
             
             logger.info(f"[IdeaAgent] Hypothesis Generated: {result.hypothesis_name}")
             
