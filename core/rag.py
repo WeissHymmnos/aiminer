@@ -7,6 +7,7 @@ import chromadb
 from chromadb.config import Settings
 from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 from loguru import logger
+from core.llm import get_llm_config
 
 class RAGModule:
     def __init__(self, db_dir: str = "data/chroma_db", docs_dir: str = "data/rag_docs", rebuild: bool = False):
@@ -16,16 +17,38 @@ class RAGModule:
         os.makedirs(self.db_dir, exist_ok=True)
         os.makedirs(self.docs_dir, exist_ok=True)
         
-        # Initialize embeddings using the provided proxy base_url and ClaudeCode_KEY
-        api_key = os.getenv("ClaudeCode_KEY")
-        if not api_key:
-            logger.warning("ClaudeCode_KEY not found. RAG operations requiring embeddings will fail.")
+        # Auto-detect LLM provider and configure embeddings accordingly.
+        # Both Claude proxy and Qwen/DashScope expose OpenAI-compatible
+        # embedding endpoints, so OpenAIEmbeddingFunction works for both.
+        _EMBEDDING_DEFAULTS = {
+            "qwen": {
+                "model_name": "text-embedding-v3",
+                "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            },
+            "claude": {
+                "model_name": "text-embedding-3-small",
+                "api_base": "https://api.gptsapi.net/v1",
+            },
+        }
+
+        try:
+            cfg = get_llm_config()
+            provider = cfg["provider"]
+            api_key = cfg["api_key"]
+            emb_defaults = _EMBEDDING_DEFAULTS[provider]
+        except ValueError:
+            logger.warning(
+                "No LLM API key found (QWEN_API_KEY or ClaudeCode_KEY). "
+                "RAG operations requiring embeddings will fail."
+            )
+            api_key = None
+            emb_defaults = _EMBEDDING_DEFAULTS["claude"]
 
         # Use ChromaDB-native OpenAI embedding function so collections actually use it
         self.embedding_fn = OpenAIEmbeddingFunction(
             api_key=api_key,
-            model_name="text-embedding-3-small",
-            api_base="https://api.gptsapi.net/v1"
+            model_name=emb_defaults["model_name"],
+            api_base=emb_defaults["api_base"],
         )
         
         # Initialize ChromaDB
