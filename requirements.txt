@@ -7,7 +7,7 @@ chromadb
 tiktoken
 numpy
 pandas
-pyqlib
+qlib
 typing_extensions
 pydantic>=2.0.0
 python-dotenv
