@@ -28,8 +28,8 @@ class AlphaEval:
         instruments: Optional[List[str]] = None,
         daily_normalize: bool = True
     ):
-        import qlib
         from qlib.data import D
+        from qlib.config import C
 
         self.alphacombo = None
         self.factor_expressions = factor_expressions
@@ -45,7 +45,7 @@ class AlphaEval:
         if not os.path.exists(expanded_path):
             raise FileNotFoundError(f"Qlib data path does not exist: {expanded_path}")
         
-        qlib.init(provider_uri=expanded_path, region='cn')
+        C.set(provider_uri=expanded_path, region='cn', mount_path=expanded_path)
 
         if instruments is not None:
             self.instruments = instruments
