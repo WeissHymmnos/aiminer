@@ -33,10 +33,6 @@ class AlphaEval:
 
         self.alphacombo = None
         self.factor_expressions = factor_expressions
-        if weights is not None:
-            self.weights = weights
-        else:
-            self.weights = WeightCalculator(self.factor_expressions, train_start_date, train_end_date, instruments).fit()
         self.train_start_date = train_start_date
         self.train_end_date = train_end_date
         self.test_start_date = test_start_date
@@ -44,15 +40,24 @@ class AlphaEval:
         self.daily_normalize = daily_normalize
 
         qlib_data_path = os.getenv("QLIB_DATA_PATH", "~/.qlib/qlib_data/cn_data")
-        qlib.init(provider_uri=qlib_data_path, region="cn")
+        expanded_path = os.path.expanduser(qlib_data_path)
+        
+        if not os.path.exists(expanded_path):
+            raise FileNotFoundError(f"Qlib data path does not exist: {expanded_path}")
+        
+        qlib.init(provider_uri=expanded_path, region="cn")
 
-        # If the user does not specify the market, CSI300 is taken by default
         if instruments is not None:
             self.instruments = instruments
         else:
             self.instruments = D.instruments(market="csi300")
 
         self._D = D
+        
+        if weights is not None:
+            self.weights = weights
+        else:
+            self.weights = WeightCalculator(self.factor_expressions, train_start_date, train_end_date, instruments).fit()
 
         self.label_expr = "Ref($close, -1)/$close - 1"
 

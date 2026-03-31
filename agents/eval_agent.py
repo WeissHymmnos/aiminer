@@ -64,9 +64,13 @@ class EvalAgent:
                 "diversity": getattr(evaluator, 'diversity', 0.0),
                 "llm_score": getattr(evaluator, 'llm_avg_score', 0.0)
             }
+        except FileNotFoundError as e:
+            logger.error(f"Qlib data directory not found: {e}")
+            logger.info("Please download Qlib data first. Run: python -m qlib.run.get_data qlib_data --target_dir ~/.qlib/qlib_data/cn_data --region cn")
+            logger.info("Falling back to simulated metrics.")
         except Exception as e:
-            logger.warning(f"AlphaEval backtest failed (possibly missing Qlib data or env issue): {e}")
-            logger.info("Falling back to simulated AlphaEval metrics for workflow demonstration.")
+            logger.warning(f"AlphaEval backtest failed: {e}")
+            logger.info("Falling back to simulated metrics.")
             
             # Use a deterministic seed based on the code expression for reproducibility
             seed = int(hashlib.md5(code.encode()).hexdigest()[:8], 16)
