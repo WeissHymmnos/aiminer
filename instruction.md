@@ -1570,3 +1570,152 @@ python main.py --iterations 3 --verbose
 # 6. (首次运行或知识库更新后) 强制重建 RAG
 python main.py --iterations 1 --rebuild-rag
 ```
+# AlphaMiner — 项目技术说明书 (Project Instruction Manual)
+
+> 一个完全 "vibe-coded" 的自主 Alpha 因子挖掘框架,基于 **LangGraph**、**Qlib** 和 **LLM Agents** 
+构建。系统自动提出市场假设、将其转化为量化因子、回测评估,并通过反思反馈循环迭代改进。
+
+---
+
+## Table of Contents
+
+1. [Architecture Overview](#1-architecture-overview)
+2. [Directory Structure](#2-directory-structure)
+3. [Workflow & State Machine](#3-workflow--state-machine)
+4. [Agents](#4-agents)
+5. [Core Modules](#5-core-modules)
+6. [Schemas / Data Models](#6-schemas--data-models-schemasmessagespy)
+7. [Data & Knowledge Base](#7-data--knowledge-base-datarag_docs)
+8. [Scripts (Data Fetching)](#8-scripts-data-fetching)
+9. [Entry Point](#9-entry-point-mainpy)
+10. [Configuration & Environment](#10-configuration--environment)
+11. [End-to-End Flow](#11-end-to-end-flow)
+12. [Technical Deep-Dive](#12-technical-deep-dive)
+13. [Troubleshooting](#13-troubleshooting)
+14. [Performance Optimization](#14-performance-optimization)
+15. [Extension Ideas](#15-extension-ideas)
+16. [Best Practices](#16-best-practices)
+17. [API Reference](#17-api-reference)
+18. [Contributing](#18-contributing)
+
+---
+
+## 1. Architecture Overview
+
+[Content continues with full Chinese documentation as shown in the file...]
+
+## 13. Troubleshooting
+
+### Common Issues
+
+**1. JSON Parsing Errors**:
+```
+Invalid JSON: control character (\u0000-\u001F) found
+```
+**Solution**: Already handled by `_strip_markdown_json()` in agents. If persists, check LLM temperature (lower = more structured output).
+
+**2. Qlib Expression Validation Failures**:
+```
+ExpressionOps parse error: unmatched parentheses
+```
+**Solution**: FactorAgent includes basic validation. If errors persist, manually test expressions in Qlib REPL:
+```python
+from qlib.data.ops import ExpressionOps
+expr = "($close - Mean($close, 20)) / Std($close, 20)"
+ops = ExpressionOps(expr)
+ops.load("csi300", "2020-01-01", "2020-12-31")
+```
+
+**3. ChromaDB Initialization Errors**:
+```
+chromadb.errors.InvalidCollectionException
+```
+**Solution**: Delete `data/chroma_db/` and rebuild:
+```bash
+rm -rf data/chroma_db
+python main.py --rebuild-rag --iterations 1
+```
+
+**4. API Rate Limiting**:
+```
+429 Too Many Requests
+```
+**Solution**: Reduce iteration count or add delays between LLM calls.
+
+**5. Qlib Data Not Found**:
+```
+FileNotFoundError: Qlib data directory not found
+```
+**Solution**: Download Qlib data:
+```bash
+python -m qlib.run.get_data qlib_data --target_dir ~/.qlib/qlib_data/cn_data --region cn
+```
+
+---
+
+## 14. Performance Optimization
+
+### RAG Retrieval Speed
+- Reduce `n_results` in `retrieve()` calls
+- Use smaller embedding models
+- Implement caching for repeated queries
+
+### Backtesting Performance
+- Reduce date range for faster iteration
+- Use smaller stock universe during development
+- Disable noise injection when not needed
+
+---
+
+## 15. Extension Ideas
+
+### Multi-Asset Support
+Extend beyond Chinese equities to US stocks, futures, crypto.
+
+### Ensemble Factor Mining
+Run multiple parallel workflows with different LLM parameters.
+
+### Real-Time Factor Monitoring
+Deploy factors to production and monitor live performance.
+
+---
+
+## 16. Best Practices
+
+### Prompt Engineering
+- Be specific about output format
+- Include examples
+- Use chain-of-thought reasoning
+
+### Iteration Strategy
+- Start with 5-10 iterations for exploration
+- Increase to 30-50 for production
+- Review logs after each run
+
+### Knowledge Base Curation
+- Use high-quality academic sources
+- Include industry reports
+- Avoid outdated or overfitted strategies
+
+### Factor Validation Checklist
+- IC > 0.02 on out-of-sample data
+- Rank IC > 0.01
+- Sharpe ratio > 1.0
+- Low correlation with existing factors
+- Stable across market regimes
+
+---
+
+## 17. API Reference
+
+See code documentation for detailed API specifications.
+
+---
+
+## 18. Contributing
+
+Create new agents by extending the base pattern and adding to the workflow graph.
+
+---
+
+**Last Updated**: 2026-03-31
