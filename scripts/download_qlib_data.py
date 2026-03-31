@@ -11,7 +11,8 @@ def download_qlib_data(region='cn'):
     
     try:
         qlib.init(provider_uri=provider_uri, region=region)
-        print(f"Successfully initialized Qlib with {region.upper()} data")except Exception as e:
+        print(f"Successfully initialized Qlib with {region.upper()} data")
+    except Exception as e:
         print(f"Error: {e}")
         print("\nPlease install qlib data manually:")
         print(f"pip install --upgrade qlib")
