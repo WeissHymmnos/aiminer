@@ -1,5 +1,4 @@
 import qlib
-from qlib.data import D
 import os
 
 def download_qlib_data(region='cn'):
@@ -10,13 +9,13 @@ def download_qlib_data(region='cn'):
     print(f"Downloading {region.upper()} market data to {provider_uri}...")
     
     try:
+        from qlib.data.data import BaseProvider
         qlib.init(provider_uri=provider_uri, region=region)
         print(f"Successfully initialized Qlib with {region.upper()} data")
     except Exception as e:
         print(f"Error: {e}")
-        print("\nPlease install qlib data manually:")
-        print(f"pip install --upgrade qlib")
-        print(f"Then run: python scripts/download_qlib_data.py")
+        print("\nTo download Qlib data manually, run:")
+        print(f"python -m qlib.run.get_data qlib_data --target_dir {provider_uri} --region {region}")
 
 if __name__ == "__main__":
     import sys
