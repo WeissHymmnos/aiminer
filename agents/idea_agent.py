@@ -19,7 +19,7 @@ class IdeaAgent:
     
     @staticmethod
     def _strip_markdown_json(text: str) -> str:
-        """Remove markdown code block wrapper from JSON response."""
+        """Remove markdown code block wrapper and sanitize control characters from JSON response."""
         text = text.strip()
         if text.startswith("```json"):
             text = re.sub(r'^```json\s*', '', text)
@@ -27,6 +27,11 @@ class IdeaAgent:
         elif text.startswith("```"):
             text = re.sub(r'^```\s*', '', text)
             text = re.sub(r'\s*```$', '', text)
+        
+        # Remove control characters except newlines and tabs that are part of JSON structure
+        # Replace control characters within string values with spaces
+        text = re.sub(r'[\x00-\x08\x0b-\x0c\x0e-\x1f]', ' ', text)
+        
         return text.strip()
 
     def __call__(self, state: AlphaMinerState) -> Dict[str, Any]:
