@@ -69,6 +69,19 @@ class EvalAgent:
             logger.info("Please download Qlib data first. Run: python -c \"import qlib; qlib.init(provider_uri='~/.qlib/qlib_data/cn_data', region='cn'); from qlib.data.dataset import DatasetD; DatasetD.get_data(target_dir='~/.qlib/qlib_data/cn_data', region='cn')\"")
             logger.info("Or use: python scripts/get_data.py qlib_data --target_dir ~/.qlib/qlib_data/cn_data --region cn")
             logger.info("Falling back to simulated metrics.")
+            
+            seed = int(hashlib.md5(code.encode()).hexdigest()[:8], 16)rng = random.Random(seed)
+            
+            return {
+                "information_coefficient": round(rng.uniform(-0.05, 0.15), 3),
+                "rank_ic": round(rng.uniform(-0.05, 0.15), 3),
+                "rre": round(rng.uniform(0.0, 1.0), 3),
+                "pfs1": round(rng.uniform(0.0, 1.0), 6),
+                "pfs2": round(rng.uniform(0.0, 1.0), 6),
+                "diversity": round(rng.uniform(0.0, 1.0), 3),
+                "llm_score": round(rng.uniform(50.0, 100.0), 2),
+                "_simulated": True
+            }
         except Exception as e:
             logger.warning(f"AlphaEval backtest failed: {e}")
             logger.info("Falling back to simulated metrics.")
