@@ -1,3 +1,62 @@
 {
-  "results": []
+  "results": [
+    {
+      "timestamp": "2026-03-29T19:48:10.477987",
+      "iteration": 1,
+      "max_iterations": 3,
+      "hypothesis_name": null,
+      "hypothesis_description": null,
+      "code_expression": null,
+      "backtest_metrics": {},
+      "is_simulated": false,
+      "is_effective": null,
+      "review_summary": null,
+      "suggested_improvements": null,
+      "error": null
+    },
+    {
+      "timestamp": "2026-03-31T15:51:45.230119",
+      "iteration": 30,
+      "max_iterations": 30,
+      "hypothesis_name": "Adaptive Volume-Price Elasticity with Regime-Dependent Decay",
+      "hypothesis_description": "Captures alpha by measuring the elasticity between volume changes and price returns across adaptive volatility regimes (60th-80th percentile), using dynamic lookback windows (18 days during high vol, 22 days during moderate vol) and sector-neutral ranking. Applies asymmetric decay rates (-0.30 for accumulation signals, -0.40 for distribution signals) to differentiate institutional positioning patterns. Amplifies signals when volume elasticity exceeds 1.5x (indicating disproportionate volume response to price moves) and filters out low-conviction signals by requiring minimum 3-day signal persistence.",
+      "code_expression": "Let($vol_std, Std($close / Ref($close, 1) - 1, 20), Let($p60, Quantile($vol_std, 60, 0.6), Let($p80, Quantile($vol_std, 60, 0.8), Let($p70, Quantile($vol_std, 60, 0.7), Let($L, If($vol_std > $p70, 18, 22), Let($delta_v, $volume - Mean($volume, $L), Let($R, $close / Ref($close, 1) - 1, Let($E, ($delta_v / Ref($volume, 1)) / $R, Let($I_regime, If(And($vol_std >= $p60, $vol_std <= $p80), 1, 0), Let($I_elasticity, If(Abs($E) > 1.5, 1, 0), Let($I_persistence, If(And(Sign($E) == Sign(Ref($E, 1)), Sign($E) == Sign(Ref($E, 2))), 1, 0), Let($D, If($E > 0, Exp(-0.30 * 1), Exp(-0.40 * 1)), Rank($E * $I_regime * $I_elasticity * $I_persistence * $D))))))))))))))",
+      "backtest_metrics": {
+        "information_coefficient": 0.14,
+        "rank_ic": 0.07,
+        "rre": 0.307,
+        "pfs1": 0.489505,
+        "pfs2": 0.020044,
+        "diversity": 0.43,
+        "llm_score": 81.8
+      },
+      "is_simulated": true,
+      "is_effective": true,
+      "review_summary": "Factor shows strong performance with IC=0.14 (well above 0.02 threshold) and solid Rank IC=0.07, indicating robust predictive power. RRE of 0.307 and PFS1 of 0.49 demonstrate good risk-adjusted returns. The hypothesis about volume-price elasticity in adaptive volatility regimes appears validated. However, diversity at 0.43 suggests moderate concentration risk, and PFS2 at 0.02 indicates limited incremental value over simpler factors.",
+      "suggested_improvements": "1) Increase diversity by relaxing the strict 60th-80th percentile regime filter to capture more opportunities (try 55th-85th). 2) The 3-day persistence requirement may be too restrictive - test 2-day persistence to improve signal coverage. 3) Consider cross-sectional normalization within volatility regimes to reduce regime-switching noise. 4) The asymmetric decay rates (-0.30 vs -0.40) show minimal differentiation - test wider spreads like -0.25 vs -0.50. 5) Add a liquidity filter to improve tradability and potentially boost PFS2.",
+      "error": null
+    },
+    {
+      "timestamp": "2026-03-31T18:13:49.430216",
+      "iteration": 12,
+      "max_iterations": 100,
+      "hypothesis_name": "Volatility Regime Asymmetry with Volume Acceleration",
+      "hypothesis_description": "Captures alpha when realized volatility transitions from compression (below 40th percentile of 60-day rolling) to expansion (above 60th percentile), combined with volume acceleration (current volume > 1.5x 20-day MA). The factor applies asymmetric decay: 1.3x multiplier on down-days with volume surge (institutional accumulation signal), 0.7x on up-days with volume surge (distribution signal). Uses 30-day correlation window between log-volume changes and returns to reduce noise sensitivity while maintaining regime responsiveness. Normalizes price deviation using ATR instead of standard deviation for better volatility adjustment across different liquidity regimes.",
+      "code_expression": "If(And(Lt(Ref(Std($close / Ref($close, 1) - 1, 20), 1), Quantile(Std($close / Ref($close, 1) - 1, 20), 60, 0.4)), Gt(Std($close / Ref($close, 1) - 1, 20), Quantile(Std($close / Ref($close, 1) - 1, 20), 60, 0.6))), 1, 0) * If(Gt($volume, 1.5 * Mean($volume, 20)), 1, 0) * If(And(Lt($close / Ref($close, 1) - 1, 0), Gt($volume, 1.5 * Mean($volume, 20))), 1.3, If(And(Gt($close / Ref($close, 1) - 1, 0), Gt($volume, 1.5 * Mean($volume, 20))), 0.7, 1.0)) * Corr(Log($volume / Ref($volume, 1)), $close / Ref($close, 1) - 1, 30) * ($close - Mean($close, 20)) / Mean(Max(Max($high - $low, Abs($high - Ref($close, 1))), Abs($low - Ref($close, 1))), 14)",
+      "backtest_metrics": {
+        "information_coefficient": 0.03,
+        "rank_ic": -0.026,
+        "rre": 0.233,
+        "pfs1": 0.876282,
+        "pfs2": 0.942854,
+        "diversity": 0.672,
+        "llm_score": 63.92
+      },
+      "is_simulated": true,
+      "is_effective": false,
+      "review_summary": "Factor shows mixed signals. Positive IC (0.03) exceeds threshold indicating predictive power, but negative Rank IC (-0.026) suggests poor rank-order prediction. Strong PFS scores (0.88/0.94) indicate good portfolio separation. Moderate diversity (0.672) and RRE (0.233) show limited orthogonality to existing factors. The asymmetric decay logic conflicts with correlation term - multiplying by negative correlation when it should amplify positive regime signals.",
+      "suggested_improvements": "Remove the correlation multiplier that inverts the signal. Simplify volatility regime detection - current logic checks if yesterday's vol was low AND today's is high, creating sparse signals. Use direct percentile comparison: If(And(Lt(Std(returns,20), Quantile(...,0.4)), Gt(Std(returns,20), Quantile(...,0.6)))) catches only transition days. Instead use: If(Gt(Std(returns,20), Quantile(...,0.6)), 1, 0) for expansion regime. The asymmetric decay (1.3x down, 0.7x up) is backwards - institutional accumulation typically occurs on up-days with volume. Reverse to 1.3x on up-days. Test shorter ATR period (7-10 days) for faster regime adaptation.",
+      "error": "1 validation error for HypothesisOutput\n  Invalid JSON: control character (\\u0000-\\u001F) found while parsing a string at line 6 column 0 [type=json_invalid, input_value='{\\n  \"hypothesis_name\": ...close, 1))), 8)), 0)\\n}', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.12/v/json_invalid"
+    }
+  ]
 }
