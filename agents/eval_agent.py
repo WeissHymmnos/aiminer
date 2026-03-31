@@ -70,7 +70,8 @@ class EvalAgent:
             logger.info("Or use: python scripts/get_data.py qlib_data --target_dir ~/.qlib/qlib_data/cn_data --region cn")
             logger.info("Falling back to simulated metrics.")
             
-            seed = int(hashlib.md5(code.encode()).hexdigest()[:8], 16)rng = random.Random(seed)
+            seed = int(hashlib.md5(code.encode()).hexdigest()[:8], 16)
+            rng = random.Random(seed)
             
             return {
                 "information_coefficient": round(rng.uniform(-0.05, 0.15), 3),
