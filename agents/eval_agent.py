@@ -66,7 +66,8 @@ class EvalAgent:
             }
         except FileNotFoundError as e:
             logger.error(f"Qlib data directory not found: {e}")
-            logger.info("Please download Qlib data first. Run: python -m qlib.run.get_data qlib_data --target_dir ~/.qlib/qlib_data/cn_data --region cn")
+            logger.info("Please download Qlib data first. Run: python -c \"import qlib; qlib.init(provider_uri='~/.qlib/qlib_data/cn_data', region='cn'); from qlib.data.dataset import DatasetD; DatasetD.get_data(target_dir='~/.qlib/qlib_data/cn_data', region='cn')\"")
+            logger.info("Or use: python scripts/get_data.py qlib_data --target_dir ~/.qlib/qlib_data/cn_data --region cn")
             logger.info("Falling back to simulated metrics.")
         except Exception as e:
             logger.warning(f"AlphaEval backtest failed: {e}")
