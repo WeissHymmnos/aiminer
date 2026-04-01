@@ -1,0 +1,19 @@
+2026-03-31 19:29:43.589 | INFO     | __main__:main:98 - Initializing Multi-Agent AI Alpha Miner for 30 iteration(s)...
+2026-03-31 19:29:43.668 | INFO     | core.rag:_init_knowledge_base:101 - Knowledge base already initialized with 15 documents.
+2026-03-31 19:29:43.746 | INFO     | __main__:main:112 - === Starting LangGraph Execution ===
+2026-03-31 19:29:43.747 | INFO     | agents.idea_agent:__call__:41 - [IdeaAgent] Starting iteration 1
+2026-03-31 19:29:46.381 | DEBUG    | agents.idea_agent:__call__:50 - [IdeaAgent] Retrieved Context Length: 8480
+2026-03-31 19:29:58.791 | INFO     | agents.idea_agent:__call__:82 - [IdeaAgent] Hypothesis Generated: Intraday VWAP Divergence with Volume Surge Detection
+2026-03-31 19:29:58.792 | INFO     | __main__:main:119 - --- Completed Node: idea_agent ---
+2026-03-31 19:29:58.792 | INFO     | agents.factor_agent:__call__:67 - [FactorAgent] Starting formalization and implementation
+2026-03-31 19:30:07.213 | INFO     | agents.factor_agent:__call__:92 - [FactorAgent] Formalized Math: Factor_i,t = Rank_i((Close_i,t - VWAP_mean_i,t) / σ_i,t × (Volume_i,t / Volume_avg_i,t)) × I(Turnover_i,t > P60_t)
+2026-03-31 19:30:11.280 | INFO     | agents.factor_agent:__call__:112 - [FactorAgent] Implemented Code: Rank(($close - Mean($vwap, 10)) / Std($close - $vwap, 10) * ($volume / Mean($volume, 20))) * If($volume / $shares_outstanding > Quantile($volume / $shares_outstanding, 0.6), 1, 0)
+2026-03-31 19:30:11.280 | INFO     | __main__:main:119 - --- Completed Node: factor_agent ---
+2026-03-31 19:30:11.280 | INFO     | agents.eval_agent:__call__:109 - [EvalAgent] Starting evaluation and reflexive review
+2026-03-31 19:30:11.280 | INFO     | agents.eval_agent:_execute_alphaeval_backtest:40 - [EvalAgent] Executing AlphaEval for expression: Rank(($close - Mean($vwap, 10)) / Std($close - $vwap, 10) * ($volume / Mean($volume, 20))) * If($volume / $shares_outstanding > Quantile($volume / $shares_outstanding, 0.6), 1, 0)
+2026-03-31 19:30:12.220 | WARNING  | agents.eval_agent:_execute_alphaeval_backtest:87 - AlphaEval backtest failed: Rank.__init__() missing 1 required positional argument: 'N'
+2026-03-31 19:30:12.221 | INFO     | agents.eval_agent:_execute_alphaeval_backtest:88 - Falling back to simulated metrics.
+2026-03-31 19:30:12.221 | WARNING  | agents.eval_agent:__call__:119 - [EvalAgent] Using SIMULATED metrics — results are not real backtest data.
+2026-03-31 19:30:12.221 | INFO     | agents.eval_agent:__call__:120 - [EvalAgent] Backtest Metrics (simulated=True): {'information_coefficient': 0.021, 'rank_ic': 0.035, 'rre': 0.908, 'pfs1': 0.69443, 'pfs2': 0.853386, 'diversity': 0.663, 'llm_score': 57.57}
+2026-03-31 19:30:17.007 | WARNING  | __main__:main:131 - Execution interrupted by user.
+2026-03-31 19:30:17.008 | INFO     | __main__:save_results:52 - Results saved to results/results.json

@@ -6,6 +6,7 @@ from agents.factor_agent import FactorAgent
 from agents.eval_agent import EvalAgent
 from core.rag import RAGModule
 
+# Routing Functions
 def route_after_idea(state: AlphaMinerState) -> str:
     if state.get("error"):
         return "end"
@@ -19,11 +20,7 @@ def route_after_factor(state: AlphaMinerState) -> str:
     return "eval_agent"
 
 def route_after_eval(state: AlphaMinerState) -> str:
-    """Route after eval: check if we should loop for another iteration.
-    
-    Note: increment runs *after* this routing, so we compare against
-    max_iterations using the current (not yet incremented) iteration.
-    """
+    # Route after eval: check if we should loop for another iteration.
     iteration = state.get("iteration", 1)
     max_iterations = state.get("max_iterations", 1)
     
@@ -32,7 +29,6 @@ def route_after_eval(state: AlphaMinerState) -> str:
     return "end"
 
 def increment_iteration(state: AlphaMinerState):
-    """Increment iteration counter and clear transient error state."""
     return {
         "iteration": state.get("iteration", 1) + 1,
         "error": None,
@@ -56,7 +52,7 @@ def build_workflow(rebuild_rag: bool = False):
     workflow.add_node("factor_agent", factor_agent)
     workflow.add_node("eval_agent", eval_agent)
     
-    # Optional: A node just to increment state if looping
+    # Increment state if looping
     workflow.add_node("increment", increment_iteration)
 
     # Set Entry Point
@@ -66,7 +62,7 @@ def build_workflow(rebuild_rag: bool = False):
     workflow.add_conditional_edges("idea_agent", route_after_idea, {"factor_agent": "factor_agent", "end": END})
     workflow.add_conditional_edges("factor_agent", route_after_factor, {"eval_agent": "eval_agent", "end": END})
     
-    # After eval, decide whether to loop or end
+    # After eval, decide loop or end
     workflow.add_conditional_edges(
         "eval_agent",
         route_after_eval,

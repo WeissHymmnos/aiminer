@@ -1,0 +1,25 @@
+2026-03-31 19:06:57.280 | INFO     | __main__:main:98 - Initializing Multi-Agent AI Alpha Miner for 30 iteration(s)...
+2026-03-31 19:06:57.351 | INFO     | core.rag:_init_knowledge_base:101 - Knowledge base already initialized with 15 documents.
+2026-03-31 19:06:57.428 | INFO     | __main__:main:112 - === Starting LangGraph Execution ===
+2026-03-31 19:06:57.429 | INFO     | agents.idea_agent:__call__:41 - [IdeaAgent] Starting iteration 1
+2026-03-31 19:06:59.867 | DEBUG    | agents.idea_agent:__call__:50 - [IdeaAgent] Retrieved Context Length: 8480
+2026-03-31 19:07:08.238 | INFO     | agents.idea_agent:__call__:82 - [IdeaAgent] Hypothesis Generated: Intraday VWAP Divergence with Volume Surge Detection
+2026-03-31 19:07:08.238 | INFO     | __main__:main:119 - --- Completed Node: idea_agent ---
+2026-03-31 19:07:08.239 | INFO     | agents.factor_agent:__call__:67 - [FactorAgent] Starting formalization and implementation
+2026-03-31 19:07:17.895 | INFO     | agents.factor_agent:__call__:92 - [FactorAgent] Formalized Math: Alpha_i,t = rank_i((Close_i,t - VWAP_5d_i,t) / σ(Close_i,t - VWAP_5d_i,t) * (Volume_i,t / MA_Volume_20d_i,t)) * I(Turnover_i,t > P60(Turnover_t))
+2026-03-31 19:07:22.885 | INFO     | agents.factor_agent:__call__:112 - [FactorAgent] Implemented Code: Rank((($close - Mean($vwap, 5)) / Std($close - Mean($vwap, 5), 20)) * ($volume / Mean($volume, 20))) * If($volume / $factor > Quantile($volume / $factor, 60), 1, 0)
+2026-03-31 19:07:22.886 | INFO     | __main__:main:119 - --- Completed Node: factor_agent ---
+2026-03-31 19:07:22.886 | INFO     | agents.eval_agent:__call__:109 - [EvalAgent] Starting evaluation and reflexive review
+2026-03-31 19:07:22.886 | INFO     | agents.eval_agent:_execute_alphaeval_backtest:40 - [EvalAgent] Executing AlphaEval for expression: Rank((($close - Mean($vwap, 5)) / Std($close - Mean($vwap, 5), 20)) * ($volume / Mean($volume, 20))) * If($volume / $factor > Quantile($volume / $factor, 60), 1, 0)
+2026-03-31 19:07:23.203 | WARNING  | agents.eval_agent:_execute_alphaeval_backtest:87 - AlphaEval backtest failed: cannot import name 'auto_init' from 'qlib' (/home/wh/.conda/envs/aiminer/lib/python3.10/site-packages/qlib/__init__.py)
+2026-03-31 19:07:23.203 | INFO     | agents.eval_agent:_execute_alphaeval_backtest:88 - Falling back to simulated metrics.
+2026-03-31 19:07:23.203 | WARNING  | agents.eval_agent:__call__:119 - [EvalAgent] Using SIMULATED metrics — results are not real backtest data.
+2026-03-31 19:07:23.203 | INFO     | agents.eval_agent:__call__:120 - [EvalAgent] Backtest Metrics (simulated=True): {'information_coefficient': 0.14, 'rank_ic': -0.005, 'rre': 0.998, 'pfs1': 0.042051, 'pfs2': 0.50099, 'diversity': 0.56, 'llm_score': 89.96}
+2026-03-31 19:07:32.335 | INFO     | agents.eval_agent:__call__:142 - [EvalAgent] Review Summary: Factor shows strong IC (0.14) indicating predictive power, but critically flawed with negative Rank IC (-0.005) suggesting non-monotonic relationship. Near-perfect RRE (0.998) indicates overfitting or look-ahead bias. Low PFS1 (0.042) shows weak portfolio separation. Moderate diversity (0.56) and high LLM score (89.96) suggest conceptually sound but implementation issues.
+2026-03-31 19:07:33.474 | INFO     | core.rag:add_experience:215 - Added experience exp_e237a13929fb4295a5471c62016463ab to ChromaDB.
+2026-03-31 19:07:33.475 | INFO     | __main__:main:119 - --- Completed Node: eval_agent ---
+2026-03-31 19:07:33.475 | INFO     | __main__:main:119 - --- Completed Node: increment ---
+2026-03-31 19:07:33.475 | INFO     | agents.idea_agent:__call__:41 - [IdeaAgent] Starting iteration 2
+2026-03-31 19:07:34.685 | DEBUG    | agents.idea_agent:__call__:50 - [IdeaAgent] Retrieved Context Length: 7969
+2026-03-31 19:07:39.483 | WARNING  | __main__:main:131 - Execution interrupted by user.
+2026-03-31 19:07:39.484 | INFO     | __main__:save_results:52 - Results saved to results/results.json

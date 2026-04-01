@@ -1,0 +1,29 @@
+2026-03-31 19:03:47.893 | INFO     | __main__:main:98 - Initializing Multi-Agent AI Alpha Miner for 30 iteration(s)...
+2026-03-31 19:03:47.961 | INFO     | core.rag:_init_knowledge_base:101 - Knowledge base already initialized with 15 documents.
+2026-03-31 19:03:48.038 | INFO     | __main__:main:112 - === Starting LangGraph Execution ===
+2026-03-31 19:03:48.039 | INFO     | agents.idea_agent:__call__:41 - [IdeaAgent] Starting iteration 1
+2026-03-31 19:04:00.661 | DEBUG    | agents.idea_agent:__call__:50 - [IdeaAgent] Retrieved Context Length: 8480
+2026-03-31 19:04:11.459 | INFO     | agents.idea_agent:__call__:82 - [IdeaAgent] Hypothesis Generated: Intraday VWAP Divergence with Volume Surge Detection
+2026-03-31 19:04:11.460 | INFO     | __main__:main:119 - --- Completed Node: idea_agent ---
+2026-03-31 19:04:11.460 | INFO     | agents.factor_agent:__call__:67 - [FactorAgent] Starting formalization and implementation
+2026-03-31 19:04:19.321 | INFO     | agents.factor_agent:__call__:92 - [FactorAgent] Formalized Math: Factor_i,t = rank_i((Close_i,t - μ_VWAP_i,t) / σ_VWAP_i,t × (Volume_i,t / μ_Volume_i,t)) × I(Turnover_i,t > P60_t)
+2026-03-31 19:04:24.810 | INFO     | agents.factor_agent:__call__:112 - [FactorAgent] Implemented Code: Rank((( $close - Mean($vwap, 10) ) / Std($vwap, 10) ) * ( $volume / Mean($volume, 20) )) * ( $turnover > Ref(PctRank($turnover, 60), 0))
+2026-03-31 19:04:24.811 | INFO     | __main__:main:119 - --- Completed Node: factor_agent ---
+2026-03-31 19:04:24.811 | INFO     | agents.eval_agent:__call__:109 - [EvalAgent] Starting evaluation and reflexive review
+2026-03-31 19:04:24.811 | INFO     | agents.eval_agent:_execute_alphaeval_backtest:40 - [EvalAgent] Executing AlphaEval for expression: Rank((( $close - Mean($vwap, 10) ) / Std($vwap, 10) ) * ( $volume / Mean($volume, 20) )) * ( $turnover > Ref(PctRank($turnover, 60), 0))
+2026-03-31 19:04:25.131 | WARNING  | agents.eval_agent:_execute_alphaeval_backtest:87 - AlphaEval backtest failed: module 'qlib' has no attribute 'init'
+2026-03-31 19:04:25.131 | INFO     | agents.eval_agent:_execute_alphaeval_backtest:88 - Falling back to simulated metrics.
+2026-03-31 19:04:25.131 | WARNING  | agents.eval_agent:__call__:119 - [EvalAgent] Using SIMULATED metrics — results are not real backtest data.
+2026-03-31 19:04:25.131 | INFO     | agents.eval_agent:__call__:120 - [EvalAgent] Backtest Metrics (simulated=True): {'information_coefficient': -0.043, 'rank_ic': 0.091, 'rre': 0.856, 'pfs1': 0.665758, 'pfs2': 0.439491, 'diversity': 0.77, 'llm_score': 82.67}
+2026-03-31 19:04:30.637 | INFO     | agents.eval_agent:__call__:142 - [EvalAgent] Review Summary: The factor shows a negative Information Coefficient (-0.043), indicating poor linear predictive ability on returns, though the positive Rank IC (0.091) suggests some stability in ordinal predictions. The relatively high RRE (0.856) indicates reasonable return residual explained, but the PFS ratios are below the typical benchmark of 0.7 for strong factor stability, especially PFS2 at 0.439, indicating moderate to low persistence long-term. Diversity at 0.77 is good, and the high LLM score (82.67) suggests the factor construction logic aligns well with quantitative standards. Overall, the factor does not meet the baseline effectiveness threshold (IC > 0.02) and shows signs of weak predictive power and moderate instability over time.
+2026-03-31 19:04:32.005 | INFO     | core.rag:add_experience:215 - Added experience exp_8292b738c9f344c984f6a820d5919762 to ChromaDB.
+2026-03-31 19:04:32.006 | INFO     | __main__:main:119 - --- Completed Node: eval_agent ---
+2026-03-31 19:04:32.006 | INFO     | __main__:main:119 - --- Completed Node: increment ---
+2026-03-31 19:04:32.006 | INFO     | agents.idea_agent:__call__:41 - [IdeaAgent] Starting iteration 2
+2026-03-31 19:04:33.177 | DEBUG    | agents.idea_agent:__call__:50 - [IdeaAgent] Retrieved Context Length: 7310
+2026-03-31 19:04:44.802 | INFO     | agents.idea_agent:__call__:82 - [IdeaAgent] Hypothesis Generated: Intraday Price Discovery Asymmetry with Liquidity Regime Filtering
+2026-03-31 19:04:44.803 | INFO     | __main__:main:119 - --- Completed Node: idea_agent ---
+2026-03-31 19:04:44.803 | INFO     | agents.factor_agent:__call__:67 - [FactorAgent] Starting formalization and implementation
+2026-03-31 19:04:53.577 | INFO     | agents.factor_agent:__call__:92 - [FactorAgent] Formalized Math: Alpha_i,t = Rank_i,t(Momentum_5d(Divergence_i,t × VolumeRatio_i,t)) × I(Volatility_i,t < P_85)
+2026-03-31 19:04:56.911 | WARNING  | __main__:main:131 - Execution interrupted by user.
+2026-03-31 19:04:56.912 | INFO     | __main__:save_results:52 - Results saved to results/results.json

@@ -1,0 +1,42 @@
+2026-03-31 19:02:04.031 | INFO     | __main__:main:98 - Initializing Multi-Agent AI Alpha Miner for 30 iteration(s)...
+2026-03-31 19:02:04.103 | INFO     | core.rag:_init_knowledge_base:101 - Knowledge base already initialized with 15 documents.
+2026-03-31 19:02:04.181 | INFO     | __main__:main:112 - === Starting LangGraph Execution ===
+2026-03-31 19:02:04.182 | INFO     | agents.idea_agent:__call__:41 - [IdeaAgent] Starting iteration 1
+2026-03-31 19:02:07.378 | DEBUG    | agents.idea_agent:__call__:50 - [IdeaAgent] Retrieved Context Length: 8480
+2026-03-31 19:02:25.424 | INFO     | agents.idea_agent:__call__:82 - [IdeaAgent] Hypothesis Generated: Intraday VWAP Divergence with Volume Regime Filtering
+2026-03-31 19:02:25.424 | INFO     | __main__:main:119 - --- Completed Node: idea_agent ---
+2026-03-31 19:02:25.424 | INFO     | agents.factor_agent:__call__:67 - [FactorAgent] Starting formalization and implementation
+2026-03-31 19:02:38.019 | INFO     | agents.factor_agent:__call__:92 - [FactorAgent] Formalized Math: Alpha_{i,t} = Rank_i(Corr_{10d}(Rank(VWAP\_Dev_{i,t}), Rank(ΔVol_{i,t}))) × I(Vol\_Regime_{i,t} = transition) × I(σ_{i,t} ≤ P_{80}(σ_t))
+2026-03-31 19:02:49.721 | INFO     | agents.factor_agent:__call__:112 - [FactorAgent] Implemented Code: Rank(Corr(Rank(($vwap - Ref($vwap, 1)) / $close, 10), Rank(($volume - Ref($volume, 1)) / Ref($volume, 1), 10), 10)) * If((Ref($volume, 1) < Median($volume)) & ($volume >= Median($volume)), 1, 0) * If(Std(Return($close, 1), 20) <= Quantile(Std(Return($close, 1), 20), 0.8), 1, 0)
+2026-03-31 19:02:49.722 | INFO     | __main__:main:119 - --- Completed Node: factor_agent ---
+2026-03-31 19:02:49.722 | INFO     | agents.eval_agent:__call__:109 - [EvalAgent] Starting evaluation and reflexive review
+2026-03-31 19:02:49.722 | INFO     | agents.eval_agent:_execute_alphaeval_backtest:40 - [EvalAgent] Executing AlphaEval for expression: Rank(Corr(Rank(($vwap - Ref($vwap, 1)) / $close, 10), Rank(($volume - Ref($volume, 1)) / Ref($volume, 1), 10), 10)) * If((Ref($volume, 1) < Median($volume)) & ($volume >= Median($volume)), 1, 0) * If(Std(Return($close, 1), 20) <= Quantile(Std(Return($close, 1), 20), 0.8), 1, 0)
+2026-03-31 19:02:50.047 | WARNING  | agents.eval_agent:_execute_alphaeval_backtest:87 - AlphaEval backtest failed: Please run qlib.init() first using qlib
+2026-03-31 19:02:50.047 | INFO     | agents.eval_agent:_execute_alphaeval_backtest:88 - Falling back to simulated metrics.
+2026-03-31 19:02:50.047 | WARNING  | agents.eval_agent:__call__:119 - [EvalAgent] Using SIMULATED metrics — results are not real backtest data.
+2026-03-31 19:02:50.047 | INFO     | agents.eval_agent:__call__:120 - [EvalAgent] Backtest Metrics (simulated=True): {'information_coefficient': 0.101, 'rank_ic': 0.035, 'rre': 0.877, 'pfs1': 0.159179, 'pfs2': 0.64236, 'diversity': 0.277, 'llm_score': 59.33}
+2026-03-31 19:02:58.555 | INFO     | agents.eval_agent:__call__:142 - [EvalAgent] Review Summary: Factor shows strong IC (0.101) well above threshold, indicating good predictive power. Rank IC (0.035) is acceptable but modest. High RRE (0.877) suggests strong risk-adjusted returns. PFS metrics show reasonable performance with PFS2 (0.642) better than PFS1 (0.159). Low diversity (0.277) indicates concentrated signals. LLM score (59.33) is moderate. The hypothesis about institutional flow detection appears validated by strong IC, though the signal concentration and modest Rank IC suggest room for refinement.
+2026-03-31 19:03:00.408 | INFO     | core.rag:add_experience:215 - Added experience exp_50defaac1b214e34834125670413197a to ChromaDB.
+2026-03-31 19:03:00.409 | INFO     | __main__:main:119 - --- Completed Node: eval_agent ---
+2026-03-31 19:03:00.409 | INFO     | __main__:main:119 - --- Completed Node: increment ---
+2026-03-31 19:03:00.409 | INFO     | agents.idea_agent:__call__:41 - [IdeaAgent] Starting iteration 2
+2026-03-31 19:03:02.252 | DEBUG    | agents.idea_agent:__call__:50 - [IdeaAgent] Retrieved Context Length: 7676
+2026-03-31 19:03:15.788 | INFO     | agents.idea_agent:__call__:82 - [IdeaAgent] Hypothesis Generated: Asymmetric_VWAP_Pressure_With_Volume_Gradient
+2026-03-31 19:03:15.789 | INFO     | __main__:main:119 - --- Completed Node: idea_agent ---
+2026-03-31 19:03:15.789 | INFO     | agents.factor_agent:__call__:67 - [FactorAgent] Starting formalization and implementation
+2026-03-31 19:03:27.335 | INFO     | agents.factor_agent:__call__:92 - [FactorAgent] Formalized Math: F_i,t = w_sector(RankIC_i,t) × σ_filter(i,t) × Corr_7d(SVWAP_i,t, ∇V_i,t) where SVWAP_i,t = sign(VWAP_i,t - Close_i,t) × |VWAP_i,t - Close_i,t| / Close_i,t × G(V_i,t; μ=P_60(V), σ=20), ∇V_i,t = (V_i,t - V_i,t-1) / V_i,t-1, σ_filter(i,t) = 𝟙(σ_i,t < P_60(σ_t)), G(V; μ, σ) = exp(-(V - μ)² / (2σ²))
+2026-03-31 19:03:33.549 | INFO     | agents.factor_agent:__call__:112 - [FactorAgent] Implemented Code: Rank(Corr(Sign($vwap - $close) * Abs($vwap - $close) / $close * Exp(-($volume - Ref(Mean($volume, 60), 0))**2 / (2 * 20**2)), ($volume - Ref($volume, 1)) / Ref($volume, 1), 7)) * If(Std($close / Ref($close, 1), 20) < Ref(Mean(Std($close / Ref($close, 1), 20), 60), 0), 1, 0)
+2026-03-31 19:03:33.550 | INFO     | __main__:main:119 - --- Completed Node: factor_agent ---
+2026-03-31 19:03:33.550 | INFO     | agents.eval_agent:__call__:109 - [EvalAgent] Starting evaluation and reflexive review
+2026-03-31 19:03:33.550 | INFO     | agents.eval_agent:_execute_alphaeval_backtest:40 - [EvalAgent] Executing AlphaEval for expression: Rank(Corr(Sign($vwap - $close) * Abs($vwap - $close) / $close * Exp(-($volume - Ref(Mean($volume, 60), 0))**2 / (2 * 20**2)), ($volume - Ref($volume, 1)) / Ref($volume, 1), 7)) * If(Std($close / Ref($close, 1), 20) < Ref(Mean(Std($close / Ref($close, 1), 20), 60), 0), 1, 0)
+2026-03-31 19:03:33.551 | WARNING  | agents.eval_agent:_execute_alphaeval_backtest:87 - AlphaEval backtest failed: Please run qlib.init() first using qlib
+2026-03-31 19:03:33.551 | INFO     | agents.eval_agent:_execute_alphaeval_backtest:88 - Falling back to simulated metrics.
+2026-03-31 19:03:33.551 | WARNING  | agents.eval_agent:__call__:119 - [EvalAgent] Using SIMULATED metrics — results are not real backtest data.
+2026-03-31 19:03:33.551 | INFO     | agents.eval_agent:__call__:120 - [EvalAgent] Backtest Metrics (simulated=True): {'information_coefficient': 0.029, 'rank_ic': 0.102, 'rre': 0.243, 'pfs1': 0.506648, 'pfs2': 0.057906, 'diversity': 0.506, 'llm_score': 57.08}
+2026-03-31 19:03:43.564 | INFO     | agents.eval_agent:__call__:142 - [EvalAgent] Review Summary: Factor shows moderate effectiveness with IC=0.029 (above 0.02 threshold) and strong Rank IC=0.102, indicating good rank-ordering ability. RRE of 0.243 is acceptable but suggests room for improvement in risk-adjusted returns. PFS1=0.507 shows slight positive predictive power while PFS2=0.058 indicates weak tail performance. Diversity at 0.506 is reasonable. The hypothesis of capturing institutional flow through signed VWAP deviation weighted by volume acceleration is partially validated, though the complex Gaussian weighting and volatility filter may be adding noise rather than signal.
+2026-03-31 19:03:44.385 | INFO     | core.rag:add_experience:215 - Added experience exp_6f2a431d3fcd48f8a96c7ac301a6587d to ChromaDB.
+2026-03-31 19:03:44.385 | INFO     | __main__:main:119 - --- Completed Node: eval_agent ---
+2026-03-31 19:03:44.385 | INFO     | __main__:main:119 - --- Completed Node: increment ---
+2026-03-31 19:03:44.386 | INFO     | agents.idea_agent:__call__:41 - [IdeaAgent] Starting iteration 3
+2026-03-31 19:03:45.510 | WARNING  | __main__:main:131 - Execution interrupted by user.
+2026-03-31 19:03:45.511 | INFO     | __main__:save_results:52 - Results saved to results/results.json

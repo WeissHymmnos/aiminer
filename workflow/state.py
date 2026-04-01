@@ -9,18 +9,18 @@ class AlphaMinerState(TypedDict, total=False):
     # Context
     rag_context: str
     
-    # 1. IdeaAgent Outputs
+    # IdeaAgent
     hypothesis_name: str
     hypothesis_description: str
     rationale: str
     
-    # 2. FactorAgent Outputs
+    # FactorAgent
     math_formula: str
     variables_defined: Dict[str, str]
     code_expression: str
     is_valid_syntax: bool
     
-    # 3. EvalAgent Outputs
+    # EvalAgent
     backtest_metrics: Dict[str, float]
     review_summary: str
     is_effective: bool

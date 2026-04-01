@@ -57,6 +57,28 @@
       "review_summary": "Factor shows mixed signals. Positive IC (0.03) exceeds threshold indicating predictive power, but negative Rank IC (-0.026) suggests poor rank-order prediction. Strong PFS scores (0.88/0.94) indicate good portfolio separation. Moderate diversity (0.672) and RRE (0.233) show limited orthogonality to existing factors. The asymmetric decay logic conflicts with correlation term - multiplying by negative correlation when it should amplify positive regime signals.",
       "suggested_improvements": "Remove the correlation multiplier that inverts the signal. Simplify volatility regime detection - current logic checks if yesterday's vol was low AND today's is high, creating sparse signals. Use direct percentile comparison: If(And(Lt(Std(returns,20), Quantile(...,0.4)), Gt(Std(returns,20), Quantile(...,0.6)))) catches only transition days. Instead use: If(Gt(Std(returns,20), Quantile(...,0.6)), 1, 0) for expansion regime. The asymmetric decay (1.3x down, 0.7x up) is backwards - institutional accumulation typically occurs on up-days with volume. Reverse to 1.3x on up-days. Test shorter ATR period (7-10 days) for faster regime adaptation.",
       "error": "1 validation error for HypothesisOutput\n  Invalid JSON: control character (\\u0000-\\u001F) found while parsing a string at line 6 column 0 [type=json_invalid, input_value='{\\n  \"hypothesis_name\": ...close, 1))), 8)), 0)\\n}', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.12/v/json_invalid"
+    },
+    {
+      "timestamp": "2026-03-31T19:53:29.226497",
+      "iteration": 2,
+      "max_iterations": 30,
+      "hypothesis_name": "Intraday VWAP Momentum with Overnight Price Gap and Dynamic Volume Surge Adjustment",
+      "hypothesis_description": "This factor measures the momentum of intraday VWAP shifts relative to the previous day's close, adjusted by the overnight price gap and dynamically scaled by recent volume surge intensity. It calculates the normalized difference between the current day's VWAP at midday (e.g., 11:30 AM) and the previous close, subtracts the overnight return (previous close to current open), and multiplies this by a volume surge factor that adapts to recent intraday volume volatility. The factor ranks stocks cross-sectionally daily to capture institutional intraday directional commitment who adjust position sizing dynamically based on overnight risk and intraday liquidity conditions.",
+      "code_expression": "((Ref($vwap,0,'open') - Ref($vwap,0,'close')) - Mean($close,5)) / Std($close,5) * ( $volume > Quantile($volume,0.9) )",
+      "backtest_metrics": {
+        "information_coefficient": 0.138,
+        "rank_ic": 0.138,
+        "rre": 0.273,
+        "pfs1": 0.335675,
+        "pfs2": 0.97606,
+        "diversity": 0.075,
+        "llm_score": 64.06
+      },
+      "is_simulated": true,
+      "is_effective": true,
+      "review_summary": "The factor shows a strong positive Information Coefficient (0.138) and Rank IC (0.138), well above the 0.02 threshold, indicating solid predictive power. The RRE of 0.273 suggests reasonable robustness in repeated evaluation, and PFS1 and PFS2 values (0.336 and 0.976) imply good portfolio factor stability, especially in longer-term tests. However, the Diversity metric is quite low at 0.075, which may indicate limited cross-sectional variability or exposure concentration risks. The LLM score of 64.06 shows the factor aligns moderately with known successful patterns but leaves room for improvement. Overall, this supports the hypothesis that the factor captures intraday reversal and mean reversion signals effectively with institutional volume surge confirmation, but further enhancement of factor diversity and robustness is advisable.",
+      "suggested_improvements": "Enhance factor diversity by incorporating additional complementary intraday signals or alternative volume surge thresholds to reduce exposure concentration. Consider refining the normalization window or adding volatility-adjusted scaling to improve robustness. Testing alternative quantile thresholds for volume surges beyond the 90th percentile or incorporating interaction terms with momentum or overnight returns could also boost predictive consistency. Finally, perform additional out-of-sample validations to confirm stability across market regimes.",
+      "error": null
     }
   ]
 }

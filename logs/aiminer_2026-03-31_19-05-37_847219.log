@@ -1,0 +1,37 @@
+2026-03-31 19:05:37.849 | INFO     | __main__:main:98 - Initializing Multi-Agent AI Alpha Miner for 30 iteration(s)...
+2026-03-31 19:05:37.916 | INFO     | core.rag:_init_knowledge_base:101 - Knowledge base already initialized with 15 documents.
+2026-03-31 19:05:37.993 | INFO     | __main__:main:112 - === Starting LangGraph Execution ===
+2026-03-31 19:05:37.994 | INFO     | agents.idea_agent:__call__:41 - [IdeaAgent] Starting iteration 1
+2026-03-31 19:05:39.828 | DEBUG    | agents.idea_agent:__call__:50 - [IdeaAgent] Retrieved Context Length: 8480
+2026-03-31 19:05:45.759 | INFO     | agents.idea_agent:__call__:82 - [IdeaAgent] Hypothesis Generated: Intraday VWAP Dislocation with Volume Surge Alpha
+2026-03-31 19:05:45.760 | INFO     | __main__:main:119 - --- Completed Node: idea_agent ---
+2026-03-31 19:05:45.760 | INFO     | agents.factor_agent:__call__:67 - [FactorAgent] Starting formalization and implementation
+2026-03-31 19:05:53.846 | INFO     | agents.factor_agent:__call__:92 - [FactorAgent] Formalized Math: Alpha_t = rank((VWAP_close_t - VWAP_open_t) / mu_close_5d_t * 1 / sigma_close_5d_t * I(Volume_t > k * MA_Volume_5d_t))
+2026-03-31 19:05:57.369 | INFO     | agents.factor_agent:__call__:112 - [FactorAgent] Implemented Code: Rank(($vwap - Ref($vwap, 1)) / Mean($close, 5) / Std($close, 5) * If($volume > 1.5 * Mean($volume, 5), 1, 0))
+2026-03-31 19:05:57.370 | INFO     | __main__:main:119 - --- Completed Node: factor_agent ---
+2026-03-31 19:05:57.370 | INFO     | agents.eval_agent:__call__:109 - [EvalAgent] Starting evaluation and reflexive review
+2026-03-31 19:05:57.370 | INFO     | agents.eval_agent:_execute_alphaeval_backtest:40 - [EvalAgent] Executing AlphaEval for expression: Rank(($vwap - Ref($vwap, 1)) / Mean($close, 5) / Std($close, 5) * If($volume > 1.5 * Mean($volume, 5), 1, 0))
+2026-03-31 19:05:57.687 | WARNING  | agents.eval_agent:_execute_alphaeval_backtest:87 - AlphaEval backtest failed: Please run qlib.init() first using qlib
+2026-03-31 19:05:57.687 | INFO     | agents.eval_agent:_execute_alphaeval_backtest:88 - Falling back to simulated metrics.
+2026-03-31 19:05:57.687 | WARNING  | agents.eval_agent:__call__:119 - [EvalAgent] Using SIMULATED metrics — results are not real backtest data.
+2026-03-31 19:05:57.687 | INFO     | agents.eval_agent:__call__:120 - [EvalAgent] Backtest Metrics (simulated=True): {'information_coefficient': 0.064, 'rank_ic': -0.037, 'rre': 0.996, 'pfs1': 0.622923, 'pfs2': 0.004214, 'diversity': 0.333, 'llm_score': 77.59}
+2026-03-31 19:06:05.650 | INFO     | agents.eval_agent:__call__:142 - [EvalAgent] Review Summary: The factor shows promising IC (0.064) indicating predictive power, but negative Rank IC (-0.037) suggests non-monotonic relationship with returns. High RRE (0.996) indicates strong correlation with existing factors, reducing diversification benefit. Low PFS2 (0.004) shows weak portfolio separation. The volume filter may be too restrictive, and the normalization approach needs refinement.
+2026-03-31 19:06:07.267 | INFO     | core.rag:add_experience:215 - Added experience exp_1d93070c154b42a69a0daae8a7aca411 to ChromaDB.
+2026-03-31 19:06:07.268 | INFO     | __main__:main:119 - --- Completed Node: eval_agent ---
+2026-03-31 19:06:07.268 | INFO     | __main__:main:119 - --- Completed Node: increment ---
+2026-03-31 19:06:07.268 | INFO     | agents.idea_agent:__call__:41 - [IdeaAgent] Starting iteration 2
+2026-03-31 19:06:10.208 | DEBUG    | agents.idea_agent:__call__:50 - [IdeaAgent] Retrieved Context Length: 7166
+2026-03-31 19:06:20.557 | INFO     | agents.idea_agent:__call__:82 - [IdeaAgent] Hypothesis Generated: Cross-Sectional Volume-Weighted VWAP Momentum with Volatility Regime Decay
+2026-03-31 19:06:20.557 | INFO     | __main__:main:119 - --- Completed Node: idea_agent ---
+2026-03-31 19:06:20.557 | INFO     | agents.factor_agent:__call__:67 - [FactorAgent] Starting formalization and implementation
+2026-03-31 19:06:40.734 | INFO     | agents.factor_agent:__call__:92 - [FactorAgent] Formalized Math: F_i = RankStd_i(∑_{t=0}^{2} w_i(t) · δ_i(t) · 0.9^t) · I(P_{30} ≤ σ_m ≤ P_{70})
+2026-03-31 19:06:49.675 | INFO     | agents.factor_agent:__call__:112 - [FactorAgent] Implemented Code: (Rank(($volume / Mean($volume, 3)) * (($vwap - Ref($vwap, 1)) / Ref($vwap, 1)) * 1.0 + ($volume / Mean($volume, 3)) * (Ref($vwap, 1) - Ref($vwap, 2)) / Ref($vwap, 2) * 0.9 + ($volume / Mean($volume, 3)) * (Ref($vwap, 2) - Ref($vwap, 3)) / Ref($vwap, 3) * 0.81) - Mean(Rank(($volume / Mean($volume, 3)) * (($vwap - Ref($vwap, 1)) / Ref($vwap, 1)) * 1.0 + ($volume / Mean($volume, 3)) * (Ref($vwap, 1) - Ref($vwap, 2)) / Ref($vwap, 2) * 0.9 + ($volume / Mean($volume, 3)) * (Ref($vwap, 2) - Ref($vwap, 3)) / Ref($vwap, 3) * 0.81))) / Std(Rank(($volume / Mean($volume, 3)) * (($vwap - Ref($vwap, 1)) / Ref($vwap, 1)) * 1.0 + ($volume / Mean($volume, 3)) * (Ref($vwap, 1) - Ref($vwap, 2)) / Ref($vwap, 2) * 0.9 + ($volume / Mean($volume, 3)) * (Ref($vwap, 2) - Ref($vwap, 3)) / Ref($vwap, 3) * 0.81)) * If((Std($close, 20) >= Quantile(Std($close, 20), 0.3)) & (Std($close, 20) <= Quantile(Std($close, 20), 0.7)), 1, 0)
+2026-03-31 19:06:49.676 | INFO     | __main__:main:119 - --- Completed Node: factor_agent ---
+2026-03-31 19:06:49.676 | INFO     | agents.eval_agent:__call__:109 - [EvalAgent] Starting evaluation and reflexive review
+2026-03-31 19:06:49.676 | INFO     | agents.eval_agent:_execute_alphaeval_backtest:40 - [EvalAgent] Executing AlphaEval for expression: (Rank(($volume / Mean($volume, 3)) * (($vwap - Ref($vwap, 1)) / Ref($vwap, 1)) * 1.0 + ($volume / Mean($volume, 3)) * (Ref($vwap, 1) - Ref($vwap, 2)) / Ref($vwap, 2) * 0.9 + ($volume / Mean($volume, 3)) * (Ref($vwap, 2) - Ref($vwap, 3)) / Ref($vwap, 3) * 0.81) - Mean(Rank(($volume / Mean($volume, 3)) * (($vwap - Ref($vwap, 1)) / Ref($vwap, 1)) * 1.0 + ($volume / Mean($volume, 3)) * (Ref($vwap, 1) - Ref($vwap, 2)) / Ref($vwap, 2) * 0.9 + ($volume / Mean($volume, 3)) * (Ref($vwap, 2) - Ref($vwap, 3)) / Ref($vwap, 3) * 0.81))) / Std(Rank(($volume / Mean($volume, 3)) * (($vwap - Ref($vwap, 1)) / Ref($vwap, 1)) * 1.0 + ($volume / Mean($volume, 3)) * (Ref($vwap, 1) - Ref($vwap, 2)) / Ref($vwap, 2) * 0.9 + ($volume / Mean($volume, 3)) * (Ref($vwap, 2) - Ref($vwap, 3)) / Ref($vwap, 3) * 0.81)) * If((Std($close, 20) >= Quantile(Std($close, 20), 0.3)) & (Std($close, 20) <= Quantile(Std($close, 20), 0.7)), 1, 0)
+2026-03-31 19:06:49.677 | WARNING  | agents.eval_agent:_execute_alphaeval_backtest:87 - AlphaEval backtest failed: Please run qlib.init() first using qlib
+2026-03-31 19:06:49.677 | INFO     | agents.eval_agent:_execute_alphaeval_backtest:88 - Falling back to simulated metrics.
+2026-03-31 19:06:49.677 | WARNING  | agents.eval_agent:__call__:119 - [EvalAgent] Using SIMULATED metrics — results are not real backtest data.
+2026-03-31 19:06:49.678 | INFO     | agents.eval_agent:__call__:120 - [EvalAgent] Backtest Metrics (simulated=True): {'information_coefficient': 0.022, 'rank_ic': -0.023, 'rre': 0.138, 'pfs1': 0.350676, 'pfs2': 0.178342, 'diversity': 0.01, 'llm_score': 55.56}
+2026-03-31 19:06:55.022 | WARNING  | __main__:main:131 - Execution interrupted by user.
+2026-03-31 19:06:55.023 | INFO     | __main__:save_results:52 - Results saved to results/results.json

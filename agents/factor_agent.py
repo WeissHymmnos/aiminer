@@ -7,12 +7,9 @@ from core.llm import get_llm
 from schemas.messages import FormalizationOutput, ImplementationOutput
 
 class FactorAgent:
-    """
-    FactorAgent translates the market hypothesis into executable code.
-    It contains Formalization (hypothesis -> math) and Implementation (math -> code).
-    """
-    # Known Qlib operators and fields for basic syntax validation
+    # FactorAgent translates the market hypothesis into executable code (Formalization and Implementation).
     QLIB_OPERATORS = {
+        # Known Qlib operators and fields for basic syntax validation
         "Ref", "Mean", "Std", "Rank", "Max", "Min", "Sum", "Abs",
         "Log", "Sign", "Power", "Corr", "Cov", "Delta", "Delay",
         "Ts_Rank", "Ts_Min", "Ts_Max", "Ts_ArgMax", "Ts_ArgMin",
@@ -21,7 +18,6 @@ class FactorAgent:
     QLIB_FIELDS = {"$close", "$open", "$high", "$low", "$volume", "$vwap", "$turn", "$factor"}
 
     def __init__(self):
-        # We might use a lower temp for math/coding tasks
         self.llm = get_llm(temperature=0.2)
     
     @staticmethod
@@ -38,7 +34,7 @@ class FactorAgent:
 
     @staticmethod
     def _validate_qlib_expression(expr: str) -> tuple:
-        """Basic syntax validation for Qlib expressions."""
+        # Basic syntax validation for Qlib expressions.
         if not expr or not expr.strip():
             return False, "Expression is empty."
         
@@ -54,7 +50,7 @@ class FactorAgent:
         if depth != 0:
             return False, f"Unbalanced parentheses: {depth} unclosed '('."
         
-        # Check that it contains at least one $ field reference
+        # Check $ 
         if '$' not in expr:
             return False, "Expression contains no Qlib field references (e.g., $close)."
         
@@ -69,7 +65,7 @@ class FactorAgent:
         if not hypothesis_desc:
             return {"error": "No hypothesis found in state.", "messages": ["[FactorAgent] Error: Missing hypothesis."]}
 
-        # 1. Formalization Module: Convert text to math language
+        # Convert text to math language
         try:
             form_prompt = ChatPromptTemplate.from_messages([
                 ("system", "You are a quantitative researcher expert in mathematics and statistics. "
@@ -91,7 +87,7 @@ class FactorAgent:
             
             logger.info(f"[FactorAgent] Formalized Math: {form_result.math_formula}")
             
-            # 2. Implementation Module: Convert math to Qlib Alpha158 expressions
+            # Convert math to Qlib Alpha158 expressions
             impl_prompt = ChatPromptTemplate.from_messages([
                 ("system", "You are an expert Qlib developer. Convert the following mathematical formula into a syntactically correct Qlib Alpha158 expression. "
                            "Qlib expressions use operators like Rank(), Ref(), Mean(), Std(), and fields like $close, $volume, $open, $high, $low, $vwap. "
