@@ -89,8 +89,7 @@ class RAGModule:
         return chunks
 
     def _init_knowledge_base(self):
-        """Loads actual markdown/rst/txt docs from data/rag_docs into ChromaDB."""
-        if self.rebuild and self.knowledge_col.count() > 0:
+        #Loads actual markdown/rst/txt docs from data/rag_docs into ChromaDB.        if self.rebuild and self.knowledge_col.count() > 0:
             logger.info("Rebuilding knowledge base: deleting existing documents...")
             self.client.delete_collection("knowledge_base")
             self.knowledge_col = self.client.get_or_create_collection(
@@ -149,7 +148,7 @@ class RAGModule:
                 logger.error(f"Failed to populate knowledge base: {e}")
 
     def _safe_query(self, collection, query: str, n_results: int):
-        """Query a collection safely, handling empty collections."""
+        # Query a collection safely, handling empty collections.
         count = collection.count()
         if count == 0:
             return None
@@ -157,12 +156,12 @@ class RAGModule:
         return collection.query(query_texts=[query], n_results=actual_n)
 
     def retrieve(self, query: str, n_results: int = 3) -> str:
-        """Retrieve relevant context from knowledge and experiences based on query."""
+        # Retrieve relevant context from knowledge and experiences based on query.
         try:
-            # Retrieve knowledge (safe against empty collections)
+            # Retrieve knowledge
             k_results = self._safe_query(self.knowledge_col, query, n_results)
             
-            # Retrieve experiences (safe against empty collections)
+            # Retrieve experiences
             e_results = self._safe_query(self.experiences_col, query, n_results)
             
             context_parts = []
