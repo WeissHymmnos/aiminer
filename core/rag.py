@@ -89,14 +89,15 @@ class RAGModule:
         return chunks
 
     def _init_knowledge_base(self):
-        #Loads actual markdown/rst/txt docs from data/rag_docs into ChromaDB.        if self.rebuild and self.knowledge_col.count() > 0:
+        #Loads actual markdown/rst/txt docs from data/rag_docs into ChromaDB.        
+        if self.rebuild and self.knowledge_col.count() > 0:
             logger.info("Rebuilding knowledge base: deleting existing documents...")
             self.client.delete_collection("knowledge_base")
             self.knowledge_col = self.client.get_or_create_collection(
                 "knowledge_base", embedding_function=self.embedding_fn
             )
 
-        if self.knowledge_col.count() > 0:
+        if self.knowledge_col.count() > 0 :
             logger.info(f"Knowledge base already initialized with {self.knowledge_col.count()} documents.")
             return
             
