@@ -35,14 +35,20 @@ def increment_iteration(state: AlphaMinerState):
         "is_valid_syntax": True,  # Reset for next iteration
     }
 
-def build_workflow(rebuild_rag: bool = False):
+def build_workflow(
+    rebuild_rag: bool = False,
+    llm_provider: str = None,
+    llm_model: str = None,
+    embedding_provider: str = None,
+    use_gpu: bool = False
+):
     # Initialize shared resources
-    rag_module = RAGModule(rebuild=rebuild_rag)
+    rag_module = RAGModule(rebuild=rebuild_rag, embedding_provider=embedding_provider, use_gpu=use_gpu)
     
     # Initialize agents
-    idea_agent = IdeaAgent(rag_module)
-    factor_agent = FactorAgent()
-    eval_agent = EvalAgent(rag_module)
+    idea_agent = IdeaAgent(rag_module, provider=llm_provider, model=llm_model)
+    factor_agent = FactorAgent(provider=llm_provider, model=llm_model)
+    eval_agent = EvalAgent(rag_module, provider=llm_provider, model=llm_model)
 
     # Define Graph
     workflow = StateGraph(AlphaMinerState)

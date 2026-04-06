@@ -14,9 +14,9 @@ class EvalAgent:
     EvalAgent evaluates the factor/strategy effectiveness.
     Outputs experience to RAG.
     """
-    def __init__(self, rag_module: RAGModule):
+    def __init__(self, rag_module: RAGModule, provider: str = None, model: str = None):
         self.rag = rag_module
-        self.llm = get_llm(temperature=0.4)
+        self.llm = get_llm(temperature=0.4, provider=provider, model_name=model)
     
     @staticmethod
     def _strip_markdown_json(text: str) -> str:
@@ -30,26 +30,32 @@ class EvalAgent:
             text = re.sub(r'\s*```$', '', text)
         return text.strip()
 
-    def _execute_alphaeval_backtest(self, code: str) -> Dict[str, float]:
+    def _execute_alphaeval_backtest(self, code: str, mode: str = "qlib") -> Dict[str, float]:
         """
-        Uses AlphaEval framework to backtest and evaluate the generated formula.
-        In a production environment, this requires Qlib data initialized.
+        Uses AlphaEval or RiceQuantEval framework to backtest and evaluate.
         """
-        logger.info(f"[EvalAgent] Executing AlphaEval for expression: {code}")
+        logger.info(f"[EvalAgent] Executing {mode} backtest for expression: {code}")
         
         try:
-            from core.alphaeval.modeltester import AlphaEval
-            
-            # Use AlphaEval to run backtesting and factor evaluation
-            evaluator = AlphaEval(
-                factor_expressions=[code],
-                weights=[1.0],  # Single factor weight
-                train_start_date="2010-01-01",
-                train_end_date="2016-12-31",
-                test_start_date="2017-01-01",
-                test_end_date="2020-10-31",
-                daily_normalize=True
-            )
+            if mode == "ricequant":
+                from core.alphaeval.rq_eval import RiceQuantEval
+                evaluator = RiceQuantEval(
+                    factor_expressions=[code],
+                    test_start_date="2017-01-01",
+                    test_end_date="2020-10-31"
+                )
+            else:
+                from core.alphaeval.modeltester import AlphaEval
+                # Use AlphaEval to run backtesting and factor evaluation
+                evaluator = AlphaEval(
+                    factor_expressions=[code],
+                    weights=[1.0],
+                    train_start_date="2010-01-01",
+                    train_end_date="2016-12-31",
+                    test_start_date="2017-01-01",
+                    test_end_date="2020-10-31",
+                    daily_normalize=True
+                )
             
             evaluator.run()
             
@@ -62,10 +68,8 @@ class EvalAgent:
                 "diversity": getattr(evaluator, 'diversity', 0.0),
                 "llm_score": getattr(evaluator, 'llm_avg_score', 0.0)
             }
-        except FileNotFoundError as e:
-            logger.error(f"Qlib data directory not found: {e}")
-            logger.info("Please download Qlib data first. Run: python -c \"import qlib; qlib.init(provider_uri='~/.qlib/qlib_data/cn_data', region='cn'); from qlib.data.dataset import DatasetD; DatasetD.get_data(target_dir='~/.qlib/qlib_data/cn_data', region='cn')\"")
-            logger.info("Or use: python scripts/get_data.py qlib_data --target_dir ~/.qlib/qlib_data/cn_data --region cn")
+        except (FileNotFoundError, ValueError, ImportError) as e:
+            logger.error(f"{mode} evaluation failed or data not found: {e}")
             logger.info("Falling back to simulated metrics.")
             
             seed = int(hashlib.md5(code.encode()).hexdigest()[:8], 16)
@@ -82,10 +86,9 @@ class EvalAgent:
                 "_simulated": True
             }
         except Exception as e:
-            logger.warning(f"AlphaEval backtest failed: {e}")
+            logger.warning(f"{mode} backtest failed: {e}")
             logger.info("Falling back to simulated metrics.")
             
-            # Use a deterministic seed based on the code expression for reproducibility
             seed = int(hashlib.md5(code.encode()).hexdigest()[:8], 16)
             rng = random.Random(seed)
             
@@ -103,6 +106,7 @@ class EvalAgent:
     def __call__(self, state: AlphaMinerState) -> Dict[str, Any]:
         code = state.get("code_expression", "")
         hypothesis_desc = state.get("hypothesis_description", "")
+        mode = state.get("evaluation_mode", "qlib")
         
         logger.info("[EvalAgent] Starting evaluation and reflexive review")
         
@@ -110,8 +114,8 @@ class EvalAgent:
             return {"error": "No code implementation found in state.", "messages": ["[EvalAgent] Error: Missing code."]}
             
         try:
-            # 1. Backtesting Module with AlphaEval
-            metrics = self._execute_alphaeval_backtest(code)
+            # 1. Backtesting Module
+            metrics = self._execute_alphaeval_backtest(code, mode=mode)
             is_simulated = metrics.pop("_simulated", False)
             if is_simulated:
                 logger.warning("[EvalAgent] Using SIMULATED metrics — results are not real backtest data.")

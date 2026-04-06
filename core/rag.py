@@ -5,51 +5,67 @@ import uuid
 from typing import List, Dict, Any, Optional
 import chromadb
 from chromadb.config import Settings
-from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
+from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction, SentenceTransformerEmbeddingFunction
 from loguru import logger
 from core.llm import get_llm_config
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Prevent CUDA fragmentation
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 class RAGModule:
-    def __init__(self, db_dir: str = "data/chroma_db", docs_dir: str = "data/rag_docs", rebuild: bool = False):
-        self.db_dir = db_dir
+    def __init__(self, db_dir: str = "data/chroma_db", docs_dir: str = "data/rag_docs", rebuild: bool = False, embedding_provider: str = None, use_gpu: bool = False):
         self.docs_dir = docs_dir
         self.rebuild = rebuild
-        os.makedirs(self.db_dir, exist_ok=True)
         os.makedirs(self.docs_dir, exist_ok=True)
         
-        # Auto-detect LLM provider and configure embeddings accordingly.
-        # Both Claude proxy and Qwen/DashScope expose OpenAI-compatible
-        # embedding endpoints, so OpenAIEmbeddingFunction works for both.
-        _EMBEDDING_DEFAULTS = {
-            "qwen": {
-                "model_name": "text-embedding-v3",
-                "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            },
-            "claude": {
-                "model_name": "text-embedding-3-small",
-                "api_base": "https://api.gptsapi.net/v1",
-            },
-        }
+        # Check if local embedding is forced
+        use_local = (embedding_provider == "local") or (os.getenv("USE_LOCAL_EMBEDDING", "false").lower() == "true")
+        
+        model_tag = "api"
+        if use_local:
+            model_name = "Qwen/Qwen3-Embedding-4B"
+            model_tag = model_name.replace("/", "_") # Safe for filesystem
+            device = "cuda" if use_gpu else "cpu"
+            logger.info(f"Initializing LARGE LOCAL embedding model ({model_name}) on {device}...")
+            try:
+                self.embedding_fn = SentenceTransformerEmbeddingFunction(model_name=model_name, device=device, trust_remote_code=True)
+            except Exception as e:
+                logger.warning(f"Note: Hub connection sluggish ({e}). Trying mirror fallback...")
+                os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+                self.embedding_fn = SentenceTransformerEmbeddingFunction(model_name=model_name, device=device, trust_remote_code=True)
+        else:
+            # Auto-detect API provider
+            _EMBEDDING_DEFAULTS = {
+                "kimi": {"model_name": "embedding-2", "api_base": "https://api.moonshot.cn/v1"},
+                "qwen": {"model_name": "text-embedding-v3", "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
+                "claude": {"model_name": "text-embedding-3-small", "api_base": "https://api.gptsapi.net/v1"},
+            }
 
-        try:
-            cfg = get_llm_config()
-            provider = cfg["provider"]
-            api_key = cfg["api_key"]
-            emb_defaults = _EMBEDDING_DEFAULTS[provider]
-        except ValueError:
-            logger.warning(
-                "No LLM API key found (QWEN_API_KEY or ClaudeCode_KEY). "
-                "RAG operations requiring embeddings will fail."
-            )
-            api_key = None
-            emb_defaults = _EMBEDDING_DEFAULTS["claude"]
+            try:
+                cfg = get_llm_config(provider=embedding_provider)
+                provider = cfg["provider"]
+                model_tag = provider
+                api_key = cfg["api_key"]
+                emb_defaults = _EMBEDDING_DEFAULTS[provider]
+                
+                logger.info(f"Initializing API-based embedding ({provider})...")
+                self.embedding_fn = OpenAIEmbeddingFunction(
+                    api_key=api_key,
+                    model_name=emb_defaults["model_name"],
+                    api_base=emb_defaults["api_base"],
+                )
+            except (ValueError, KeyError):
+                logger.warning("No API key or provider found for embeddings. Falling back to LOCAL bge-large.")
+                model_tag = "bge-large"
+                self.embedding_fn = SentenceTransformerEmbeddingFunction(model_name="BAAI/bge-large-zh-v1.5")
 
-        # Use ChromaDB-native OpenAI embedding function so collections actually use it
-        self.embedding_fn = OpenAIEmbeddingFunction(
-            api_key=api_key,
-            model_name=emb_defaults["model_name"],
-            api_base=emb_defaults["api_base"],
-        )
+        # Version the DB directory by model_tag to avoid dimension mismatch
+        self.db_dir = os.path.join(db_dir, model_tag)
+        os.makedirs(self.db_dir, exist_ok=True)
         
         # Initialize ChromaDB
         self.client = chromadb.PersistentClient(path=self.db_dir)
@@ -61,6 +77,9 @@ class RAGModule:
         self.knowledge_col = self.client.get_or_create_collection(
             "knowledge_base", embedding_function=self.embedding_fn
         )
+        
+        # Local cache for keyword search fallback
+        self.knowledge_cache = []
         
         self._init_knowledge_base()
 
@@ -136,8 +155,8 @@ class RAGModule:
         if all_chunks:
             logger.info(f"Loading {len(all_chunks)} chunks into knowledge base...")
             try:
-                # Batch add to avoid hitting limits
-                batch_size = 100
+                # Small batch size to avoid OOM on 11GB GPUs
+                batch_size = 8
                 for i in range(0, len(all_chunks), batch_size):
                     self.knowledge_col.add(
                         documents=all_chunks[i:i+batch_size],
@@ -156,7 +175,7 @@ class RAGModule:
         actual_n = min(n_results, count)
         return collection.query(query_texts=[query], n_results=actual_n)
 
-    def retrieve(self, query: str, n_results: int = 3) -> str:
+    def retrieve(self, query: str, n_results: int = 2) -> str:
         # Retrieve relevant context from knowledge and experiences based on query.
         try:
             # Retrieve knowledge
@@ -184,6 +203,11 @@ class RAGModule:
             return "\n".join(context_parts)
             
         except Exception as e:
+            err_msg = str(e)
+            if "403" in err_msg or "not open" in err_msg.lower():
+                logger.warning("RAG Embedding API is not enabled for this provider (Kimi/Other). Running without RAG context.")
+                return "=== KNOWLEDGE BASE ===\n(RAG disabled: Embedding API not open)\n\n=== PAST EXPERIENCES ===\n(RAG disabled)"
+            
             logger.error(f"RAG Retrieval failed: {e}")
             return "RAG Retrieval failed due to an error."
 

@@ -92,21 +92,47 @@ def main():
     parser.add_argument("--iterations", type=int, default=1, help="Number of factor mining iterations to run")
     parser.add_argument("--rebuild-rag", action="store_true", help="Force rebuild the RAG knowledge base from docs")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose debug logging to stderr")
+    parser.add_argument("--mode", type=str, choices=["qlib", "ricequant"], default="qlib", help="Evaluation mode (qlib or ricequant)")
+    parser.add_argument("--llm-provider", type=str, choices=["kimi", "qwen", "claude"], help="LLM provider (overrides env detection)")
+    parser.add_argument("--llm-model", type=str, help="Specific LLM model name")
+    parser.add_argument("--embedding-provider", type=str, choices=["local", "kimi", "qwen", "claude"], help="Embedding provider for RAG")
+    parser.add_argument("--market-start", type=str, help="Market analysis start date (YYYY-MM-DD)")
+    parser.add_argument("--market-end", type=str, help="Market analysis end date (YYYY-MM-DD)")
+    parser.add_argument("--market-lookback", type=int, default=60, help="Market analysis lookback days (default: 60)")
+    parser.add_argument("--use-gpu", action="store_true", help="Use GPU for local RAG embedding (if available)")
     args = parser.parse_args()
 
     setup_logging(verbose=args.verbose)
-    logger.info(f"Initializing Multi-Agent AI Alpha Miner for {args.iterations} iteration(s)...")
+    logger.info(f"Initializing Multi-Agent AI Alpha Miner for {args.iterations} iteration(s) in {args.mode} mode...")
     
-    if not os.getenv("ClaudeCode_KEY"):
-        logger.error("ClaudeCode_KEY is not set. Please ensure it's in your .env or environment.")
-        return
+    # If market dates are provided, fetch macro news
+    rebuild_rag = args.rebuild_rag
+    if args.market_start and args.market_end:
+        logger.info(f"Fetching macro news from {args.market_start} to {args.market_end}...")
+        try:
+            cmd = f"python3 scripts/fetch_macro_news.py --start {args.market_start} --end {args.market_end} --count 3"
+            os.system(cmd)
+            rebuild_rag = True # Auto-rebuild to include new news
+        except Exception as e:
+            logger.error(f"Failed to fetch macro news: {e}")
 
-    app = build_workflow(rebuild_rag=args.rebuild_rag)
+    # Pass providers to workflow builder
+    app = build_workflow(
+        rebuild_rag=rebuild_rag,
+        llm_provider=args.llm_provider,
+        llm_model=args.llm_model,
+        embedding_provider=args.embedding_provider,
+        use_gpu=args.use_gpu
+    )
     
     initial_state = {
         "iteration": 1,
         "max_iterations": args.iterations,
-        "messages": ["[System] Starting Alpha Miner Workflow"]
+        "evaluation_mode": args.mode,
+        "market_analysis_start_date": args.market_start,
+        "market_analysis_end_date": args.market_end,
+        "market_analysis_lookback_days": args.market_lookback,
+        "messages": [f"[System] Starting Alpha Miner Workflow in {args.mode} mode"]
     }
     
     logger.info("=== Starting LangGraph Execution ===")

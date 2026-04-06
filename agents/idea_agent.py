@@ -13,9 +13,9 @@ class IdeaAgent:
     It uses RAG to fetch Qlib docs, Alpha/Academic Library, Market MetaData, and Past Experiences,
     then reasons over this context using a structured LLM call.
     """
-    def __init__(self, rag_module: RAGModule):
+    def __init__(self, rag_module: RAGModule, provider: str = None, model: str = None):
         self.rag = rag_module
-        self.llm = get_llm(temperature=0.7)
+        self.llm = get_llm(temperature=0.7, provider=provider, model_name=model)
     
     @staticmethod
     def _strip_markdown_json(text: str) -> str:
@@ -38,20 +38,61 @@ class IdeaAgent:
         iteration = state.get("iteration", 0)
         previous_improvements = state.get("suggested_improvements", "")
         previous_hypothesis = state.get("hypothesis_name", "")
+        mode = state.get("evaluation_mode", "qlib")
         logger.info(f"[IdeaAgent] Starting iteration {iteration}")
         
-        # 1. RAG Module: Retrieve context — incorporate feedback from prior iteration
-        base_query = "Generate a novel quantitative trading alpha factor hypothesis. Focus on robustness and high Information Coefficient (IC)."
-        if previous_improvements and iteration > 1:
-            query = f"{base_query} Previous attempt '{previous_hypothesis}' had these suggestions: {previous_improvements}"
-        else:
-            query = base_query
-        rag_context = self.rag.retrieve(query)
-        logger.debug(f"[IdeaAgent] Retrieved Context Length: {len(rag_context)}")
+        # 1. RAG Module: Retrieve context
+        base_query = "Generate a novel quantitative trading alpha factor hypothesis."
+        rag_context = self.rag.retrieve(base_query)
+        
+        # Retrieve Macro News specifically if dates are set (Skip if already in state)
+        macro_context = state.get("macro_news_summary", "")
+        if not macro_context and mode == "ricequant":
+             macro_query = "What are the major macroeconomic news, central bank policies, and trade data?"
+             macro_context = self.rag.retrieve(macro_query, n_results=3)
+        
+        # Fetch Dynamic RiceQuant Market Insight if in ricequant mode (Skip if already in state)
+        market_regime = state.get("market_regime_summary", "")
+        if not market_regime and mode == "ricequant":
+            try:
+                from core.alphaeval.rq_eval import RiceQuantEval
+                
+                # Use params from state if available
+                m_start = state.get("market_analysis_start_date")
+                m_end = state.get("market_analysis_end_date")
+                m_lookback = state.get("market_analysis_lookback_days", 60) # Default to 60 for better stats
+                
+                rq_eval = RiceQuantEval(
+                    factor_expressions=[], 
+                    test_end_date=m_end if m_end else "2020-10-31"
+                )
+                market_regime = rq_eval.get_market_regime(
+                    start_date=m_start,
+                    end_date=m_end,
+                    lookback_days=m_lookback
+                )
+                logger.info(f"[IdeaAgent] Injected RiceQuant Market Regime into context (Lookback: {m_lookback}d).")
+            except Exception as e:
+                logger.warning(f"[IdeaAgent] Failed to fetch market regime: {e}")
+                pass
+        
+        # Combine static knowledge, macro news, and dynamic insight
+        combined_context = (
+            f"--- HISTORICAL KNOWLEDGE & THEORY ---\n{rag_context}\n\n"
+            f"--- MACROECONOMIC NEWS & EVENTS ---\n{macro_context}\n\n"
+            f"{market_regime}"
+        )
+        
+        # Truncate context to save tokens (approx 4000 chars total)
+        if len(combined_context) > 4000:
+            combined_context = combined_context[:4000] + "... [Truncated]"
         
         # 2. Reason Module: Formulate hypothesis
         system_msg = ("You are an elite quantitative researcher designing alpha factors for a high-frequency or statistical arbitrage fund. "
                       "Use the provided context to inspire a novel hypothesis. Do not repeat failed past experiences.\n\n"
+                      "IMPORTANT: Pay close attention to the MACRO NEWS and MARKET ANALYSIS provided.\n"
+                      "1. Macro News: Use central bank signals, trade data, or inflation trends to justify the economic rationale.\n"
+                      "2. Market Analysis: Tailor your hypothesis to the current regime (e.g. High Volatility, Bearish).\n\n"
                       "You must respond with valid JSON matching this schema:\n"
                       "{{\n"
                       '  "hypothesis_name": "string",\n'
@@ -73,7 +114,7 @@ class IdeaAgent:
         
         try:
             raw_response = chain.invoke({
-                "context": rag_context,
+                "context": combined_context,
                 "iteration": iteration
             })
             cleaned_json = self._strip_markdown_json(raw_response.content)
@@ -83,6 +124,8 @@ class IdeaAgent:
             
             return {
                 "rag_context": rag_context,
+                "macro_news_summary": macro_context,
+                "market_regime_summary": market_regime,
                 "hypothesis_name": result.hypothesis_name,
                 "hypothesis_description": result.hypothesis_description,
                 "rationale": result.rationale,

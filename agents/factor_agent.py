@@ -7,19 +7,23 @@ from core.llm import get_llm
 from schemas.messages import FormalizationOutput, ImplementationOutput
 
 class FactorAgent:
-    # FactorAgent translates the market hypothesis into executable code (Formalization and Implementation).
+    """
+    FactorAgent translates the market hypothesis into executable code (Formalization and Implementation).
+    """
+    # Verified Whitelist of supported Qlib operators in our Matrix Engine (rq_eval.py)
     QLIB_OPERATORS = {
-        # Known Qlib operators and fields for basic syntax validation
-        "Ref", "Mean", "Std", "Rank", "Max", "Min", "Sum", "Abs",
-        "Log", "Sign", "Power", "Corr", "Cov", "Delta", "Delay",
-        "Ts_Rank", "Ts_Min", "Ts_Max", "Ts_ArgMax", "Ts_ArgMin",
-        "WMA", "EMA", "If", "Greater", "Less",
+        "Rank", "CSRank", "CSZScore", "Mean", "Std", "Median", "EMA", "Abs",
+        "Ref", "Log", "Sum", "If", "Greater", "Less", "And", "Or", "Delta",
+        "Corr", "Correlation", "Cov", "Ts_Rank", "Ts_ArgMax", "Ts_ArgMin",
+        "Ts_Percentile", "Winsorize", "GroupNeutral", "Percentile", "Clip",
+        "Count", "Sign", "Sqrt"
     }
-    QLIB_FIELDS = {"$close", "$open", "$high", "$low", "$volume", "$vwap", "$turn", "$factor"}
+    # Verified Whitelist of supported data fields
+    QLIB_FIELDS = {"$close", "$open", "$high", "$low", "$volume", "$vwap"}
 
-    def __init__(self):
-        self.llm = get_llm(temperature=0.2)
-    
+    def __init__(self, provider: str = None, model: str = None):
+        self.llm = get_llm(temperature=0.1, provider=provider, model_name=model) # Lower temperature for strictness
+
     @staticmethod
     def _strip_markdown_json(text: str) -> str:
         """Remove markdown code block wrapper from JSON response."""
@@ -65,7 +69,7 @@ class FactorAgent:
         if not hypothesis_desc:
             return {"error": "No hypothesis found in state.", "messages": ["[FactorAgent] Error: Missing hypothesis."]}
 
-        # Convert text to math language
+        # 1. Convert text to math language (Single pass)
         try:
             form_prompt = ChatPromptTemplate.from_messages([
                 ("system", "You are a quantitative researcher expert in mathematics and statistics. "
@@ -87,44 +91,82 @@ class FactorAgent:
             
             logger.info(f"[FactorAgent] Formalized Math: {form_result.math_formula}")
             
-            # Convert math to Qlib Alpha158 expressions
-            impl_prompt = ChatPromptTemplate.from_messages([
-                ("system", "You are an expert Qlib developer. Convert the following mathematical formula into a syntactically correct Qlib Alpha158 expression. "
-                           "Qlib expressions use operators like Rank(), Ref(), Mean(), Std(), and fields like $close, $volume, $open, $high, $low, $vwap. "
-                           "You MUST respond with valid JSON only, no markdown, no explanations."),
+            # 2. Implementation with Self-Correction Retry Loop
+            max_retries = 2
+            current_retry = 0
+            code_expression = ""
+            is_valid_syntax = False
+            error_feedback = ""
+            
+            # Seed the conversation for implementation
+            messages = [
+                ("system", "You are an expert Qlib developer. Convert the following mathematical formula into a syntactically correct Qlib Alpha158 expression.\n\n"
+                           "### STRICT WHITELIST OF SUPPORTED OPERATORS:\n"
+                           f"{', '.join(sorted(list(self.QLIB_OPERATORS)))}\n\n"
+                           "### ALLOWED DATA FIELDS:\n"
+                           f"{', '.join(sorted(list(self.QLIB_FIELDS)))}\n\n"
+                           "### MANDATORY RULES:\n"
+                           "1. DO NOT use any function, operator, or field not in the whitelists above.\n"
+                           "2. If a logic requires an unlisted operator, simplify it using the allowed ones.\n"
+                           "3. Use functional style: Op(args) instead of infix (except basic math + - * /).\n"
+                           "4. You MUST respond with valid JSON only, no markdown, no explanations."),
                 ("user", "Mathematical Formula: {math_formula}\nVariables: {variables}\n\n"
                          "Return ONLY valid JSON matching this exact schema:\n"
                          '{{"code_expression": "string", "is_valid_syntax": boolean}}\n\n'
                          "Do not include markdown code blocks or any other text.")
-            ])
-            impl_chain = impl_prompt | self.llm
-            raw_impl_response = impl_chain.invoke({
-                "math_formula": form_result.math_formula,
-                "variables": str(form_result.variables_defined)
-            })
-            cleaned_impl_json = self._strip_markdown_json(raw_impl_response.content)
-            impl_result = ImplementationOutput.model_validate_json(cleaned_impl_json)
-            
-            logger.info(f"[FactorAgent] Implemented Code: {impl_result.code_expression}")
-            
-            # Validate the expression independently of LLM's self-assessment
-            is_valid, validation_msg = self._validate_qlib_expression(impl_result.code_expression)
-            if not is_valid:
-                logger.warning(f"[FactorAgent] Syntax validation failed: {validation_msg}")
-            
-            # Use AND of LLM's assessment and our validation
-            final_valid = impl_result.is_valid_syntax and is_valid
+            ]
+
+            while current_retry <= max_retries:
+                if current_retry > 0:
+                    logger.warning(f"[FactorAgent] Retry {current_retry}/{max_retries} due to syntax error: {error_feedback}")
+                    # Keep history: append the previous wrong answer and the error feedback
+                    messages.append(("assistant", f'{{"code_expression": "{code_expression}", "is_valid_syntax": false}}'))
+                    messages.append(("user", f"The code you generated has a syntax error: {error_feedback}. Please FIX IT and return only the valid JSON."))
+
+                impl_prompt = ChatPromptTemplate.from_messages(messages)
+                impl_chain = impl_prompt | self.llm
+                
+                raw_impl_response = impl_chain.invoke({
+                    "math_formula": form_result.math_formula,
+                    "variables": str(form_result.variables_defined)
+                })
+                
+                cleaned_impl_json = self._strip_markdown_json(raw_impl_response.content)
+                impl_result = ImplementationOutput.model_validate_json(cleaned_impl_json)
+                
+                code_expression = impl_result.code_expression
+                
+                # Independent validation
+                is_valid, validation_msg = self._validate_qlib_expression(code_expression)
+                
+                if is_valid:
+                    is_valid_syntax = True
+                    logger.info(f"[FactorAgent] Implemented Code (Success): {code_expression}")
+                    break
+                else:
+                    error_feedback = validation_msg
+                    current_retry += 1
+
+            if not is_valid_syntax:
+                logger.error(f"[FactorAgent] Failed to fix syntax after {max_retries} retries.")
 
             return {
                 "math_formula": form_result.math_formula,
                 "variables_defined": form_result.variables_defined,
-                "code_expression": impl_result.code_expression,
-                "is_valid_syntax": final_valid,
+                "code_expression": code_expression,
+                "is_valid_syntax": is_valid_syntax,
                 "messages": [
                     f"[FactorAgent] Math: {form_result.math_formula}",
-                    f"[FactorAgent] Code: {impl_result.code_expression}",
-                    f"[FactorAgent] Valid: {final_valid} (LLM={impl_result.is_valid_syntax}, Check={is_valid}: {validation_msg})"
+                    f"[FactorAgent] Code: {code_expression}",
+                    f"[FactorAgent] Final Valid: {is_valid_syntax}"
                 ]
+            }
+
+        except Exception as e:
+            logger.error(f"[FactorAgent] Failed to process factor: {e}")
+            return {
+                "error": str(e),
+                "messages": [f"[FactorAgent] Error: {e}"]
             }
 
         except Exception as e:

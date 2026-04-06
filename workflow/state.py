@@ -8,6 +8,8 @@ class AlphaMinerState(TypedDict, total=False):
     
     # Context
     rag_context: str
+    market_regime_summary: str
+    macro_news_summary: str
     
     # IdeaAgent
     hypothesis_name: str
@@ -28,5 +30,12 @@ class AlphaMinerState(TypedDict, total=False):
     is_simulated: bool  # True when backtest used fallback/simulated metrics
     
     # Control flow & History
+    evaluation_mode: str # "qlib" or "ricequant"
+    
+    # Market Analysis Parameters
+    market_analysis_start_date: Optional[str]
+    market_analysis_end_date: Optional[str]
+    market_analysis_lookback_days: Optional[int]
+    
     error: Optional[str]
     messages: Annotated[List[str], operator.add]
