@@ -156,6 +156,18 @@ class EvalAgent:
                 review=review_result.review_summary
             )
             
+            # 4. Update Early Stopping Metrics
+            current_ic = metrics.get('information_coefficient', 0.0)
+            best_ic = state.get('best_ic', -999.0)
+            patience_counter = state.get('patience_counter', 0)
+            
+            if current_ic > best_ic:
+                new_best_ic = current_ic
+                new_patience_counter = 0
+            else:
+                new_best_ic = best_ic
+                new_patience_counter = patience_counter + 1
+            
             return {
                 "backtest_metrics": metrics,
                 "daily_returns": daily_returns,
@@ -163,6 +175,8 @@ class EvalAgent:
                 "is_effective": review_result.is_effective,
                 "is_simulated": is_simulated,
                 "suggested_improvements": review_result.suggested_improvements,
+                "best_ic": new_best_ic,
+                "patience_counter": new_patience_counter,
                 "messages": [
                     f"[EvalAgent] IC: {metrics['information_coefficient']}, Rank IC: {metrics['rank_ic']}, Simulated: {is_simulated}",
                     f"[EvalAgent] Effective: {review_result.is_effective}",

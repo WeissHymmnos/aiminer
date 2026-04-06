@@ -30,6 +30,9 @@ class AlphaMinerState(TypedDict, total=False):
     suggested_improvements: str
     is_simulated: bool  # True when backtest used fallback/simulated metrics
     
+    best_ic: float
+    patience_counter: int
+    
     # Control flow & History
     evaluation_mode: str # "qlib" or "ricequant"
     

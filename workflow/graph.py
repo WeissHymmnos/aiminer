@@ -24,6 +24,20 @@ def route_after_eval(state: AlphaMinerState) -> str:
     iteration = state.get("iteration", 1)
     max_iterations = state.get("max_iterations", 1)
     
+    metrics = state.get("backtest_metrics", {})
+    current_ic = metrics.get("information_coefficient", 0.0)
+    
+    # 1. Early Stopping: High IC achieved
+    if current_ic >= 0.05:
+        logger.success(f"[Early Stop] Exceptional IC reached: {current_ic:.4f}")
+        return "end"
+        
+    # 2. Early Stopping: Patience exhausted
+    patience = state.get("patience_counter", 0)
+    if patience >= 3:
+        logger.info(f"[Early Stop] No IC improvement for 3 consecutive iterations.")
+        return "end"
+    
     if iteration < max_iterations:
         return "increment"
     return "end"

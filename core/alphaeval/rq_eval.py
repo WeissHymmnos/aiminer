@@ -36,14 +36,48 @@ class SafeEvalTransformer(ast.NodeTransformer):
 
 def zscore(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty: return df
-    means = df.mean(axis=1)
-    stds  = df.std(axis=1).replace(0, np.nan)
-    # If std is NaN (all same values), the result after sub will be 0 anyway. 
-    # But we need to handle the div by std carefully.
-    res = df.sub(means, axis=0)
-    # Only divide where std is not NaN and > 0
-    res = res.div(stds, axis=0).fillna(0)
+    means = df.mean(axis=0, skipna=True)
+    stds  = df.std(axis=0, skipna=True).replace(0, np.nan)
+    res = df.sub(means, axis=1)
+    res = res.div(stds, axis=1).fillna(0)
     return res
+
+_rq_initialized = False
+
+def init_rq_auth():
+    global _rq_initialized
+    if _rq_initialized:
+        return
+    
+    token = os.getenv("RQ_TOKEN")
+    username = os.getenv("RQ_USER")
+    password = os.getenv("RQ_PASS")
+
+    # 1. Try Token Mode (Priority)
+    if token and len(token.strip()) > 50:
+        tk = token.strip()
+        logger.info(f"Attempting RiceQuant License Auth (Length: {len(tk)})...")
+        try:
+            rq.init(token=tk)
+            logger.info("RiceQuant Token Auth sequence completed.")
+            _rq_initialized = True
+            return
+        except Exception as e:
+            logger.warning(f"RiceQuant Token Auth failed: {e}. Trying Password fallback...")
+
+    # 2. Try User/Pass Mode (Confirmed working in test_rq.py)
+    if username and password and "your-" not in username.lower():
+        logger.info(f"Attempting RiceQuant Password Auth (User: {username})...")
+        try:
+            rq.init(username=username.strip(), password=password.strip())
+            logger.info("RiceQuant Password Auth Successful!")
+            _rq_initialized = True
+            return
+        except Exception as e:
+            logger.error(f"RiceQuant Password Auth failed: {e}")
+            raise
+    
+    raise ValueError("RiceQuant Auth Failed: No valid credentials found or accepted.")
 
 class RiceQuantEval:
     """
@@ -69,37 +103,8 @@ class RiceQuantEval:
         self.market = market
         self.daily_normalize = daily_normalize
         
-        self._init_rq()
-        
-    def _init_rq(self):
-        # Skip check, just try to init
-        token = os.getenv("RQ_TOKEN")
-        username = os.getenv("RQ_USER")
-        password = os.getenv("RQ_PASS")
-
-        # 1. Try Token Mode (Priority)
-        if token and len(token.strip()) > 50:
-            tk = token.strip()
-            logger.info(f"Attempting RiceQuant License Auth (Length: {len(tk)})...")
-            try:
-                rq.init(token=tk)
-                logger.info("RiceQuant Token Auth sequence completed.")
-                return
-            except Exception as e:
-                logger.warning(f"RiceQuant Token Auth failed: {e}. Trying Password fallback...")
-
-        # 2. Try User/Pass Mode (Confirmed working in test_rq.py)
-        if username and password and "your-" not in username.lower():
-            logger.info(f"Attempting RiceQuant Password Auth (User: {username})...")
-            try:
-                rq.init(username=username.strip(), password=password.strip())
-                logger.info("RiceQuant Password Auth Successful!")
-                return
-            except Exception as e:
-                logger.error(f"RiceQuant Password Auth failed: {e}")
-                raise
-        
-        raise ValueError("RiceQuant Auth Failed: No valid credentials found or accepted.")
+        # Auth is now handled globally, ensure it's initialized
+        init_rq_auth()
 
     def fetch_data(self):
         """Fetch price data from RiceQuant."""
@@ -478,6 +483,78 @@ class RiceQuantEval:
         self.daily_returns = {str(k.date() if hasattr(k, 'date') else k): float(v) for k, v in daily_ret_series.fillna(0).items()}
         
         logger.info(f"RiceQuant Evaluation - IC: {self.ic}, RankIC: {self.rankic}")
+
+    @staticmethod
+    def dry_run(expr: str) -> tuple:
+        """
+        Mock execution of a factor expression using dummy 10x10 matrices.
+        Returns (is_success, error_message).
+        """
+        try:
+            # 1. Create dummy 10x10 environment
+            dates = pd.date_range("2020-01-01", periods=10)
+            symbols = [f"S{i:02d}" for i in range(10)]
+            
+            def make_dummy():
+                return pd.DataFrame(np.random.randn(10, 10), index=dates, columns=symbols)
+
+            dummy_fields = {
+                'open': make_dummy() + 10,
+                'high': make_dummy() + 15,
+                'low': make_dummy() + 5,
+                'close': make_dummy() + 10,
+                'volume': make_dummy() * 1000,
+                'total_turnover': make_dummy() * 10000,
+                'vwap': make_dummy() + 10
+            }
+
+            # 2. Re-use the matrix engine logic
+            # We need the context. We'll instantiate a dummy object to get its compute_factors context
+            # or better, refactor compute_factors to expose its context.
+            # For simplicity in this surgical edit, we'll define a minimal context here 
+            # that matches the one in compute_factors.
+            
+            # (Snippet of context creation logic duplicated/shared)
+            def _get_n(n):
+                try: return int(float(n))
+                except: return 5
+            
+            context = {
+                "fields": dummy_fields, "np": np, "pd": pd,
+                "Rank": lambda df: df.rank(axis=1, pct=True),
+                "CSRank": lambda df: df.rank(axis=1, pct=True),
+                "CSZScore": lambda df: df.sub(df.mean(axis=1), axis=0).div(df.std(axis=1).replace(0, 1), axis=0),
+                "Mean": lambda df, n: df.rolling(max(1, _get_n(n))).mean(),
+                "Std": lambda df, n: df.rolling(max(1, _get_n(n))).std(),
+                "Median": lambda df, n: df.rolling(max(1, _get_n(n))).median(),
+                "EMA": lambda df, n: df.ewm(span=max(1, _get_n(n))).mean(),
+                "Abs": np.abs, "Log": lambda df: np.log(df.replace(0, np.nan)),
+                "Sum": lambda df, n: df.rolling(max(1, _get_n(n))).sum(),
+                "Ref": lambda df, n: df.shift(_get_n(n)),
+                "Delta": lambda df, n: df.diff(_get_n(n)),
+                "Corr": lambda df1, df2, n: df1.rolling(max(1, _get_n(n))).corr(df2),
+                "If": lambda cond, a, b: a.where(cond, b),
+                "Greater": lambda a, b: a > b, "Less": lambda a, b: a < b,
+                "And": lambda a, b: a & b, "Or": lambda a, b: a | b,
+                "Ts_Rank": lambda df, n: df.rolling(max(1, _get_n(n))).apply(lambda x: x.rank(pct=True).iloc[-1]),
+                "Ts_Percentile": lambda df, n, p=50: df.rolling(max(1, _get_n(n))).apply(lambda x: np.percentile(x, float(p))),
+                "Winsorize": lambda df, pct=0.05: df.apply(lambda x: x.clip(lower=x.quantile(float(pct)), upper=x.quantile(1-float(pct))), axis=1),
+                "Sign": np.sign, "Sqrt": lambda df: np.sqrt(df.clip(lower=0)),
+                "Add": lambda a, b: a + b, "Sub": lambda a, b: a - b, "Mul": lambda a, b: a * b, "Div": lambda a, b: a / b
+            }
+
+            safe_expr = expr
+            for col in dummy_fields.keys():
+                safe_expr = safe_expr.replace(f"${col}", f"fields['{col}']")
+            
+            # AST and eval
+            tree = ast.parse(safe_expr, mode='eval')
+            compiled_expr = compile(tree, filename="<ast>", mode="eval")
+            eval(compiled_expr, context)
+            
+            return True, "OK"
+        except Exception as e:
+            return False, str(e)
 
     def summary(self):
         print(f"RiceQuant IC: {self.ic}")

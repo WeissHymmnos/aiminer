@@ -214,29 +214,36 @@ class RAGModule:
 
     def add_experience(self, hypothesis: str, code: str, metrics: Dict[str, float], is_effective: bool, review: str):
         """Embed and store backtesting experience into ChromaDB."""
+        import fcntl
         try:
-            exp_id = f"exp_{uuid.uuid4().hex}"
-            
-            # Create a rich document representation
-            document = (
-                f"Hypothesis: {hypothesis}\n"
-                f"Code: {code}\n"
-                f"Metrics: {json.dumps(metrics)}\n"
-                f"Effective: {is_effective}\n"
-                f"Review: {review}"
-            )
-            
-            metadata = {
-                "is_effective": is_effective,
-                "ic": metrics.get("information_coefficient", 0.0),
-                "rank_ic": metrics.get("rank_ic", 0.0)
-            }
-            
-            self.experiences_col.add(
-                documents=[document],
-                metadatas=[metadata],
-                ids=[exp_id]
-            )
-            logger.info(f"Added experience {exp_id} to ChromaDB.")
+            lock_file = os.path.join(self.db_dir, "rag_write.lock")
+            with open(lock_file, "w") as lf:
+                fcntl.flock(lf, fcntl.LOCK_EX)
+                try:
+                    exp_id = f"exp_{uuid.uuid4().hex}"
+                    
+                    # Create a rich document representation
+                    document = (
+                        f"Hypothesis: {hypothesis}\n"
+                        f"Code: {code}\n"
+                        f"Metrics: {json.dumps(metrics)}\n"
+                        f"Effective: {is_effective}\n"
+                        f"Review: {review}"
+                    )
+                    
+                    metadata = {
+                        "is_effective": is_effective,
+                        "ic": metrics.get("information_coefficient", 0.0),
+                        "rank_ic": metrics.get("rank_ic", 0.0)
+                    }
+                    
+                    self.experiences_col.add(
+                        documents=[document],
+                        metadatas=[metadata],
+                        ids=[exp_id]
+                    )
+                    logger.info(f"Added experience {exp_id} to ChromaDB.")
+                finally:
+                    fcntl.flock(lf, fcntl.LOCK_UN)
         except Exception as e:
             logger.error(f"Failed to add experience to RAG: {e}")

@@ -172,7 +172,8 @@ class FactorAgent:
                 if current_retry > 0:
                     logger.warning(f"[FactorAgent] Retry {current_retry}/{max_retries} due to syntax error: {error_feedback}")
                     # Keep history: append the previous wrong answer and the error feedback
-                    messages.append(("assistant", f'{{"code_expression": "{code_expression}", "is_valid_syntax": false}}'))
+                    # Use double curly braces to escape for LangChain template
+                    messages.append(("assistant", f'{{{{ "code_expression": "{code_expression}", "is_valid_syntax": false }}}}'))
                     messages.append(("user", f"The code you generated has a syntax error: {error_feedback}. Please FIX IT and return only the valid JSON."))
 
                 impl_prompt = ChatPromptTemplate.from_messages(messages)
@@ -191,6 +192,17 @@ class FactorAgent:
                 # Independent validation
                 is_valid, validation_msg = self._validate_qlib_expression(code_expression)
                 
+                if is_valid:
+                    # Secondary validation: Mock execution (Dry Run)
+                    try:
+                        from core.alphaeval.rq_eval import RiceQuantEval
+                        is_mock_ok, mock_msg = RiceQuantEval.dry_run(code_expression)
+                        if not is_mock_ok:
+                            is_valid = False
+                            validation_msg = f"Runtime Error during Mock Execution: {mock_msg}"
+                    except Exception as dry_e:
+                        logger.warning(f"Dry run could not be performed: {dry_e}")
+
                 if is_valid:
                     is_valid_syntax = True
                     logger.info(f"[FactorAgent] Implemented Code (Success): {code_expression}")
