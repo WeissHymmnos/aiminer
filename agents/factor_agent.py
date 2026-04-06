@@ -21,6 +21,31 @@ class FactorAgent:
     # Verified Whitelist of supported data fields
     QLIB_FIELDS = {"$close", "$open", "$high", "$low", "$volume", "$vwap"}
 
+    OPERATOR_SIGNATURES = """
+- Rank(df): Cross-sectional rank (pct).
+- CSRank(df): Same as Rank(df).
+- CSZScore(df): Cross-sectional Z-score.
+- Mean(df, n): Rolling mean over n days.
+- Std(df, n): Rolling standard deviation over n days.
+- Median(df, n): Rolling median over n days.
+- EMA(df, n): Exponential moving average over n days.
+- Abs(df): Absolute value.
+- Ref(df, n): Value from n days ago.
+- Log(df): Natural logarithm.
+- Sum(df, n): Rolling sum over n days.
+- If(cond, a, b): element-wise if-then-else.
+- Greater(a, b), Less(a, b), And(a, b), Or(a, b): Logical operators.
+- Delta(df, n): df - Ref(df, n).
+- Corr(df1, df2, n): Rolling correlation over n days.
+- Cov(df1, df2, n): Rolling covariance over n days.
+- Ts_Rank(df, n): Time-series rank (pct) of current value over n days.
+- Ts_Percentile(df, n, p): The value at the p-th percentile over n days (p defaults to 50).
+- Ts_ArgMax(df, n), Ts_ArgMin(df, n): Days since max/min in n days.
+- Winsorize(df, pct): Cross-sectional winsorization.
+- GroupNeutral(df): Cross-sectional de-meaning.
+- Sign(df), Sqrt(df): Math functions.
+"""
+
     def __init__(self, provider: str = None, model: str = None):
         self.llm = get_llm(temperature=0.1, provider=provider, model_name=model) # Lower temperature for strictness
 
@@ -36,28 +61,53 @@ class FactorAgent:
             text = re.sub(r'\s*```$', '', text)
         return text.strip()
 
-    @staticmethod
-    def _validate_qlib_expression(expr: str) -> tuple:
+    def _validate_qlib_expression(self, expr: str) -> tuple:
         # Basic syntax validation for Qlib expressions.
         if not expr or not expr.strip():
             return False, "Expression is empty."
         
+        if "Cannot be expressed" in expr or "whitelist" in expr:
+            return False, "LLM returned a refusal/explanation instead of a formula."
+
         # Check balanced parentheses
         depth = 0
         for ch in expr:
-            if ch == '(':
-                depth += 1
-            elif ch == ')':
-                depth -= 1
-            if depth < 0:
-                return False, "Unbalanced parentheses: extra closing ')'."
-        if depth != 0:
-            return False, f"Unbalanced parentheses: {depth} unclosed '('."
+            if ch == '(': depth += 1
+            elif ch == ')': depth -= 1
+            if depth < 0: return False, "Unbalanced parentheses: extra closing ')'."
+        if depth != 0: return False, f"Unbalanced parentheses: {depth} unclosed '('."
         
-        # Check $ 
+        # Check $ fields
         if '$' not in expr:
             return False, "Expression contains no Qlib field references (e.g., $close)."
         
+        # Strict field validation: all $xxx must be in QLIB_FIELDS
+        all_fields = re.findall(r'\$\w+', expr)
+        for f in all_fields:
+            if f not in self.QLIB_FIELDS:
+                return False, f"Field '{f}' is not in the supported whitelist: {list(self.QLIB_FIELDS)}."
+
+        # Check for unknown operators and empty parameters e.g., Mean()
+        if "()" in expr:
+            return False, "Expression contains empty function calls: ()."
+
+        # Check for operators missing arguments (e.g. Mean($close) vs Mean($close, 10))
+        # This is hard via regex, but we can detect common patterns like Operator($field)
+        # for operators we know REQUIRE 2 or 3 arguments.
+        binary_ops = {"Mean", "Std", "Median", "EMA", "Ref", "Sum", "Delta", "Ts_Rank", "Ts_ArgMax", "Ts_ArgMin", "Add", "Sub", "Mul", "Div", "Pow", "Greater", "Less"}
+        ternary_ops = {"Corr", "Correlation", "Cov", "Ts_Percentile", "If"}
+        
+        found_ops = re.findall(r'(\w+)\(([^()]+)\)', expr)
+        for op, args in found_ops:
+            arg_list = [a.strip() for a in args.split(",")]
+            if op in binary_ops and len(arg_list) < 2:
+                return False, f"Operator '{op}' requires at least 2 arguments, but got {len(arg_list)}: ({args})."
+            if op in ternary_ops and len(arg_list) < 3 and op != "If": # If can be flexible
+                 return False, f"Operator '{op}' requires 3 arguments, but got {len(arg_list)}: ({args})."
+            
+            if op not in self.QLIB_OPERATORS and op not in {"fields", "np", "pd", "Abs", "Log", "Sign", "Sqrt"}:
+                return False, f"Operator '{op}' is not in the supported whitelist."
+
         return True, "OK"
 
     def __call__(self, state: AlphaMinerState) -> Dict[str, Any]:
@@ -101,15 +151,17 @@ class FactorAgent:
             # Seed the conversation for implementation
             messages = [
                 ("system", "You are an expert Qlib developer. Convert the following mathematical formula into a syntactically correct Qlib Alpha158 expression.\n\n"
-                           "### STRICT WHITELIST OF SUPPORTED OPERATORS:\n"
-                           f"{', '.join(sorted(list(self.QLIB_OPERATORS)))}\n\n"
+                           "### SUPPORTED OPERATORS & SIGNATURES:\n"
+                           f"{self.OPERATOR_SIGNATURES}\n\n"
                            "### ALLOWED DATA FIELDS:\n"
                            f"{', '.join(sorted(list(self.QLIB_FIELDS)))}\n\n"
                            "### MANDATORY RULES:\n"
-                           "1. DO NOT use any function, operator, or field not in the whitelists above.\n"
-                           "2. If a logic requires an unlisted operator, simplify it using the allowed ones.\n"
-                           "3. Use functional style: Op(args) instead of infix (except basic math + - * /).\n"
-                           "4. You MUST respond with valid JSON only, no markdown, no explanations."),
+                           "1. ONLY use the operators listed above. Do not assume any other operator exists.\n"
+                           "2. Use $field for data fields (e.g., $close, $volume, $vwap).\n"
+                           "3. Pay close attention to operator arguments (e.g., rolling windows n must be positive integers).\n"
+                           "4. If a logic requires an unlisted operator, simplify it using the allowed ones.\n"
+                           "5. Return a SINGLE string expression. No explanations.\n"
+                           "6. You MUST respond with valid JSON only, no markdown, no explanations."),
                 ("user", "Mathematical Formula: {math_formula}\nVariables: {variables}\n\n"
                          "Return ONLY valid JSON matching this exact schema:\n"
                          '{{"code_expression": "string", "is_valid_syntax": boolean}}\n\n'

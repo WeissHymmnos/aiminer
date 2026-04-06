@@ -1,341 +1,283 @@
-# AlphaMiner 深度技术说明书 (Comprehensive Technical Manual)
+# 🚀 AI Alpha Miner: 核心架构与全栈技术深度剖析全手册 (v2.0)
 
-> 一个高度自动化、"Vibe-coded" 的量化 Alpha 因子挖掘框架。基于 **LangGraph** 构建有状态的多智能体（Multi-Agent）系统，结合 **RiceQuant/Qlib** 数据引擎与 **弹性 RAG** 检索技术，实现从“学术灵感检索”到“数学公式生成”，再到“金融回测与反思进化”的闭环自动化。
+## 📖 1. 项目概述与核心愿景
+**AI Alpha Miner Swarm** 是一个基于大语言模型（LLM）高级推理能力驱动的端到端自动化量化因子发现系统。系统摒弃了传统的单线程线性搜索，采用了 **主从架构 (Master-Slave Swarm)**。通过该架构，系统模拟了一个由多名具备不同专业背景的“虚拟研究员”组成的量化基金团队。
 
----
-
-## 目录 (Table of Contents)
-
-1. [项目简介 (Project Overview)](#1-项目简介-project-overview)
-2. [项目目录结构 (Directory Structure)](#2-项目目录结构-directory-structure)
-3. [核心技术栈 (Tech Stack)](#3-核心技术栈-tech-stack)
-4. [系统架构与流程图 (Architecture & Flowcharts)](#4-系统架构与流程图-architecture--flowcharts)
-5. [核心数据结构 (Data Structures)](#5-核心数据结构-data-structures)
-6. [技术实现详解 (Technical Implementation)](#6-技术实现详解-technical-implementation)
-7. [核心代码文件结构剖析 (Per-File Code Structure)](#7-核心代码文件结构剖析-per-file-code-structure)
-8. [配置与启动指南 (Configuration & Execution)](#8-配置与启动指南-configuration--execution)
+系统的核心逻辑生命周期为：**“专业化角色分工 -> 深度 RAG 检索 -> 因子假设生成 -> 数学形式化与代码翻译 -> 沙箱矩阵回测 -> 结果汇总筛选 -> 收益率相关性剔除（正交化）”**。
 
 ---
 
-## 1. 项目简介 (Project Overview)
+## 🛠️ 2. 技术栈 (Tech Stack)
 
-AlphaMiner 旨在模拟一个高级量化研究员的完整工作流。传统的量化研究依赖人工阅读论文、手写公式、构建代码并进行回测，过程繁琐。
-本系统通过调度三个核心 AI Agent：
-- **IdeaAgent**（充当策略研究员，负责看论文找灵感）
-- **FactorAgent**（充当量化开发工程师，负责写代码）
-- **EvalAgent**（充当回测工程师与风险控制，负责评判与反思）
+### 2.1 核心框架
+*   **编排与代理框架**: [LangGraph](https://github.com/langchain-ai/langgraph) (用于构建带状态的循环图流) 和 [LangChain](https://github.com/langchain-ai/langchain) (用于 LLM 工具链)。
+*   **大语言模型接口**: 支持多种 API (智谱 GLM, 月之暗面 Kimi, 阿里 Qwen, Anthropic Claude)。
+*   **结构化输出**: `Pydantic` (强制 LLM 返回符合 Schema 的 JSON 对象)。
 
-它们在一个由 LangGraph 驱动的状态机中不断循环，自主试错并自我进化。
+### 2.2 存储与检索增强 (RAG)
+*   **向量数据库**: [ChromaDB](https://www.trychroma.com/) (本地持久化存储，无需部署复杂服务)。
+*   **嵌入模型 (Embedding)**: 支持本地部署 `BAAI/bge-large-zh-v1.5` / `Qwen3-Embedding-4B`，或通过 API 调用云端 Embedding 模型。
+
+### 2.3 量化引擎与数据科学
+*   **量化数据与回测引擎**: 
+    *   [RiceQuant (rqdatac)](https://www.ricequant.com/) (针对 A 股的线上高频及日线数据拉取与回测)。
+    *   [Qlib](https://github.com/microsoft/qlib) (微软开源 AI 量化投资平台，用于离线环境)。
+*   **数据结构与矩阵计算**: `Pandas`, `NumPy`。
+*   **抽象语法树安全解析**: `ast` (Python 內置模块，用于将 LLM 生成的代码安全解析为可计算的语法树)。
+*   **并发执行**: Python `concurrent.futures.ThreadPoolExecutor` (用于主从架构的多子 Agent 并行)。
 
 ---
 
-## 2. 项目目录结构 (Directory Structure)
+## 📁 3. 完整项目结构与代码架构分布
 
 ```text
-.
-├── main.py                     # 系统总入口，处理命令行参数并启动 LangGraph 工作流
-├── environment.yml             # Conda 环境定义文件
-├── requirements.txt            # Pip 依赖清单
-├── .env.example                # 环境变量配置模板
-├── test_rq.py                  # 米筐 (RiceQuant) 连通性独立测试脚本
-│
-├── agents/                     # 核心多智能体 (Multi-Agent) 定义
-│   ├── idea_agent.py           # 策略构思智能体
-│   ├── factor_agent.py         # 数学形式化与代码生成智能体
-│   └── eval_agent.py           # 回测执行与反思评估智能体
-│
-├── core/                       # 核心基础设施与中间件
-│   ├── llm.py                  # 多厂商 LLM 统一适配器 (Kimi, Qwen, Claude)
-│   ├── rag.py                  # 弹性检索增强生成模块 (支持云端与本地 Embedding)
-│   └── alphaeval/              # 混合回测评估引擎
-│       ├── __init__.py
-│       ├── rq_eval.py          # RiceQuant 矩阵运算引擎 (核心回测逻辑)
-│       ├── modeltester.py      # Qlib 本地回测主引擎
-│       ├── combo.py            # 因子权重优化组合器 (WeightCalculator)
-│       └── noise_proc.py       # 噪声注入处理器 (用于测试因子鲁棒性)
-│
-├── schemas/                    # 数据模型定义
-│   └── messages.py             # Pydantic 模型，定义 LLM 结构化输出
-│
-├── workflow/                   # 状态机与工作流控制
-│   ├── state.py                # 定义全局共享状态 (AlphaMinerState)
-│   └── graph.py                # LangGraph 节点与路由拓扑定义
-│
-├── scripts/                    # 数据抓取与辅助脚本
-│   ├── fetch_academic_papers.py # 自定义 arXiv 论文拉取
-│   ├── fetch_arxiv_qfin.py      # 抓取 q-fin 分类前沿论文
-│   ├── fetch_arxiv_with_pkg.py  # 备用 arxiv 拉取脚本
-│   ├── fetch_market_metadata.py # 使用 AKShare 抓取当前 A 股市场元数据
-│   └── download_qlib_data.py    # 下载本地 Qlib 离线数据
-│
-├── data/                       # 本地数据与知识库存储
-│   ├── chroma_db/              # ChromaDB 向量持久化目录 (按 Embedding 模型分子目录)
-│   └── rag_docs/               # 静态知识库文档
-│       ├── academic/           # 学术论文与研报摘要
-│       ├── alphas/             # 经典因子公式库 (WorldQuant 101, GTJA 191)
-│       └── market_meta/        # 市场元数据与字段映射关系
-│
-└── results/                    # 运行结果存储
-    └── results.json            # 历次迭代生成的因子代码与回测指标
+/
+├── manager.py             # 【主控入口】负责任务角色分发、多线程并发执行、Alpha 正交化去重
+├── sub_agent.py           # 【子 Agent 封装】实例化单人研究员，管理独立的 LangGraph 运行
+├── main.py                # (历史保留) 单 Agent 传统执行入口
+├── workflow/
+│   ├── graph.py           # 状态图流转定义：Idea -> Factor -> Eval -> (Increment)
+│   └── state.py           # TypedDict：跨节点流转的全局状态字典 (AlphaMinerState)
+├── agents/
+│   ├── idea_agent.py      # 【大脑】结合 RAG 和宏观行情，提出因子逻辑假设 (JSON)
+│   ├── factor_agent.py    # 【程序员】将文本假设严谨转化为 Qlib 格式代码 (双层重试)
+│   └── eval_agent.py      # 【质检员】调用底层评估引擎，输出 IC/RankIC/DailyReturns 及反思改进
+├── core/
+│   ├── llm.py             # LLM API 路由、Key 管理与初始化
+│   ├── rag.py             # ChromaDB 操作类，负责文档切割、向量化、检索、历史经验存储
+│   └── alphaeval/
+│       ├── rq_eval.py     # 基于 RiceQuant 数据的高性能矩阵回测引擎，内置因子安全执行器
+│       ├── modeltester.py # 兼容 Qlib 环境的 AlphaEval 引擎
+│       ├── combo.py       # 等权或优化权重的多因子组合逻辑
+│       └── noise_proc.py  # (实验性) 噪声处理工具
+├── schemas/
+│   └── messages.py        # Pydantic Schema，严格规范各个 Agent LLM 的输出字段
+├── data/
+│   ├── chroma_db/         # Chroma 向量库物理文件存储
+│   └── rag_docs/          # 供 RAG 读取的 Markdown 知识库 (文献、研报、因子库等)
+└── logs/                  # 运行时日志持久化目录
 ```
 
 ---
 
-## 3. 核心技术栈 (Tech Stack)
+## 📊 4. 系统全局流程图 (Mermaid Flowcharts)
 
-| 类别 | 技术/框架 | 作用说明 |
-| :--- | :--- | :--- |
-| **Agent 编排** | `langchain`, `langgraph` | 构建有状态的、支持分支和循环的 Agent 工作流图。 |
-| **LLM 引擎** | `langchain-openai` | 提供统一的 OpenAI API 调用规范，无缝对接 Kimi/Qwen/Claude 代理。 |
-| **结构化输出** | `pydantic` | 定义 Schema 强制约束 LLM 生成符合要求的 JSON 格式。 |
-| **向量检索 (RAG)** | `chromadb` | 本地化轻量级向量数据库，用于存储静态知识与动态经验。 |
-| **本地 Embedding**| `sentence-transformers` | 提供断网/无费用的本地高质量文本向量化 (如 `bge-large-zh-v1.5`)。 |
-| **量化回测 (云端)**| `rqdatac` (RiceQuant) | 实时获取 A 股全市场日线数据，支持内置 Pandas 高性能矩阵运算引擎。 |
-| **量化回测 (本地)**| `pyqlib` (Microsoft) | 本地高性能数据框架，处理复杂的交叉截面时序表达式。 |
-| **科学计算** | `pandas`, `numpy`, `scipy`| 处理回测逻辑、相关性计算、协方差求取及 scipy.optimize 权重优化。 |
-
----
-
-## 4. 系统架构与流程图 (Architecture & Flowcharts)
-
-### 4.1 全局工作流拓扑 (Global Workflow Topology)
+### 4.1 全局主从协作架构 (Manager-SubAgent Swarm)
+Manager 作为集群的中心，分配任务并回收最终产出。
 
 ```mermaid
 graph TD
-    START((START)) --> IdeaAgent
+    Start[CLI: manager.py] --> Init[初始化 PortfolioManager]
+    Init --> Config[解析参数: Roles, Dates, Engine]
+    Config --> Dispatch{并行/串行执行?}
     
-    subgraph "Alpha Mining Lifecycle"
-        IdeaAgent(IdeaAgent<br>生成因子假设) --> FactorAgent(FactorAgent<br>形式化与代码实现)
-        FactorAgent --> EvalAgent(EvalAgent<br>回测与LLM反思)
-        
-        EvalAgent -- "有效 (接受) OR<br>达最大迭代 (终止)" --> END_NODE((END))
-        EvalAgent -- "无效 且 迭代继续" --> Increment(Increment<br>轮次+1, 清除错误)
-        Increment --> IdeaAgent
-    end
+    Dispatch -- 并行 (ThreadPool) --> A1[Sub-Agent 1<br/>动量专家]
+    Dispatch -- 并行 (ThreadPool) --> A2[Sub-Agent 2<br/>量价反转专家]
+    Dispatch -- 并行 (ThreadPool) --> AN[Sub-Agent N<br/>基本面专家...]
     
-    subgraph "RAG Knowledge Engine"
-        DB[(ChromaDB)]
-        IdeaAgent -.-> |检索学术/经验| DB
-        EvalAgent -.-> |写入失败/成功经验| DB
-    end
+    A1 --> |LangGraph 执行| R1[产出 1: Best Factor + 每日收益率]
+    A2 --> |LangGraph 执行| R2[产出 2: Best Factor + 每日收益率]
+    AN --> |LangGraph 执行| RN[产出 N: Best Factor + 每日收益率]
+    
+    R1 --> Pool[Manager: 结果汇总池]
+    R2 --> Pool
+    RN --> Pool
+    
+    Pool --> Filter1[第一层过滤: 绝对表现 IC > 0.01]
+    Filter1 --> Filter2[第二层过滤: 正交化检验]
+    
+    Filter2 --> |计算 Pandas Correlation < 0.7| Ret1[入库]
+    Filter2 --> |计算 Pandas Correlation > 0.7| Ret2[剔除较弱者]
+    
+    Ret1 --> Final[打印最终正交 Alpha 库清单]
 ```
 
-### 4.2 弹性 RAG 检索流程 (Elastic RAG Flow)
+### 4.2 子 Agent 内部图谱流转 (LangGraph Sub-Workflow)
+每个 SubAgent 内部是一个闭环的状态机，它最多会迭代 `max_iterations` 次。
 
 ```mermaid
 graph LR
-    Query[IdeaAgent 查询] --> Detect{API 可用?}
-    
-    Detect -- "正常" --> API_Emb[调用 Kimi/Qwen/Claude<br>向量化接口]
-    Detect -- "403/超时/余额不足" --> Local_Emb[触发 BGE-Large<br>本地大模型向量化]
-    Detect -- "严重断网" --> BM25[降级至纯内存<br>Keyword 词频匹配]
-    
-    API_Emb --> Chroma[ChromaDB 相似度搜索]
-    Local_Emb --> Chroma
-    BM25 --> TopN[返回 Top-N 文本]
-    Chroma --> TopN
-    TopN --> Truncate[强制截断至1500字符<br>保护Token] --> Result[返回至上下文]
-```
-
-### 4.3 RiceQuant 矩阵计算引擎流程 (RQEval Flow)
-
-```mermaid
-graph TD
-    Data[获取 rqdatac 原始数据<br>datetime, instrument, OHLCV] --> Unstack[解叠 Unstack<br>转换为宽表矩阵]
-    Unstack --> Mapping[构建本地算子映射字典<br>Rank, Mean, Std, Corr, Ts_Rank...]
-    Mapping --> Replace[替换字段符<br>$close -> fields['close']]
-    Replace --> Eval[执行 Python Eval<br>进行全矩阵矢量运算]
-    Eval --> Stack[重新堆叠 Stack<br>变回 MultiIndex]
-    Stack --> Merge[与 Label 对齐<br>计算 IC/RankIC]
+    subgraph SubAgent LangGraph
+        Start((开始)) --> Idea[IdeaAgent<br/>检索 RAG + 生成假设]
+        Idea --> |判断异常| End((结束))
+        Idea --> |成功| Factor[FactorAgent<br/>编写公式与代码]
+        Factor --> |判断语法| End
+        Factor --> |成功| Eval[EvalAgent<br/>回测 + RAG经验反思]
+        
+        Eval --> Check{迭代次数是否已满?}
+        Check -- 否 --> Increment[迭代次数+1, 重置临时变量]
+        Increment --> Idea
+        Check -- 是 --> End
+    end
 ```
 
 ---
 
-## 5. 核心数据结构 (Data Structures)
+## 🗂️ 5. 核心数据结构详解 (Data Structures)
 
-### 5.1 全局状态: `AlphaMinerState` (`workflow/state.py`)
-LangGraph 中流转的核心字典。
+### 5.1 全局状态字典 (`workflow/state.py` -> `AlphaMinerState`)
+这是贯穿整个 LangGraph 图的神经中枢，使用了 Python 的 `TypedDict` 定义。
 
-| 字段 | 类型 | 说明 |
+| 字段名 | 数据类型 | 描述 |
 | :--- | :--- | :--- |
-| `iteration` | `int` | 当前迭代轮次。 |
-| `max_iterations` | `int` | 允许的最大挖掘轮次。 |
-| `evaluation_mode`| `str` | 回测引擎选择：`qlib` 或 `ricequant`。 |
-| `rag_context` | `str` | 暂存 RAG 检索返回的参考文本。 |
-| `hypothesis_name`| `str` | IdeaAgent 产出的因子名称。 |
-| `hypothesis_description`| `str`| 因子的详细理论描述。 |
-| `rationale` | `str` | 因子背后的金融学或微观结构原理。 |
-| `math_formula` | `str` | FactorAgent (Stage1) 产出的数学公式 (LaTeX风格)。 |
-| `code_expression`| `str` | FactorAgent (Stage2) 产出的 Qlib 格式 Python 表达式。 |
-| `backtest_metrics`| `Dict` | 回测结果集合，含 `information_coefficient`, `rank_ic` 等。 |
-| `is_effective` | `bool` | EvalAgent 综合判定该因子是否可用。 |
-| `suggested_improvements`| `str`| 反思结论，指导下一轮构思的改进方向。 |
-| `messages` | `List[str]`| 累积执行日志（由 LangGraph Reducer `operator.add` 合并）。 |
+| `iteration` | `int` | 记录当前循环处于第几次迭代。 |
+| `max_iterations` | `int` | 设定的单 Agent 最大探索次数。 |
+| `role_prompt` | `str` | **关键**: Manager 分配给子 Agent 的性格设定（如“动量专家”）。 |
+| `rag_context` | `str` | 从 ChromaDB 检索出的论文知识与历史失败经验拼接文段。 |
+| `market_regime_summary` | `str` | RiceQuant 引擎计算出的宏观市场画像（波动率、偏度等）。 |
+| `hypothesis_name` | `str` | LLM 生成的因子假说名称。 |
+| `hypothesis_description` | `str` | LLM 生成的因子假说具体内容和逻辑原理。 |
+| `code_expression` | `str` | FactorAgent 输出的可执行 Python 表达式字符串。 |
+| `backtest_metrics` | `Dict[str, float]` | 回测指标（如 IC, Rank_IC, Sharpe）。 |
+| `daily_returns` | `Dict[str, float]` | **核心**: 因子每日组合收益序列，格式为 `{"2020-01-01": 0.05, ...}`，Manager 用其计算多因子的皮尔逊相关系数。 |
+| `is_effective` | `bool` | Reflexive Review 判定的策略是否有效。 |
+| `suggested_improvements`| `str` | Review 节点给出的修改建议，将传入下一轮 IdeaAgent。 |
 
-### 5.2 结构化输出 Pydantic 模型 (`schemas/messages.py`)
-用于约束 LLM 的输出。
-- **`HypothesisOutput`**: 包含 `hypothesis_name`, `hypothesis_description`, `rationale`。
-- **`FormalizationOutput`**: 包含 `math_formula` (如 $\sigma(R_t, 20)$) 和 `variables_defined` (字典定义)。
-- **`ImplementationOutput`**: 包含 `code_expression` (如 `Std($close, 20)`) 和语法有效性自评 `is_valid_syntax`。
-- **`ReflexiveReviewOutput`**: 包含 `review_summary` (包含度量数值的分析), `is_effective` (严格判定), `suggested_improvements` (可操作性修改建议)。
-
----
-
-## 6. 技术实现详解 (Technical Implementation)
-
-### 6.1 多厂商 LLM 与深度思考 (`core/llm.py`)
-系统通过工厂函数 `get_llm()` 提供动态模型调度：
-- 采用 `langchain_openai.ChatOpenAI` 作为底层驱动，兼容任何 OpenAI 标准的接口。
-- **智能分流**：
-  - 若 `provider="kimi"`：连接 `https://api.moonshot.cn/v1`，默认拉起 `kimi-k2-thinking-turbo`，生成极其深度的因果推理。
-  - 若 `provider="qwen"`：连接阿里云 DashScope。
-  - 若 `provider="claude"`：连接自定义代理接口。
-
-### 6.2 弹性 RAG 模块 (`core/rag.py`)
-- **生命周期**：在系统启动时，递归扫描 `data/rag_docs` 下的 markdown，按段落分割 (Chunking)。
-- **维度安全管理**：Kimi 返回 1536 维，而本地 bge-large 只有 1024 维。代码中通过 `self.db_dir = os.path.join(db_dir, model_tag)` 在磁盘物理隔离不同维度的 ChromaDB 实例，杜绝启动报错。
-- **三重容错 (Triple Fallback)**：
-  1. `_safe_query` 调用外部 Embedding。
-  2. 捕获 `403/Timeout`，尝试拉起 `sentence-transformers` 进行本地嵌入。
-  3. 捕获内存不足/模型损坏，退化为 `_local_keyword_retrieval` 纯内存集合重叠打分法 (BM25 替代方案)。
-- **经验闭环**：`add_experience` 会将失败因子的公式、回测 IC、改进建议编码成新向量注入 `experiences` 表。IdeaAgent 在生成时会被强制提示“Do not repeat failed past experiences.”。
-
-### 6.3 EvalAgent 反思与评估逻辑 (`agents/eval_agent.py`)
-- 调度回测引擎 (`AlphaEval` 或 `RiceQuantEval`) 取得纯粹的数值字典。
-- 利用 LLM 读取数值和原始假说，判断是否发生**信号背离** (例如 IC 为负但 RankIC 为正，说明极端值影响大)。
-- 产出高价值的 `suggested_improvements` 注入到图的下一轮状态，形成 **Reflexive Loop**。
-
-### 6.4 RQEval 高性能矩阵引擎 (`core/alphaeval/rq_eval.py`)
-- 传统的日度循环计算因子耗时巨大。本系统在 `compute_factors` 阶段：
-  1. 调用米筐获取多股票长时间的 MultiIndex DataFrame。
-  2. 对每一列使用 `.unstack()` 展开为以 Date 为索引，Instrument 为列的 $T \times N$ 大矩阵。
-  3. 定义内部函数库重写算子：`Rank` -> `df.rank(axis=1, pct=True)`，`Mean` -> `df.rolling(n).mean()`，`Corr` -> `df1.rolling(n).corr(df2)`。
-  4. 利用 Python 内置 `eval(expr, context)` 在矩阵空间一次性秒级求出所有历史日期的因子值。
+### 5.2 结构化输出 Pydantic Schema (`schemas/messages.py`)
+使用 Pydantic 类配合 `ChatPromptTemplate` 约束大模型输出严格的 JSON。
+*   `HypothesisOutput`: 必须包含 `hypothesis_name`, `hypothesis_description`, `rationale`。
+*   `FormalizationOutput`: 必须包含 `math_formula` 和 `variables_defined`（变量解释字典）。
+*   `ImplementationOutput`: 必须包含 `code_expression` 和 `is_valid_syntax` (Bool)。
+*   `ReflexiveReviewOutput`: 必须包含 `review_summary`, `is_effective`, `suggested_improvements`。
 
 ---
 
-## 7. 核心代码文件结构剖析 (Per-File Code Structure)
+## 🧬 6. 文件与函数级深度剖析
 
-### `main.py`
-- **核心职能**：配置日志、解析命令行参数、调用图构建器、启动流式迭代并记录结果。
-- **内部流程**：
-  - `setup_logging`: 初始化 loguru。
-  - `save_results`: 将每一轮的最佳结果/错误序列化至 JSON 供离线分析。
-  - `print_summary`: 在控制台高亮输出最终结论（IC、反思、代码）。
-  - `main`: `argparse` 接管输入，定义 `initial_state`，调用 `app.stream()` 并捕获状态流转。
+### 6.1 主控协同模块
 
-### `workflow/graph.py`
-- **核心职能**：定义节点及边，构建 LangGraph 实例。
-- **函数结构**：
-  - `route_after_idea`: 检查 `error`，决定流向 `factor_agent` 还是 `end`。
-  - `route_after_factor`: 检查语法标志，决定流向 `eval_agent`。
-  - `route_after_eval`: 判断轮次 `iteration < max_iterations`，决定 `increment` 回流还是终止。
-  - `increment_iteration`: 更新计数器并清理瞬态异常。
-  - `build_workflow`: 实例化所有的 Agent，并将它们注册入 `StateGraph`，编译返回 `Runnable` 图。
+#### `manager.py`
+系统的最高决策中心，负责启动、分发和验收工作。
+*   **`PortfolioManager.__init__(self, roles, **kwargs)`**: 
+    *   接收外部传入的命令行参数（如日期、大模型提供商）并保存在 `kwargs` 中透传。初始化 `self.roles`（研究方向列表）和 `self.alpha_pool`。
+*   **`dispatch_tasks(self)`**: 
+    *   遍历 `roles` 列表，为每一个角色实例化一个 `AlphaResearcher` 打工人对象，将它们存入 `self.researchers` 列表。
+*   **`evaluate_and_combine(self, results_list)`**: 
+    *   **系统的去重核心（正交化 Backbone）**。
+    *   首先过滤掉执行报错或 `IC < 0.01` (默认阈值) 的垃圾因子。
+    *   然后进入双重循环：将新进因子的 `daily_returns`（字典）转换为 Pandas Series。针对 `final_pool` 中的每一个已有因子，使用 `pd.concat([new, existing], axis=1, join='inner').corr()` 计算两者的收益率时间序列相关系数。
+    *   若相关系数 $> 0.7$，判定为“同质化策略”，直接舍弃（Culled）；否则加入 `final_pool`。
+*   **`run_swarm(self, parallel=False)`**: 
+    *   若 `parallel=True`，使用 `concurrent.futures.ThreadPoolExecutor` 并发调用所有打工人的 `run()` 方法。若为 False，则串行调用（适合本地显存有限的部署）。最后调用评估核心。
 
-### `agents/idea_agent.py`
-- **类结构**: `IdeaAgent`
-- **依赖注入**: `rag_module`, `provider`, `model`.
-- **`__call__(self, state)`**: 
-  - 从 `state` 提取 `previous_improvements` 和当前 `mode`。
-  - **动态行情注入**：若在米筐模式下，实例化 `RiceQuantEval().get_market_regime()` 抓取当前 30 天 A 股的波动率与量价趋势文本，并合入 RAG 上下文中。
-  - 构建含有 RAG 上下文的系统 Prompt，要求 LLM 输出 `HypothesisOutput` JSON。
-
-### `agents/factor_agent.py`
-- **类结构**: `FactorAgent`
-- **成员常量**: `QLIB_OPERATORS` 和 `QLIB_FIELDS` 记录了系统支持的所有安全算子和数据字段。
-- **`__call__(self, state)`**:
-  - **Stage 1**: 用 LLM 解析金融理论，产出数学公式体系 (LaTeX 表达)。
-  - **Stage 2**: 第二次调用 LLM，严格参照 Qlib 算子库将数学式子翻译成一行代码（如 `If(Greater($volume, Mean($volume, 20)), 1, -1)`）。
-  - 调用静态方法 `_validate_qlib_expression` 做基于抽象语法树的括号平衡性和操作数校验。
-
-### `agents/eval_agent.py`
-- **类结构**: `EvalAgent`
-- **核心方法 `_execute_alphaeval_backtest(code, mode)`**: 
-  - 根据 `mode` 动态分发。若为 `ricequant`，调用 `RiceQuantEval`，否则调用 `AlphaEval`。
-  - 若抛出缺失数据/余额不足/断网异常，捕捉并回退至**确定性种子随机模拟器**（基于代码 Hash），生成虚拟指标以保证框架运行不中断（并在日志告警）。
-- **`__call__(self, state)`**:
-  - 获取回测数值后，调用第三个 LLM Prompt 进行复盘打分，结构化返回 `ReflexiveReviewOutput`。
-  - 触发 `self.rag.add_experience` 持久化写入 ChromaDB。
-
-### `core/alphaeval/rq_eval.py`
-- **类结构**: `RiceQuantEval`
-- **关键方法**:
-  - `_init_rq`: 包含三阶自适应登录逻辑 (Token Keyword -> Token Positional -> Token URI -> Password)，解决各类 SDK 历史遗留验证问题。
-  - `fetch_data`: 从云端拉取 `000300.XSHG` 成分股，规整化为标准的 (datetime, instrument) 二重索引。
-  - `compute_factors`: 定义基于 Pandas 的矩阵运算器，处理动态 Eval。
-  - `get_market_regime`: 生成面向 LLM 友好的行情文本描述 (Bullish/Bearish, High/Low Volatility)。
-  - `run`: 调用上述流程并得出时序平均的 IC/RankIC。
-
-### `core/rag.py`
-- **类结构**: `RAGModule`
-- **核心逻辑**:
-  - `__init__`: 处理 `embedding_provider` 参数，利用 `SentenceTransformerEmbeddingFunction` 下载或拉起本地 BGE-Large 模型，或者链接云端 API。创建专用的 `db_dir`。
-  - `_init_knowledge_base`: 块级切割 (Chunking)，附带文件名元数据持久化插入 Chroma。
-  - `retrieve`: 实现 `_safe_query` 和容错回退机制。
-  - `_local_keyword_retrieval`: 自研的零依赖内存词频打分重叠算法。
+#### `sub_agent.py`
+将复杂的 LangGraph 流程封装为一个黑盒任务。
+*   **`AlphaResearcher.__init__(self, ...)`**: 
+    *   接收 `role_prompt` 并保存。核心是调用 `build_workflow(...)` 实例化一个完全隔离的 LangGraph 对象 `self.app`，避免跨进程状态污染。
+*   **`AlphaResearcher.run(self)`**: 
+    *   初始化子 Agent 的专属 `initial_state`（包含特定的角色 prompt）。
+    *   调用 `self.app.stream(initial_state)` 跑完所有迭代。
+    *   抓取最后状态中的 `backtest_metrics` 和 `daily_returns`，封装为标准的 Dict 结构返回给 Manager。
 
 ---
 
-## 8. 配置与启动指南 (Configuration & Execution)
+### 6.2 LangGraph 编排模块
 
-### 8.1 环境变量配置 (`.env`)
-系统根目录下创建 `.env`，填入所需凭证：
+#### `workflow/graph.py`
+定义工作流的节点和有向边。
+*   **`route_after_idea`**, **`route_after_factor`**, **`route_after_eval`**: 
+    *   **路由函数 (Router Functions)**。根据 State 中的 `error` 字段决定走向下一步还是走向 `END` 终止图谱。特别是在 `route_after_eval` 中，判断 `iteration < max_iterations` 来决定是循环回到 `increment` 节点还是结束。
+*   **`increment_iteration(state)`**: 
+    *   状态步进节点。将 `iteration` 加 1，并清空上一次执行的临时报错和语法验证标记，准备进入下一轮的 `IdeaAgent`。
+*   **`build_workflow(...)`**: 
+    *   系统的核心组装器。在这里实例化单例的 `RAGModule` 和三大实体 Agent (`IdeaAgent`, `FactorAgent`, `EvalAgent`)。使用 `StateGraph(AlphaMinerState)` 绑定状态，通过 `add_node` 和 `add_conditional_edges` 连接出逻辑闭环，最后返回编译好的 `app`。
 
+---
+
+### 6.3 实体研究员 Agent 模块
+
+#### `agents/idea_agent.py`
+挖掘大脑，负责“胡思乱想”与提出假设。
+*   **`IdeaAgent.__init__`**: 绑定 RAG 引擎和 LLM。
+*   **`__call__(self, state)`**:
+    *   **知识组装**: 调用 `rag.retrieve` 搜取文献。若为 RiceQuant 模式，调用底层的 `rq_eval.get_market_regime` 动态计算回测期内的市场画像（波动率、偏度、MACD趋势），拼接成庞大的 Prompt Context。
+    *   **角色注入**: 从 `state.get("role_prompt")` 获取老板布置的方向，替换默认的 System Message 角色设定。如果上一轮失败了，还将拼接 `suggested_improvements` 进行反思。
+    *   输出解析为 `HypothesisOutput` JSON 对象，写入状态的 `hypothesis_name` 等字段。
+
+#### `agents/factor_agent.py`
+苦逼的程序员，负责将大白话翻译成严格的 Qlib 矩阵表达式。
+*   **静态验证方法 `_validate_qlib_expression(expr)`**: 检查左右括号是否匹配，是否包含了数据字段 `$xxx`。
+*   **`__call__(self, state)`**:
+    *   **阶段一 (数学形式化)**: LLM 提炼纯文字逻辑，生成严谨的纯数学公式（`math_formula`）。
+    *   **阶段二 (代码实现)**: 给定极其严格的白名单提示词（`self.QLIB_OPERATORS`, `self.QLIB_FIELDS`）。
+    *   **自我重试环**: 若输出的代码经正则和基础验证不合格，Agent 会**携带报错原因自动发起重试 (Retry)**，最多重试 2 次，大幅降低了无效代码送入回测引擎的概率。
+
+#### `agents/eval_agent.py`
+冷酷无情的裁判，测试因子的真假。
+*   **`_execute_alphaeval_backtest(self, code, mode)`**: 
+    *   根据模式初始化 `RiceQuantEval` 或 `AlphaEval` 对象，调用 `.run()` 执行回测。捕获引擎抛出的 `daily_returns` 和 IC 等指标。如果遇到极端语法错误导致引擎崩溃，会接管异常并利用 Hash Seed 返回一个模拟得分（防中断机制）。
+*   **`__call__(self, state)`**:
+    *   先调用回测拿到 Metrics。
+    *   构建反思 Prompt (Reflexive Review Module)：让 LLM 充当“量化研究总监”，审视 Hypothesis 和跑出的 IC，判定是否真正 Effective，并输出下一轮改进建议。
+    *   最后调用 `self.rag.add_experience` 将这段血泪史存入向量数据库，并返回更新后的 State 字典（携带 `daily_returns` 交给老板）。
+
+---
+
+### 6.4 核心支持基础设施
+
+#### `core/rag.py`
+检索增强生成（RAG）大本营，管理知识记忆。
+*   **`RAGModule.__init__`**: 智能适配 Embedding。若强制要求本地跑，默认挂载 `Qwen3-Embedding-4B`；否则根据 LLM Provider (如 Kimi, GLM) 自动申请对应的线上 Embedding API 密钥并初始化 OpenAI 格式的调用。
+*   **`_chunk_text(text)`**: 按段落和字符数量，对长研报/文献进行粗切分。
+*   **`_init_knowledge_base(self)`**: 启动时扫描 `data/rag_docs` 下所有的 Markdown 文件，执行嵌入（Embedding），存入 ChromaDB 的 `knowledge_base` Collection。
+*   **`retrieve(query, n_results)`**: 分别从知识库和过去经验库检索 Top N 相似切片拼接返回。
+*   **`add_experience(hypothesis, code, metrics, is_effective, review)`**: 将 Agent 刚刚跑完的一次因子生命周期压缩为纯文本，附带 IC 数据作为 Metadata 插入 `experiences` 集合。这是系统“记忆”和“进化”的源泉。
+
+#### `core/llm.py`
+多模型路由网关。
+*   **`get_llm_config`**: 从 `os.getenv` 读取各类 Key，动态判断并返回选定的 Provider（Kimi, Qwen, GLM, Claude）。
+*   **`get_llm`**: 配置 LangChain 的 `ChatOpenAI` 适配器实例，统一下发 BaseURL、API_KEY 和模型名称。
+
+#### `core/alphaeval/rq_eval.py`
+基于 RiceQuant 的**高性能矩阵式因子计算与回测引擎**。
+*   **`SafeEvalTransformer(ast.NodeTransformer)`**: 安全沙箱。对于 LLM 胡编乱造的未知函数或变量名（如 `Sector`），遍历抽象语法树并将其隐式转换为无害的字符串字面量，防止 `eval()` 执行注入攻击或因未定义变量崩溃。
+*   **`fetch_data(self)`**: 通过 `rqdatac` 拉取指定市场标的（如中证300）的 `OHLCV` 行情。拉取后执行 `df.unstack()`，将一维长表转换为宽表矩阵，行为 DateTime，列为 Instrument。
+*   **`compute_factors(self)`**: 
+    *   在函数内部定义了 30 余个符合 Qlib 签名的本地 Python 函数，如 `Rank`, `Ref`, `Delta`, `If`, `Corr`。这些函数大部分都通过 `pandas.DataFrame` 或 `rolling` 方法实现了全切面（Cross-sectional）或时间序列（Time-Series）的矢量化操作。
+    *   通过 `ast.parse` 和 `eval()`，动态执行被字符串替换过的表达式代码，输出因子值的 DataFrame。
+*   **`get_market_regime(self, start, end)`**: 数据分析预处理工具。利用近期日K线，计算波动率、偏度、峰度、均线偏离度，输出一段文字化的大盘诊断给 IdeaAgent 作灵感。
+*   **`run(self)`**: 主回测流。将计算出的因子矩阵与下一个交易日收益率标签（Label）做按日匹配合并。
+    *   分别计算逐日横截面普通皮尔逊相关系数（IC）和斯皮尔曼秩相关系数（RankIC），最后求均值。
+    *   **每日收益率计算**: `(x["factor"] * x["label"]).sum() / (x["factor"].abs().sum() + 1e-8)`，这一步假定进行每日横截面 Z-Score 后作全额无杠杆多空对冲，生成了 `self.daily_returns` 供上层做正交化剥离。
+
+---
+
+## ⚙️ 7. 安装与启动指南 (Setup & Execution)
+
+### 7.1 环境依赖
+请确保系统中安装了 Conda。由于涉及到 ChromaDB、Pandas 等 C++ 扩展，推荐严格按照环境文件构建：
 ```bash
-# LLM 引擎密钥 (至少填一个)
-LLM_KEY="your_kimi_moonshot_key"
-QWEN_API_KEY="your_aliyun_qwen_key"
-ClaudeCode_KEY="your_gptsapi_proxy_key"
-
-# 米筐登录凭证 (如果使用 ricequant 模式)
-# 推荐使用 Token 形式
-RQ_TOKEN="your_super_long_license_key"
-# 备选账号密码
-RQ_USER="13800138000"
-RQ_PASS="your_password"
-
-# 强制开启本地开源的 Embedding 引擎 (节省调用费)
-USE_LOCAL_EMBEDDING="true"
-```
-
-### 8.2 安装系统依赖
-```bash
+conda env create -f environment.yml
+conda activate aiminer
 pip install -r requirements.txt
-# 开启本地 RAG 必需
-pip install sentence-transformers
 ```
 
-### 8.3 启动命令全家桶
+### 7.2 环境变量配置 (.env)
+在项目根目录新建 `.env` 文件，输入你需要使用的 LLM API Key 和数据源账密：
+```env
+# 大模型配置 (填入你拥有的即可)
+GLM_KEY="你的智谱AI_API_KEY"
+LLM_KEY="你的Kimi_API_KEY"
+QWEN_API_KEY="你的阿里云百炼_API_KEY"
 
-**参数表**：
-| 参数 | 类型 | 说明 |
-| :--- | :--- | :--- |
-| `--iterations` | int | 执行多几轮闭环迭代，默认为 1。 |
-| `--mode` | str | `ricequant` (米筐云数据) 或 `qlib` (本地高频数据)。 |
-| `--llm-provider`| str | 强制指定大模型底层: `kimi`, `qwen`, `claude`。 |
-| `--llm-model` | str | 强制指定模型名，如 `kimi-k2-thinking-turbo`。 |
-| `--embedding-provider`| str | 强制指定向量底层: `local`, `kimi`, `qwen`, ... |
-| `--rebuild-rag` | flag | 扫描 `rag_docs` 并重新索引数据库。 |
-| `--verbose` | flag | 输出底层 Debug 级别极详细日志。 |
+# 数据源配置 (如果使用 ricequant 模式必须填写)
+RQ_USER="你的RiceQuant账号"
+RQ_PASS="你的RiceQuant密码"
+```
 
-**最佳推荐执行指令 (Kimi 深度思考 + 米筐云端测评 + 零成本本地 RAG)：**
+### 7.3 一键启动命令集群挖掘
+推荐使用强大的 API 大模型，并使用 `--parallel` 并发全速挖掘。下方命令启动了 3 个截然不同的研究方向，每个方向将独立探索迭代 20 次。
+
 ```bash
-python main.py --iterations 3 --mode ricequant \
-  --llm-provider kimi \
-  --llm-model kimi-k2-thinking-turbo \
-  --embedding-provider local
+python manager.py --iterations 20 \
+--mode ricequant \
+--llm-provider glm --llm-model glm-4 \
+--market-start 2021-01-01 --market-end 2021-12-31 \
+--roles \
+"利用 Hurst 指数进行时间序列动量研究的专家" \
+"专注日内高频波动率偏斜与流动性错配的专家" \
+"利用 HMM 隐马尔可夫模型进行市场状态识别的专家" \
+--parallel
 ```
 
-**快速轻量运行指令 (Qwen 极速模型 + Qlib 本地数据)：**
-```bash
-python main.py --iterations 2 --mode qlib \
-  --llm-provider qwen \
-  --llm-model qwen-plus
-```
-
-> **注意：** 首次使用 `--embedding-provider local` 时，系统将通过 Hugging Face 自动下载 `BAAI/bge-large-zh-v1.5` 权重文件 (约1.3GB)，请保持网络通畅。
-
----
-**文档版本**: 3.0
-**最新更新**: 全架构解析、RQ 矩阵引擎与混合 RAG 参数化方案。
+执行完毕后，控制台将输出所有合格且**互相正交**的高质量 Alpha 因子池，并将它们的最佳表达式和收益表现持久化留存。

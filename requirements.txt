@@ -1,18 +1,18 @@
 langchain>=0.1.0
 langchain-community
-langchain-anthropic
 langchain-chroma
+langchain-anthropic
+langchain-openai
 langgraph
 chromadb
-tiktoken
-numpy
-pandas
-git+https://github.com/microsoft/qlib.git
-typing_extensions
 pydantic>=2.0.0
+typing_extensions
 python-dotenv
 loguru
-anthropic
-langchain-openai
+numpy
+pandas
 rqdatac
 sentence-transformers
+tiktoken
+anthropic
+qlib @ git+https://github.com/microsoft/qlib.git

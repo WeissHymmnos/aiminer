@@ -35,10 +35,15 @@ class SafeEvalTransformer(ast.NodeTransformer):
         return node
 
 def zscore(df: pd.DataFrame) -> pd.DataFrame:
-    means = df.mean(axis=0, skipna=True)
-    stds  = df.std(axis=0, skipna=True, ddof=0).replace(0, np.nan)
-    stds[stds < 1e-8] = 1
-    return df.sub(means, axis='columns').div(stds, axis='columns')
+    if df.empty: return df
+    means = df.mean(axis=1)
+    stds  = df.std(axis=1).replace(0, np.nan)
+    # If std is NaN (all same values), the result after sub will be 0 anyway. 
+    # But we need to handle the div by std carefully.
+    res = df.sub(means, axis=0)
+    # Only divide where std is not NaN and > 0
+    res = res.div(stds, axis=0).fillna(0)
+    return res
 
 class RiceQuantEval:
     """
@@ -103,8 +108,8 @@ class RiceQuantEval:
         # Get instruments
         instruments = rq.index_components(self.market, self.test_end_date)
         
-        # Fetch OHLCV
-        fields = ["close", "open", "high", "low", "volume"]
+        # Fetch OHLCV + Turnover
+        fields = ["close", "open", "high", "low", "volume", "total_turnover"]
         df = rq.get_price(
             instruments,
             start_date=self.test_start_date,
@@ -140,6 +145,11 @@ class RiceQuantEval:
         for col in self.raw_data.columns:
             fields[col] = self.raw_data[col].unstack()
         
+        # Add vwap: total_turnover / volume
+        if 'total_turnover' in fields and 'volume' in fields:
+            fields['vwap'] = fields['total_turnover'] / fields['volume'].replace(0, np.nan)
+            fields['vwap'] = fields['vwap'].ffill().fillna(fields['close'])
+
         # Define local helper functions for the eval engine
         def Rank(df):
             return df.rank(axis=1, pct=True)
@@ -148,46 +158,47 @@ class RiceQuantEval:
             if n is None: 
                 res = df.mean(axis=1)
                 return pd.DataFrame(np.repeat(res.values[:, np.newaxis], df.shape[1], axis=1), index=df.index, columns=df.columns)
-            return df.rolling(int(n)).mean()
+            return df.rolling(max(1, _get_n(n))).mean()
         
         def Std(df, n=None):
             if n is None: 
                 res = df.std(axis=1)
                 return pd.DataFrame(np.repeat(res.values[:, np.newaxis], df.shape[1], axis=1), index=df.index, columns=df.columns)
-            return df.rolling(int(n)).std()
+            return df.rolling(max(1, _get_n(n))).std()
         
         def Median(df, n=None):
             if n is None: 
                 res = df.median(axis=1)
                 return pd.DataFrame(np.repeat(res.values[:, np.newaxis], df.shape[1], axis=1), index=df.index, columns=df.columns)
-            return df.rolling(int(n)).median()
+            return df.rolling(max(1, _get_n(n))).median()
 
         def EMA(df, n):
-            return df.ewm(span=int(n)).mean()
+            return df.ewm(span=max(1, _get_n(n))).mean()
 
         def Abs(df):
             return np.abs(df)
         
         def _get_n(n):
             if isinstance(n, (pd.Series, pd.DataFrame)):
-                # If n is a matrix/series, take the most recent scalar value (or mean)
-                # This is a common requirement when LLMs generate dynamic windows
                 try:
                     val = n.iloc[-1]
                     if isinstance(val, pd.Series): val = val.iloc[-1]
                     return int(val)
                 except:
                     return 20 # Fallback
-            return int(n)
+            try:
+                return int(float(n))
+            except:
+                return 20
 
         def Ref(df, n):
             return df.shift(_get_n(n))
         
         def Log(df):
-            return np.log(df)
+            return np.log(df.replace(0, np.nan))
         
         def Sum(df, n):
-            return df.rolling(_get_n(n)).sum()
+            return df.rolling(max(1, _get_n(n))).sum()
 
         def If(cond, a, b):
             # If 'a' is scalar, convert to DF to match cond
@@ -213,13 +224,15 @@ class RiceQuantEval:
             return df.diff(_get_n(n))
 
         def Corr(df1, df2, n):
-            return df1.rolling(_get_n(n)).corr(df2)
+            return df1.rolling(max(1, _get_n(n))).corr(df2)
 
         def Cov(df1, df2, n):
-            return df1.rolling(_get_n(n)).cov(df2)
+            return df1.rolling(max(1, _get_n(n))).cov(df2)
 
         def Ts_Rank(df, n):
-            return df.rolling(_get_n(n)).apply(lambda x: x.rank(pct=True).iloc[-1], raw=False)
+            nn = max(1, _get_n(n))
+            if nn == 1: return pd.DataFrame(0.5, index=df.index, columns=df.columns)
+            return df.rolling(nn).apply(lambda x: x.rank(pct=True).iloc[-1], raw=False)
 
         def CSRank(df):
             return df.rank(axis=1, pct=True)
@@ -231,7 +244,7 @@ class RiceQuantEval:
             return df.clip(lower=lower, upper=upper, axis=0 if isinstance(lower, pd.Series) else None)
 
         def CSZScore(df):
-            return df.sub(df.mean(axis=1), axis=0).div(df.std(axis=1), axis=0)
+            return df.sub(df.mean(axis=1), axis=0).div(df.std(axis=1).replace(0, 1), axis=0)
 
         def Winsorize(df, pct=0.05):
             # Simple winsorization on cross-section
@@ -239,13 +252,9 @@ class RiceQuantEval:
 
         def GroupNeutral(df, group='sector'):
             # Simplified neutral: just subtract cross-sectional mean
-            # In real case we should use sector info, but fallback to global CSMean for now
             return df.sub(df.mean(axis=1), axis=0)
 
         def Count():
-            # Return a matrix of count of instruments per day
-            # Since we are using unstacked matrices, the number of columns is the count
-            # But eval might expect a value. We'll return the number of columns as a series/df
             c = fields['close'].shape[1]
             return pd.DataFrame(c, index=fields['close'].index, columns=fields['close'].columns)
 
@@ -253,17 +262,18 @@ class RiceQuantEval:
             return np.sign(df)
 
         def Sqrt(df):
-            return np.sqrt(df)
+            return np.sqrt(df.clip(lower=0))
 
         def Ts_ArgMax(df, n):
-            return df.rolling(_get_n(n)).apply(lambda x: float(np.argmax(x)), raw=True)
+            return df.rolling(max(1, _get_n(n))).apply(lambda x: float(np.argmax(x)), raw=True)
 
         def Ts_ArgMin(df, n):
-            return df.rolling(_get_n(n)).apply(lambda x: float(np.argmin(x)), raw=True)
+            return df.rolling(max(1, _get_n(n))).apply(lambda x: float(np.argmin(x)), raw=True)
 
-        def Ts_Percentile(df, n, p):
-            # Rolling percentile
-            return df.rolling(_get_n(n)).apply(lambda x: np.percentile(x, float(p)), raw=True)
+        def Ts_Percentile(df, n, p=50):
+            # Rolling percentile VALUE (p-th percentile of last n days)
+            # Default p=50 (median) if not provided
+            return df.rolling(max(1, _get_n(n))).apply(lambda x: np.percentile(x, float(p)), raw=True)
 
         # Basic operator aliases for LLM compatibility
         def Add(a, b): return a + b
@@ -443,6 +453,7 @@ class RiceQuantEval:
             logger.warning("All data points were NaN or Inf after factor computation.")
             self.ic = 0.0
             self.rankic = 0.0
+            self.daily_returns = {}
             return
 
         # IC
@@ -457,6 +468,14 @@ class RiceQuantEval:
         # Fill NaN in series with 0 to prevent final NaN
         self.ic = round(float(ic_series.fillna(0).mean()), 4)
         self.rankic = round(float(rank_ic_series.fillna(0).mean()), 4)
+        
+        # Calculate daily factor returns (long-short portfolio based on z-scored factor)
+        # We assume factor values are portfolio weights, scaled to 1.0 gross leverage
+        daily_ret_series = all_data.groupby(level="datetime").apply(
+            lambda x: (x["factor"] * x["label"]).sum() / (x["factor"].abs().sum() + 1e-8)
+        )
+        # Convert datetime index to string keys for JSON serialization in State
+        self.daily_returns = {str(k.date() if hasattr(k, 'date') else k): float(v) for k, v in daily_ret_series.fillna(0).items()}
         
         logger.info(f"RiceQuant Evaluation - IC: {self.ic}, RankIC: {self.rankic}")
 

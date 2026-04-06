@@ -43,6 +43,7 @@ class RAGModule:
                 "kimi": {"model_name": "embedding-2", "api_base": "https://api.moonshot.cn/v1"},
                 "qwen": {"model_name": "text-embedding-v3", "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
                 "claude": {"model_name": "text-embedding-3-small", "api_base": "https://api.gptsapi.net/v1"},
+                "glm": {"model_name": "embedding-3", "api_base": "https://open.bigmodel.cn/api/paas/v4"},
             }
 
             try:

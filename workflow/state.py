@@ -24,6 +24,7 @@ class AlphaMinerState(TypedDict, total=False):
     
     # EvalAgent
     backtest_metrics: Dict[str, float]
+    daily_returns: Dict[str, float]
     review_summary: str
     is_effective: bool
     suggested_improvements: str

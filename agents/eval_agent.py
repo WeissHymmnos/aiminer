@@ -66,7 +66,8 @@ class EvalAgent:
                 "pfs1": getattr(evaluator, 'pfs1', 0.0),
                 "pfs2": getattr(evaluator, 'pfs2', 0.0),
                 "diversity": getattr(evaluator, 'diversity', 0.0),
-                "llm_score": getattr(evaluator, 'llm_avg_score', 0.0)
+                "llm_score": getattr(evaluator, 'llm_avg_score', 0.0),
+                "daily_returns": getattr(evaluator, 'daily_returns', {})
             }
         except (FileNotFoundError, ValueError, ImportError) as e:
             logger.error(f"{mode} evaluation failed or data not found: {e}")
@@ -83,6 +84,7 @@ class EvalAgent:
                 "pfs2": round(rng.uniform(0.0, 1.0), 6),
                 "diversity": round(rng.uniform(0.0, 1.0), 3),
                 "llm_score": round(rng.uniform(50.0, 100.0), 2),
+                "daily_returns": {},
                 "_simulated": True
             }
         except Exception as e:
@@ -100,6 +102,7 @@ class EvalAgent:
                 "pfs2": round(rng.uniform(0.0, 1.0), 6),
                 "diversity": round(rng.uniform(0.0, 1.0), 3),
                 "llm_score": round(rng.uniform(50.0, 100.0), 2),
+                "daily_returns": {},
                 "_simulated": True
             }
 
@@ -117,6 +120,7 @@ class EvalAgent:
             # 1. Backtesting Module
             metrics = self._execute_alphaeval_backtest(code, mode=mode)
             is_simulated = metrics.pop("_simulated", False)
+            daily_returns = metrics.pop("daily_returns", {})
             if is_simulated:
                 logger.warning("[EvalAgent] Using SIMULATED metrics — results are not real backtest data.")
             logger.info(f"[EvalAgent] Backtest Metrics (simulated={is_simulated}): {metrics}")
@@ -154,6 +158,7 @@ class EvalAgent:
             
             return {
                 "backtest_metrics": metrics,
+                "daily_returns": daily_returns,
                 "review_summary": review_result.review_summary,
                 "is_effective": review_result.is_effective,
                 "is_simulated": is_simulated,

@@ -88,7 +88,8 @@ class IdeaAgent:
             combined_context = combined_context[:4000] + "... [Truncated]"
         
         # 2. Reason Module: Formulate hypothesis
-        system_msg = ("You are an elite quantitative researcher designing alpha factors for a high-frequency or statistical arbitrage fund. "
+        role_prompt = state.get("role_prompt", "You are an elite quantitative researcher designing alpha factors for a high-frequency or statistical arbitrage fund.")
+        system_msg = (f"{role_prompt}\n"
                       "Use the provided context to inspire a novel hypothesis. Do not repeat failed past experiences.\n\n"
                       "IMPORTANT: Pay close attention to the MACRO NEWS and MARKET ANALYSIS provided.\n"
                       "1. Macro News: Use central bank signals, trade data, or inflation trends to justify the economic rationale.\n"
