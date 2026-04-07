@@ -44,6 +44,9 @@ class RAGModule:
                 "qwen": {"model_name": "text-embedding-v3", "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1"},
                 "claude": {"model_name": "text-embedding-3-small", "api_base": "https://api.gptsapi.net/v1"},
                 "glm": {"model_name": "embedding-3", "api_base": "https://open.bigmodel.cn/api/paas/v4"},
+                "openai": {"model_name": "text-embedding-3-small", "api_base": "https://api.openai.com/v1"},
+                "ollama": {"model_name": "nomic-embed-text", "api_base": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")},
+                "vllm": {"model_name": "BAAI/bge-large-zh-v1.5", "api_base": os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1")}
             }
 
             try:

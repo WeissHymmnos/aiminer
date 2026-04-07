@@ -519,6 +519,13 @@ class RiceQuantEval:
                 try: return int(float(n))
                 except: return 5
             
+            def If(cond, a, b):
+                if isinstance(a, (int, float)):
+                    a = pd.DataFrame(a, index=cond.index, columns=cond.columns)
+                if isinstance(b, (int, float)):
+                    b = pd.DataFrame(b, index=cond.index, columns=cond.columns)
+                return a.where(cond, b)
+                
             context = {
                 "fields": dummy_fields, "np": np, "pd": pd,
                 "Rank": lambda df: df.rank(axis=1, pct=True),
@@ -533,7 +540,7 @@ class RiceQuantEval:
                 "Ref": lambda df, n: df.shift(_get_n(n)),
                 "Delta": lambda df, n: df.diff(_get_n(n)),
                 "Corr": lambda df1, df2, n: df1.rolling(max(1, _get_n(n))).corr(df2),
-                "If": lambda cond, a, b: a.where(cond, b),
+                "If": If,
                 "Greater": lambda a, b: a > b, "Less": lambda a, b: a < b,
                 "And": lambda a, b: a & b, "Or": lambda a, b: a | b,
                 "Ts_Rank": lambda df, n: df.rolling(max(1, _get_n(n))).apply(lambda x: x.rank(pct=True).iloc[-1]),
