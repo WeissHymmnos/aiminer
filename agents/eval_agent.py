@@ -10,17 +10,12 @@ from core.llm import get_llm
 from schemas.messages import ReflexiveReviewOutput
 
 class EvalAgent:
-    """
-    EvalAgent evaluates the factor/strategy effectiveness.
-    Outputs experience to RAG.
-    """
     def __init__(self, rag_module: RAGModule, provider: str = None, model: str = None):
         self.rag = rag_module
         self.llm = get_llm(temperature=0.4, provider=provider, model_name=model)
     
     @staticmethod
     def _strip_markdown_json(text: str) -> str:
-        # Remove markdown code block wrapper from JSON response.
         text = text.strip()
         if text.startswith("```json"):
             text = re.sub(r'^```json\s*', '', text)
