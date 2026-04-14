@@ -7,7 +7,7 @@ class AlphaResearcher:
     def __init__(
         self,
         role_prompt: str,
-        max_iterations: int = 3,
+        max_iterations: int = 5,
         evaluation_mode: str = "ricequant",
         evaluation_engine: str = "pandas",
         market_start: str = None,

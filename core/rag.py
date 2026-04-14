@@ -11,8 +11,10 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Prevent CUDA fragmentation
+# Prevent CUDA fragmentation and set higher networking timeouts
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["OPENAI_TIMEOUT"] = "60"
+os.environ["HTTP_TIMEOUT"] = "60"
 
 
 class RAGModule:
@@ -246,17 +248,50 @@ class RAGModule:
             except Exception as e:
                 logger.error(f"Failed to populate knowledge base: {e}")
 
-    def _safe_query(self, collection, query: str, n_results: int):
-        # Query a collection safely, handling empty collections and DB exceptions.
-        try:
-            count = collection.count()
-            if count == 0:
+    def _safe_query(self, collection, query: str, n_results: int, max_retries: int = 3):
+        # Query a collection safely with retry logic, backoff, and file-level lock protection.
+        import time
+        import fcntl
+        last_error = None
+        
+        lock_file = os.path.join(self.db_dir, "rag_read.lock")
+        
+        for attempt in range(max_retries):
+            try:
+                # Use shared lock for reading
+                with open(lock_file, "a+") as lf:
+                    fcntl.flock(lf, fcntl.LOCK_SH)
+                    try:
+                        count = collection.count()
+                        if count == 0:
+                            return None
+                        actual_n = min(n_results, count)
+                        
+                        # Executing the query with potential timeout
+                        return collection.query(query_texts=[query], n_results=actual_n)
+                    finally:
+                        fcntl.flock(lf, fcntl.LOCK_UN)
+                
+            except Exception as e:
+                last_error = e
+                err_msg = str(e).lower()
+                
+                # If it's a timeout or locking error, wait and retry
+                if any(x in err_msg for x in ["timeout", "timed out", "rate limit", "database is locked"]):
+                    wait_time = (attempt + 1) * 2
+                    logger.warning(
+                        f"ChromaDB query timed out or locked (Attempt {attempt + 1}/{max_retries}). "
+                        f"Retrying in {wait_time}s... Error: {e}"
+                    )
+                    time.sleep(wait_time)
+                    continue
+                
+                # For other errors, log and return empty
+                logger.warning(f"ChromaDB query failed with non-timeout error: {e}. Returning empty results.")
                 return None
-            actual_n = min(n_results, count)
-            return collection.query(query_texts=[query], n_results=actual_n)
-        except Exception as e:
-            logger.warning(f"ChromaDB query failed: {e}. Returning empty results.")
-            return None
+                
+        logger.error(f"ChromaDB query failed after {max_retries} retries. Final error: {last_error}")
+        return None
 
     def retrieve(self, query: str, n_results: int = 2) -> str:
         # Retrieve relevant context from knowledge and experiences based on query.

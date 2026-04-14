@@ -177,8 +177,9 @@ class PortfolioManager:
         valid_factors = []
 
         # 1. First-pass filter: Absolute performance threshold
-        # Using IC > 0.01 as a reasonable threshold for valid alphas in this mock context
-        threshold = 0.01
+        # A-share real effective factors typically have IC in 0.003~0.008;
+        # lowered from 0.01 to 0.005 to avoid culling genuinely useful alphas.
+        threshold = 0.005
         for res in results_list:
             if res.get("error"):
                 logger.warning(
@@ -254,7 +255,7 @@ class PortfolioManager:
             from core.hybrid_knowledge import HybridKnowledge
 
             logger.info(
-                "🚀 Main process synthesizing shared knowledge base (LLM Wiki)..."
+                "Main process synthesizing shared knowledge base (LLM Wiki)..."
             )
             knowledge = HybridKnowledge(
                 llm_provider=self.kwargs.get("llm_provider"),

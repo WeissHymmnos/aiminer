@@ -89,7 +89,7 @@ def print_summary(final_state: dict):
         print(f"  Improvements: {final_state['suggested_improvements'][:200]}")
 
     if final_state.get("error"):
-        print(f"\n  ⚠ Last Error: {final_state['error']}")
+        print(f"\n  ! Last Error: {final_state['error']}")
 
     print("=" * 60 + "\n")
 
@@ -248,6 +248,26 @@ def main():
                     logger.error(f"Error in {node_name}: {state_update['error']}")
 
         logger.info("=== Execution Complete ===")
+        
+        # Final Summary Generation with plots
+        if final_state.get("code_expression") and not final_state.get("is_simulated"):
+            try:
+                from agents.summary_agent import SummaryAgent
+                summary_agent = SummaryAgent(provider=args.llm_provider, model=args.llm_model)
+                factor_id = final_state.get("hypothesis_name", f"factor_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+                report_data = {
+                    "id": factor_id,
+                    "hypothesis": final_state.get("hypothesis_description"),
+                    "code": final_state.get("code_expression"),
+                    "metrics": final_state.get("backtest_metrics"),
+                    "returns": final_state.get("daily_returns"),
+                    "plot_paths": final_state.get("plot_paths", {})
+                }
+                report_path = summary_agent.generate_markdown_report(report_data)
+                logger.success(f"Final research report generated at: {report_path}")
+            except Exception as e:
+                logger.error(f"Failed to generate final report: {e}")
+
         save_results(final_state)
         print_summary(final_state)
 

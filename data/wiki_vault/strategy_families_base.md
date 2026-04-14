@@ -207,3 +207,39 @@ Use this page as the first stop when onboarding a new model, comparing signal mi
 - [[tail_hedge_net_demand_reversal_iter1]] — Tail-Hedge Net Demand Reversal
 - [[volatility_adjusted_overnight_gap_with_liquidity_exhaustion_iter2]] — Volatility-Adjusted Overnight Gap with Liquidity Exhaustion
 - [[central_bank_dampened_flow_rebound_iter2]] — Central-Bank-Dampened Flow Rebound
+- [[hurst_volatility_adjusted_volume_climax_reversal_iter1]] — Hurst-Volatility-Adjusted Volume Climax Reversal
+- [[liquidity_vacuum_gap_reversal_iter1]] — Liquidity Vacuum Gap Reversal
+- [[hurst_filtered_liquidity_volatility_divergence_reversal_iter1]] — Hurst-Filtered Liquidity-Volatility Divergence Reversal
+- [[cross_sector_defensive_quality_flow_iter1]] — Cross-Sector Defensive Quality Flow
+- [[vwap_slipage_liquidity_vacuum_reversion_iter2]] — VWAP-Slipage Liquidity Vacuum Reversion
+- [[hurst_filtered_liquidity_induced_range_compression_breakout_iter2]] — Hurst-Filtered Liquidity-Induced Range Compression Breakout
+- [[cap_adjusted_liquidity_shock_reversal_on_trade_weighted_dollar_spikes_iter2]] — Cap-Adjusted Liquidity Shock Reversal on Trade-Weighted Dollar Spikes
+- [[intraday_liquidity_adjusted_vwap_rebound_iter3]] — Intraday Liquidity-Adjusted VWAP Rebound
+- [[hurst_filtered_liquidity_price_compression_breakout_iter3]] — Hurst-Filtered Liquidity-Price Compression Breakout
+- [[cap_anchored_liquidity_shock_rebound_on_global_trade_weakness_iter3]] — Cap-Anchored Liquidity Shock Rebound on Global Trade Weakness
+- [[intraday_liquidity_weighted_return_dispersion_iter1]] — Intraday Liquidity-Weighted Return Dispersion
+- [[flight_to_quality_balance_sheet_momentum_iter1]] — Flight-to-Quality Balance-Sheet Momentum
+- [[global_trade_volatility_filtered_cross_sectional_reversal_iter2]] — Global-Trade-Volatility-Filtered Cross-Sectional Reversal
+- [[vwap_slippage_liquidity_stress_reversal_iter2]] — VWAP-Slippage Liquidity Stress Reversal
+- [[hurst_scaled_liquidity_adjusted_intraday_reversal_iter1]] — Hurst-Scaled Liquidity-Adjusted Intraday Reversal
+- [[intraday_volume_weighted_mean_reversion_acceleration_iter3]] — Intraday Volume-Weighted Mean Reversion Acceleration
+- [[cross_sectional_liquidity_adjusted_policy_shadow_beta_iter3]] — Cross-Sectional Liquidity-Adjusted Policy-Shadow Beta
+- [[hurst_scaled_liquidity_weighted_order_imbalance_reversal_iter2]] — Hurst-Scaled Liquidity-Weighted Order-Imbalance Reversal
+- [[hurst_scaled_liquidity_weighted_cross_sectional_mean_reversion_iter3]] — Hurst-Scaled Liquidity-Weighted Cross-Sectional Mean-Reversion
+- [[intraday_volume_weighted_return_dispersion_iter1]] — Intraday Volume-Weighted Return Dispersion
+- [[liquidity_weighted_hurst_adjusted_cross_sectional_reversal_iter1]] — Liquidity-Weighted Hurst-Adjusted Cross-Sectional Reversal
+- [[volume_weighted_intraday_gradient_reversal_iter2]] — Volume-Weighted Intraday Gradient Reversal
+- [[liquidity_adjusted_hurst_slope_dispersion_reversal_iter2]] — Liquidity-Adjusted Hurst-Slope Dispersion Reversal
+- [[cross_sectional_gamma_squeeze_reversal_with_gamma_adjusted_volume_iter1]] — Cross-Sectional Gamma-Squeeze Reversal with Gamma-Adjusted Volume
+- [[vwap_liquidity_gradient_reversal_iter3]] — VWAP Liquidity Gradient Reversal
+- [[hurst_scaled_liquidity_imbalance_mean_reversion_iter3]] — Hurst-Scaled Liquidity-Imbalance Mean-Reversion
+- [[cross_sector_risk_reversal_on_macro_surprise_dispersion_iter2]] — Cross-Sector Risk-Reversal on Macro-Surprise Dispersion
+- [[liquidity_adjusted_hurst_weighted_idiosyncratic_reversal_iter1]] — Liquidity-Adjusted Hurst-Weighted Idiosyncratic Reversal
+- [[volatility_adjusted_volume_flow_divergence_iter1]] — Volatility-Adjusted Volume Flow Divergence
+- [[liquidity_adjusted_inflation_beta_reversal_with_policy_uncertainty_filter_iter1]] — Liquidity-Adjusted Inflation-Beta Reversal with Policy-Uncertainty Filter
+- [[liquidity_adjusted_hurst_dispersion_reversal_iter2]] — Liquidity-Adjusted Hurst Dispersion Reversal
+- [[intraday_liquidity_weighted_return_dispersion_iter2]] — Intraday Liquidity-Weighted Return Dispersion
+- [[cross_sectional_liquidity_adjusted_inflation_expectation_reversal_with_sector_volatility_filter_iter2]] — Cross-Sectional Liquidity-Adjusted Inflation-Expectation Reversal with Sector-Volatility Filter
+- [[intraday_liquidity_weighted_return_dispersion_iter3]] — Intraday Liquidity-Weighted Return Dispersion
+- [[cross_sectional_hurst_term_structure_volatility_reversal_iter3]] — Cross-Sectional Hurst-Term Structure Volatility Reversal
+- [[cross_sectional_term_structure_slope_reversal_with_liquidity_filter_iter3]] — Cross-Sectional Term-Structure Slope Reversal with Liquidity Filter

@@ -1,5 +1,5 @@
 # --- Stage 1: Build Stage ---
-FROM python:3.10-slim-bullseye AS builder
+FROM python:3.11-slim-bullseye AS builder
 
 # Prevent Python from writing .pyc files and enable unbuffered logging
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -35,7 +35,7 @@ RUN maturin build --release --strip && \
     pip install --no-cache-dir --prefix=/install target/wheels/*.whl
 
 # --- Stage 2: Runtime Stage ---
-FROM python:3.10-slim-bullseye
+FROM python:3.11-slim-bullseye
 
 WORKDIR /app
 

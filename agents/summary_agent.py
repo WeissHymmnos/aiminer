@@ -46,9 +46,7 @@ class SummaryAgent:
         code = factor_data.get("code", "N/A")
         metrics = factor_data.get("metrics", {})
         returns = factor_data.get("returns", pd.Series())
-
-        # Generate chart
-        chart_path = self.generate_equity_curve(returns, factor_id)
+        plot_paths = factor_data.get("plot_paths", {})
 
         # Build analysis via LLM
         prompt = ChatPromptTemplate.from_messages(
@@ -73,11 +71,14 @@ class SummaryAgent:
             logger.error(f"Failed to generate LLM summary: {e}")
             analysis = "Economic analysis generation failed."
 
-        chart_section = (
-            f"## 3. Equity Curve\n![Equity Curve](/api/charts/{factor_id})\n\n"
-            if chart_path
-            else "## 3. Equity Curve\n_No return series available for this factor._\n\n"
-        )
+        # Build chart section with IS/OOS and Layered images
+        chart_section = "## 3. Backtest Visualization\n\n"
+        if plot_paths.get("equity"):
+            chart_section += f"### Cumulative Returns (IS/OOS)\n![Equity Curve]({plot_paths['equity']})\n\n"
+        if plot_paths.get("layers"):
+            chart_section += f"### Layered Returns (G1-G5)\n![Layered Curves]({plot_paths['layers']})\n\n"
+        if not plot_paths:
+            chart_section += "_No visualization available._\n\n"
 
         report_md = (
             f"# Alpha Factor Research Report: {factor_id}\n\n"
@@ -87,9 +88,11 @@ class SummaryAgent:
             f"## 2. Performance Metrics\n"
             f"| Metric | Value |\n"
             f"| :--- | :--- |\n"
-            f"| Information Coefficient (IC) | {metrics.get('information_coefficient', 0.0):.4f} |\n"
+            f"| Information Coefficient (Full IC) | {metrics.get('information_coefficient', 0.0):.4f} |\n"
+            f"| Out-of-Sample IC (OOS) | {metrics.get('oos_ic', 0.0):.4f} |\n"
             f"| Rank IC | {metrics.get('rank_ic', 0.0):.4f} |\n"
-            f"| Realized Return Efficiency | {metrics.get('rre', 0.0):.4f} |\n\n"
+            f"| Sharpe Ratio | {metrics.get('sharpe', 0.0):.4f} |\n"
+            f"| Max Drawdown | {metrics.get('max_drawdown', 0.0):.4f} |\n\n"
             f"{chart_section}"
             f"## 4. Professional Analysis\n"
             f"{analysis}\n"

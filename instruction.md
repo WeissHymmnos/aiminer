@@ -1,1492 +1,1309 @@
-# AI Alpha Miner — 完整技术说明文档
+# AI Alpha Miner — 完整技术说明书
+
+本文档是系统的权威技术参考，覆盖架构设计、模块职责、数据流、算子规范、验证规则、已知陷阱与开发规范。任何新代码的修改均应以本文档为基础。
+
+---
 
 ## 目录
 
 1. [项目概述](#1-项目概述)
-2. [系统架构总览](#2-系统架构总览)
-3. [环境搭建](#3-环境搭建)
-4. [快速运行指南](#4-快速运行指南)
-5. [模块详解：工作流层](#5-模块详解工作流层)
-6. [模块详解：Agent 层](#6-模块详解agent-层)
-7. [模块详解：核心能力层](#7-模块详解核心能力层)
-8. [模块详解：因子评估层](#8-模块详解因子评估层)
-9. [模块详解：Schemas 层](#9-模块详解schemas-层)
-10. [模块详解：顶层入口](#10-模块详解顶层入口)
-11. [完整数据流与流程说明](#11-完整数据流与流程说明)
-12. [配置参数全览](#12-配置参数全览)
-13. [输出文件说明](#13-输出文件说明)
-14. [已知问题与注意事项](#14-已知问题与注意事项)
+2. [环境搭建](#2-环境搭建)
+3. [运行系统](#3-运行系统)
+4. [整体架构](#4-整体架构)
+5. [LangGraph 状态机](#5-langgraph-状态机)
+6. [各模块详解](#6-各模块详解)
+7. [因子表达式系统](#7-因子表达式系统)
+8. [求值引擎](#8-求值引擎)
+9. [RiceQuant 回测流程](#9-ricequant-回测流程)
+10. [模拟回退机制](#10-模拟回退机制)
+11. [早停与 patience 机制](#11-早停与-patience-机制)
+12. [知识库系统](#12-知识库系统)
+13. [LLM 网关](#13-llm-网关)
+14. [Manager 与 SubAgent 协调](#14-manager-与-subagent-协调)
+15. [输出结构](#15-输出结构)
+16. [AlphaMinerState 字段说明](#16-alphaminerstate-字段说明)
+17. [关键参数速查](#17-关键参数速查)
+18. [已知问题与规避方式](#18-已知问题与规避方式)
+19. [测试](#19-测试)
+20. [开发规范](#20-开发规范)
 
 ---
 
 ## 1. 项目概述
 
-AI Alpha Miner 是一个**全自动量化因子挖掘系统**。它利用 LLM（大语言模型）作为核心推理引擎，通过 Manager-SubAgent 群体智能框架，自主完成从市场假说提出、数学公式化、代码实现，到因子回测、反思改进的完整因子挖掘闭环。
+**AI Alpha Miner** 是一个端到端的量化 Alpha 因子自动发现系统。系统通过 **Manager–SubAgent Swarm** 架构，由多个 LLM 驱动的量化研究员 Agent 并发工作，自主完成以下完整流水线：
 
-核心特点：
-- **群体智能**：多个具备不同角色专长的研究员 Agent 并行探索
-- **知识积累**：每轮实验结果写入 LLM Wiki，供后续 Agent 参考学习
-- **遗传算法**：筛选出最优因子后，通过 LLM 完成"基因交叉"，合成更强因子
-- **自适应早停**：基于 IC 阈值和 Patience 计数器控制实验深度
-- **双引擎支持**：Pandas（兼容 Qlib）和 Polars（高性能）两种因子计算后端
+```
+市场假说生成 → 数学公式化 → Qlib 代码实现 → 回测（RiceQuant/Qlib）→ 正交化筛选 → 因子池
+```
 
-目标市场：中国A股市场（通过 RiceQuant/rqdatac 接口）或微软 Qlib 框架。
+核心设计原则：
+
+- **全自动**：从假说到最终因子池无需人工干预
+- **多角色**：每个 SubAgent 被赋予不同的量化研究角色（动量专家、统计套利专家等），鼓励策略多样性
+- **知识积累**：每次迭代的结果（成功或失败）写入 LLMWiki 和 RAG，后续 Agent 从中学习，避免重复失败
+- **安全执行**：所有 LLM 生成的代码在 AST 级白名单验证后方可执行，通过 `SafeEvalTransformer` 隔离危险名称
+- **容错设计**：回测失败降级为模拟指标，模拟状态全面隔离，不污染因子池、不触发早停、不写知识库
 
 ---
 
-## 2. 系统架构总览
+## 2. 环境搭建
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         manager.py                                   │
-│                       PortfolioManager                               │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │  ProcessPoolExecutor (并行/串行)                              │   │
-│  │  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐  │   │
-│  │  │  SubAgent #1   │  │  SubAgent #2   │  │  SubAgent #3   │  │   │
-│  │  │  (均值回归专家) │  │  (动量专家)     │  │  (套利专家)    │  │   │
-│  │  └───────┬────────┘  └───────┬────────┘  └───────┬────────┘  │   │
-│  └──────────┼────────────────────┼───────────────────┼───────────┘   │
-│             │ (每个子进程独立运行 LangGraph 工作流)    │               │
-│  ┌──────────▼────────────────────▼───────────────────▼───────────┐   │
-│  │              LangGraph 工作流 (每个 SubAgent 独立实例)          │   │
-│  │  ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐  │   │
-│  │  │IdeaAgent │──▶│FactorAgt │──▶│ EvalAgt  │──▶│WikiUpdate│  │   │
-│  │  │假说生成   │   │公式+代码  │   │回测+反思  │   │更新知识库 │  │   │
-│  │  └──────────┘   └──────────┘   └──────────┘   └────┬─────┘  │   │
-│  │       ▲                                             │        │   │
-│  │       └──────────── increment (循环迭代) ────────────┘        │   │
-│  └────────────────────────────────────────────────────────────┘   │
-│                                                                     │
-│  ┌─────────────────────────────────────────────────────────────┐   │
-│  │              Manager 评估与筛选                              │   │
-│  │  1. IC > 0.01 阈值过滤                                      │   │
-│  │  2. Pearson 相关性 < 0.7 去冗余                              │   │
-│  │  3. 遗传交叉（取 Top-2 生成混合因子）                         │   │
-│  │  4. SQLite 持久化 + Markdown 报告生成                        │   │
-│  └─────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────┘
-
-知识层（所有 Agent 共享）
-┌──────────────────────────────────────────────────────────────────┐
-│  HybridKnowledge                                                  │
-│  ┌──────────────────────────────┐  ┌───────────────────────────┐ │
-│  │  RAGModule (core/rag.py)     │  │  LLMWiki (core/wiki.py)   │ │
-│  │  - ChromaDB 向量库            │  │  - 结构化因子卡片          │ │
-│  │  - BM25 关键词检索             │  │  - ChromaDB 向量索引      │ │
-│  │  - 语义相似度混合检索           │  │  - Markdown 文件持久化    │ │
-│  │  - 文档：data/rag_docs/       │  │  - 位置：data/wiki_db/    │ │
-│  └──────────────────────────────┘  └───────────────────────────┘ │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-### 目录结构
-
-```
-aiminer/
-├── manager.py               # 入口：多 Agent 群体管理器
-├── main.py                  # 入口：单 Agent 顺序模式
-├── sub_agent.py             # 单个研究员 Agent 封装
-├── workflow/
-│   ├── state.py             # LangGraph 状态定义（TypedDict）
-│   └── graph.py             # LangGraph 图结构与路由
-├── agents/
-│   ├── idea_agent.py        # 假说生成代理
-│   ├── factor_agent.py      # 公式化与代码实现代理
-│   ├── eval_agent.py        # 回测评估代理
-│   └── summary_agent.py     # 报告生成代理
-├── core/
-│   ├── llm.py               # LLM 多提供商网关
-│   ├── rag.py               # ChromaDB RAG 模块
-│   ├── wiki.py              # LLM Wiki 知识库
-│   ├── hybrid_knowledge.py  # RAG + Wiki 混合检索
-│   ├── wiki_bootstrapper.py # 从 RAG 文档初始化 Wiki
-│   └── alphaeval/
-│       ├── rq_eval.py       # RiceQuant 因子评估引擎（主力）
-│       ├── modeltester.py   # Qlib 因子评估适配器
-│       └── polars_engine.py # Polars 高性能计算引擎
-├── polars_plugins/          # Rust 编写的 Polars 算子插件
-│   ├── Cargo.toml
-│   ├── pyproject.toml
-│   └── src/lib.rs
-├── schemas/
-│   └── messages.py          # Pydantic 结构化输出模型
-├── data/
-│   ├── rag_docs/            # RAG 知识文档（PDF、TXT、MD）
-│   ├── chroma_db/           # ChromaDB 向量数据库（自动生成）
-│   └── wiki_db/             # LLMWiki Markdown 卡片（自动生成）
-├── results/
-│   ├── alpha_miner.db       # SQLite 因子池数据库
-│   ├── alpha_pool.json      # JSON 备份
-│   ├── reports/             # 每个因子的 Markdown 报告
-│   └── charts/              # 权益曲线 PNG 图像
-├── tests/                   # pytest 测试套件
-├── environment.yml          # Conda 环境配置
-├── requirements.txt         # Python 依赖
-└── .env.example             # 环境变量模板
-```
-
----
-
-## 3. 环境搭建
-
-### 3.1 创建 Conda 环境
+### 依赖安装
 
 ```bash
-conda env create -f environment.yml
-conda activate aiminer
+conda env create -f environment.yml && conda activate aiminer
 pip install -r requirements.txt
 ```
 
-### 3.2 配置环境变量
+### 环境变量配置
 
 ```bash
 cp .env.example .env
-# 编辑 .env，至少填写一个 LLM API Key 和 RiceQuant 凭证
+# 然后编辑 .env 填入 API 密钥
 ```
 
-必要变量（至少一个 LLM + RiceQuant）：
-```ini
-# LLM（至少一个）
-LLM_KEY=sk-...           # Kimi/Moonshot
-ZHIPU_API_KEY=...        # 智谱 GLM（也用于 Embedding）
-OPENAI_API_KEY=sk-...    # OpenAI
-DEEPSEEK_API_KEY=...     # DeepSeek
-GROQ_API_KEY=...         # Groq（免费高速）
+必填的 `.env` 变量：
 
-# RiceQuant 回测
-RQ_USER=用户名
-RQ_PASS=密码
-# 或者 Token 方式
-RQ_TOKEN=your_token
-```
+| 变量名 | 用途 |
+|---|---|
+| `ZHIPU_API_KEY` / `GLM_KEY` | 智谱 GLM 系列 LLM |
+| `LLM_KEY` / `KIMI_API_KEY` | Kimi（Moonshot）|
+| `QWEN_API_KEY` | 通义千问 |
+| `DEEPSEEK_API_KEY` | DeepSeek |
+| `OPENAI_API_KEY` / `OpenAI_KEY` | OpenAI |
+| `ANTHROPIC_API_KEY` / `ClaudeCode_KEY` | Claude |
+| `OPENROUTER_API_KEY` | OpenRouter（多模型代理）|
+| `GROQ_API_KEY` | Groq（高速推理）|
+| `RQ_TOKEN` | RiceQuant License Token（优先）|
+| `RQ_USER` / `RQ_PASS` | RiceQuant 账号密码（备用）|
+| `USE_LOCAL_EMBEDDING` | 设为 `true` 启用本地 Embedding（Qwen3-Embedding-4B）|
 
-### 3.3 编译 Rust 插件
-
-```bash
-cd polars_plugins
-maturin develop --release
-cd ..
-```
-
-每次修改 `polars_plugins/src/lib.rs` 后必须重新执行。
-
-### 3.4 准备 RAG 文档（可选）
-
-将量化研究文档（PDF/TXT/MD）放入 `data/rag_docs/`，首次运行自动构建向量库。
+RiceQuant 认证优先级：Token > 账号密码。Token 长度须 > 50 字符。认证全局只执行一次（`_rq_initialized` 标志位），多进程共享主进程的认证状态。
 
 ---
 
-## 4. 快速运行指南
+## 3. 运行系统
 
-### 4.1 多 Agent 群体模式（推荐）
+### 主模式：多 Agent Swarm
 
 ```bash
 python manager.py \
   --iterations 5 \
   --mode ricequant \
-  --engine polars \
-  --llm-provider kimi \
-  --llm-model kimi-k2-turbo-preview \
-  --embedding-provider glm \
-  --market-start 2015-01-01 \
-  --market-end 2020-12-31 \
-  --roles "专注动量反转的量价专家" "基于基本面的价值投资专家" "统计套利专家" \
+  --llm-provider glm \
+  --llm-model glm-4-flash \
+  --roles "动量反转专家" "统计套利专家" "基本面量价专家" \
   --parallel \
   --wiki-bootstrap
 ```
 
-### 4.2 单 Agent 模式
+| 参数 | 说明 | 默认值 |
+|---|---|---|
+| `--iterations` | 每个 SubAgent 最大迭代轮数 | `5` |
+| `--mode` | 回测引擎：`ricequant` 或 `qlib` | `ricequant` |
+| `--engine` | 因子计算引擎：`pandas` 或 `polars` | `pandas` |
+| `--llm-provider` | LLM 提供商（见第 13 节）| 自动检测 |
+| `--llm-model` | 模型名称 | 各 provider 内置默认 |
+| `--roles` | 各 SubAgent 的角色 prompt，空格分隔 | 内置 3 个角色 |
+| `--parallel` | 多进程并行执行 SubAgent | 默认串行 |
+| `--wiki-bootstrap` | 启动前将 RAG 文档编译为 Wiki 卡片 | 关闭 |
+| `--rebuild-rag` | 强制重新 Embedding RAG 文档 | 关闭 |
+| `--embedding-provider` | `local`（Qwen3 本地）或 API | API |
+| `--market-start` | 回测/市场分析起始日期 | `2018-01-01` |
+| `--market-end` | 回测/市场分析截止日期 | `2025-12-31` |
+
+### 单 Agent 模式（调试用）
 
 ```bash
-python main.py --iterations 3 --mode ricequant --llm-provider glm --llm-model glm-5
+python main.py --iterations 3 --mode ricequant --llm-provider kimi
 ```
 
-### 4.3 运行测试
+### 推荐的稳定启动参数（A 股 RiceQuant）
 
 ```bash
-python -m pytest tests/ -v
-python -m pytest tests/test_polars_ops_extensive.py -v   # Polars 算子测试
-python -m pytest tests/test_numerical_consistency.py -v  # 数值一致性测试
-python test_eval.py     # 因子评估端到端测试（非 pytest）
-python test_compile.py  # Polars 编译器测试
+python manager.py \
+  --iterations 5 \
+  --mode ricequant \
+  --engine pandas \
+  --llm-provider kimi \
+  --roles "动量反转专家" "统计套利专家" \
+  --wiki-bootstrap
 ```
 
-### 4.4 命令行参数总览
-
-| 参数 | 类型 | 默认 | 说明 |
-|---|---|---|---|
-| `--iterations` | int | 2 | 每个 SubAgent 最大迭代次数 |
-| `--mode` | str | ricequant | 评估后端：`ricequant` 或 `qlib` |
-| `--engine` | str | pandas | 计算引擎：`pandas` 或 `polars` |
-| `--parallel` | flag | False | 开启并行多进程模式 |
-| `--wiki-bootstrap` | flag | False | 启动时从 RAG 文档初始化 Wiki |
-| `--roles` | str... | 默认3个 | 各 Agent 角色描述（空格分隔多个） |
-| `--llm-provider` | str | 自动检测 | LLM 提供商名称 |
-| `--llm-model` | str | 各商默认 | 指定具体模型名 |
-| `--embedding-provider` | str | 自动检测 | Embedding 提供商 |
-| `--market-start` | str | None | 市场分析起始日期 YYYY-MM-DD |
-| `--market-end` | str | None | 市场分析结束日期 YYYY-MM-DD |
-| `--rebuild-rag` | flag | False | 强制重建 ChromaDB 向量库 |
-| `--use-gpu` | flag | False | 使用 GPU 加速本地 Embedding |
+> **建议**：`--engine pandas` 在稳定性上优于 `polars`，调试时优先使用。Polars 引擎对深层嵌套表达式有额外要求（见第 8 节）。
 
 ---
 
-## 5. 模块详解：工作流层
+## 4. 整体架构
 
-### 5.1 `workflow/state.py`
+### 数据流
 
-定义 LangGraph 状态机的全局共享状态 `AlphaMinerState`。
-
-`total=False` 使所有字段均可选。各节点通过返回字典更新状态的指定字段，未返回的字段保持原值不变。唯一例外是 `messages` 字段——它使用 LangGraph Reducer 机制自动追加（`operator.add`），而非覆盖。
-
-```python
-class AlphaMinerState(TypedDict, total=False):
-    # 迭代控制
-    iteration: int              # 当前迭代编号（从 1 开始）
-    max_iterations: int         # 允许的最大迭代次数
-
-    # 知识上下文（IdeaAgent 每轮刷新）
-    rag_context: str            # RAG 检索返回的文档内容
-    wiki_context: str           # Wiki 检索返回的历史因子卡片
-    market_regime_summary: str  # 动态市场制度分析文本
-    macro_news_summary: str     # 宏观新闻摘要文本
-
-    # IdeaAgent 输出
-    hypothesis_name: str         # 因子假说名称，如"流动性冲击反转因子"
-    hypothesis_description: str  # 假说详细描述
-    rationale: str               # 经济学逻辑说明
-
-    # FactorAgent 输出
-    math_formula: str            # LaTeX 数学公式字符串
-    variables_defined: Dict[str, str]  # 公式变量释义
-    code_expression: str         # Qlib 表达式，如 Rank(Delta($close, 5))
-    is_valid_syntax: bool        # 静态语法验证是否通过
-
-    # EvalAgent 输出
-    backtest_metrics: Dict[str, float]  # IC, Rank IC, Sharpe, 最大回撤等指标
-    daily_returns: Dict[str, float]     # 日期字符串 → 日收益率
-    review_summary: str          # LLM 反思评审摘要
-    is_effective: bool           # 因子是否有效（IC > 0.02 且 Rank IC > 0.02）
-    suggested_improvements: str  # 下一轮改进建议（由 IdeaAgent 读取）
-    is_simulated: bool           # True 表示回测指标为模拟生成
-
-    # 早停机制
-    best_ic: float               # 历史最优 IC（初始 -999.0）
-    best_code_expression: Optional[str]  # 对应历史最优 IC 的因子代码
-    patience_counter: int        # 连续无改进轮数（达 3 次触发早停）
-
-    # 工作流控制
-    role_prompt: Optional[str]   # Agent 角色设定描述
-    evaluation_mode: str         # "ricequant" 或 "qlib"
-    evaluation_engine: str       # "pandas" 或 "polars"
-    market_analysis_start_date: Optional[str]
-    market_analysis_end_date: Optional[str]
-    market_analysis_lookback_days: Optional[int]  # 市场制度分析回溯天数，默认 60
-
-    error: Optional[str]         # 错误信息，非空则路由到 END
-    messages: Annotated[List[str], operator.add]  # 累积日志，自动追加
+```
+manager.py (PortfolioManager)
+│
+├─ [可选] WikiBootstrapper
+│   └─ 将 data/rag_docs/ 文档编译为 LLMWiki 卡片（一次性）
+│
+├─ dispatch_tasks(): 为每个 role 生成 SubAgent 任务参数
+│
+├─ ProcessPoolExecutor (--parallel) 或串行
+│   └─ sub_agent.py (AlphaResearcher.run())
+│       └─ workflow/graph.py (LangGraph StateGraph)
+│           ├─ idea_agent     → 生成假说（RAG + Wiki + 宏观/市场状态注入）
+│           ├─ factor_agent   → 假说 → 数学公式 → Qlib 表达式（含 AST 验证 + 干跑）
+│           ├─ eval_agent     → 回测（RiceQuant pandas/polars 或 Qlib）+ LLM 评审
+│           ├─ wiki_update    → 将本轮结果写入 LLMWiki
+│           └─ increment      → 更新计数器、清空临时状态、决策继续/终止
+│
+├─ evaluate_and_combine(results_list)
+│   ├─ 第一轮过滤：IC > 0.005（真实回测，排除 is_simulated 且排除空 returns）
+│   ├─ 第二轮过滤：Pearson 相关 < 0.7（去多重共线性，需至少 10 个重叠数据点）
+│   └─ 遗传杂交：top-2 因子注入 Crossover Agent，产生混合因子（IC 门槛 0.01）
+│
+└─ 持久化：SQLite WAL（results/alpha_miner.db）+ JSON + Markdown 报告 + 图表
 ```
 
----
+### 核心文件索引
 
-### 5.2 `workflow/graph.py`
-
-构建并编译 LangGraph 有向图，定义各节点和条件路由规则。
-
-#### `build_workflow(rebuild_rag, llm_provider, llm_model, embedding_provider, use_gpu) -> CompiledGraph`
-
-构建整个工作流。内部流程：
-1. 初始化 `HybridKnowledge`（所有 Agent 共享同一实例）
-2. 实例化 `IdeaAgent`、`FactorAgent`、`EvalAgent`
-3. 创建 `StateGraph(AlphaMinerState)` 并添加节点和边
-4. 返回编译后的 `app`
-
-**节点定义**：
-
-| 节点名 | 功能 |
+| 文件 | 职责 |
 |---|---|
-| `idea_agent` | 假说生成（`IdeaAgent.__call__`） |
-| `factor_agent` | 公式化 + 代码生成（`FactorAgent.__call__`） |
-| `eval_agent` | 回测 + LLM 反思（`EvalAgent.__call__`） |
-| `wiki_update` | 更新 Wiki 知识库（内部闭包函数） |
-| `increment` | 递增迭代计数器，重置当轮状态 |
+| `manager.py` | 最外层编排：角色分发、并行执行、因子过滤、遗传杂交、持久化 |
+| `sub_agent.py` | `AlphaResearcher`：初始化 LangGraph app、执行 workflow、汇总结果 |
+| `workflow/graph.py` | LangGraph 图定义、路由函数、`increment_iteration` 节点 |
+| `workflow/state.py` | `AlphaMinerState` TypedDict：流过图的唯一状态对象（见第 16 节）|
+| `agents/idea_agent.py` | 假说生成，注入 RAG + Wiki + 宏观 + 市场状态上下文 |
+| `agents/factor_agent.py` | 数学公式化 + Qlib 代码生成 + AST 验证白名单（含全部约束规则）|
+| `agents/eval_agent.py` | 回测执行 + LLM 评审 + 早停状态更新 + 模拟状态保护 |
+| `agents/summary_agent.py` | 为通过筛选的因子生成 Markdown 报告与权益曲线图 |
+| `core/llm.py` | 多 provider LLM 网关，返回 `ChatOpenAI` 兼容对象 |
+| `core/rag.py` | ChromaDB 向量检索 + 经验写入 |
+| `core/wiki.py` | LLMWiki：YAML frontmatter 结构化因子卡片库 |
+| `core/hybrid_knowledge.py` | 融合 RAG + Wiki；去重；回测后更新 Wiki |
+| `core/wiki_bootstrapper.py` | 将 RAG 文档批量编译为 Wiki 卡片 |
+| `core/alphaeval/rq_eval.py` | RiceQuant 回测：数据拉取、因子计算（pandas/polars）、IC 计算、分层、画图 |
+| `core/alphaeval/polars_engine.py` | Polars 算子实现 + `_eager_eval` 两步物化引擎 |
+| `core/alphaeval/modeltester.py` | Qlib 适配器（`AlphaEval`）|
+| `schemas/messages.py` | 所有 LLM 结构化输出的 Pydantic 模型 |
 
-**图拓扑**：
+---
+
+## 5. LangGraph 状态机
+
+### 图结构
+
 ```
-入口: idea_agent
-idea_agent  ──[route_after_idea]──>   factor_agent | end
-factor_agent ──[route_after_factor]──> eval_agent   | end
-eval_agent   ──[route_after_eval]──>   wiki_update  | end
-wiki_update  ──[route_after_wiki]──>   increment    | end
-increment    ──(固定边)──>             idea_agent
+[ENTRY] idea_agent
+    │
+    ├─ error 或 hypothesis_name 缺失 ─────────────────→ END
+    └─ → factor_agent
+           │
+           ├─ error ──────────────────────────────────→ END
+           └─ → eval_agent          （is_valid_syntax=False 也继续）
+                  │
+                  ├─ error ─────────────────────────→ END
+                  └─ → wiki_update
+                         │
+                         ├─ IC ≥ 0.05 且非模拟 ─────→ END  [早停：优质因子]
+                         ├─ patience_counter ≥ 4 ──→ END  [早停：无改善]
+                         ├─ iteration == max_iter ──→ END  [轮数耗尽]
+                         └─ → increment → [LOOP] idea_agent
 ```
 
-#### 路由函数
+### 路由函数说明
 
-**`route_after_idea(state) -> str`**
-- `error` 非空 → `"end"`
-- `hypothesis_name` 缺失 → 记错误日志 → `"end"`
+**`route_after_idea`**：
+- `state["error"]` 不为空 → `"end"`
+- `state["hypothesis_name"]` 缺失 → `"end"`（记录 ERROR 日志）
 - 否则 → `"factor_agent"`
 
-**`route_after_factor(state) -> str`**
-- `error` 非空 → `"end"`
-- `code_expression` 缺失 → 记错误日志 → `"end"`
-- `is_valid_syntax == False` → 记警告（但仍继续，让 dry_run 做最终判断）→ `"eval_agent"`
+**`route_after_factor`**：
+- `state["error"]` 不为空 → `"end"`
+- `state["code_expression"]` 缺失 → `"end"`
+- `is_valid_syntax=False`：记录 WARNING 但**不终止**（表达式可能在运行时成功，给 eval 一次机会）
 - 否则 → `"eval_agent"`
 
-**`route_after_eval(state) -> str`**
-- `error` 非空 → `"end"`
-- 否则始终 → `"wiki_update"`（确保失败实验也被记录以供学习）
+**`route_after_eval`**：
+- `state["error"]` 不为空 → `"end"`
+- 否则 → `"wiki_update"`（统一先更新知识库，再决策是否继续）
 
-**`route_after_wiki(state) -> str`**（早停判断，按优先级）
-1. `IC >= 0.05` → `"end"`（发现异常优秀因子）
-2. `patience_counter >= 3` → `"end"`（连续 3 轮无改进）
-3. `iteration < max_iterations` → `"increment"`（继续）
-4. 达到最大迭代 → `"end"`
+**`route_after_wiki`**（核心决策节点）：
+- 读取 `current_ic = state["backtest_metrics"]["information_coefficient"]`
+- 读取 `is_simulated = state["is_simulated"]`
+- **早停 1**：`current_ic >= 0.05 AND NOT is_simulated` → `"end"`，打印 SUCCESS 日志
+- **跳过陷阱**：`current_ic >= 0.05 AND is_simulated` → 打印 WARNING，**继续**
+- **早停 2**：`patience_counter >= 4` → `"end"`
+- `iteration < max_iterations` → `"increment"`
+- 否则 → `"end"`
 
-#### `increment_iteration(state) -> dict`
-
-重置单轮临时状态，保留跨轮积累信息：
-```python
-return {
-    "iteration": state["iteration"] + 1,
-    "best_ic": state["best_ic"],                           # 保留
-    "best_code_expression": state["best_code_expression"], # 保留最优代码
-    "patience_counter": state["patience_counter"],         # 保留耐心计数
-    "error": None,          # 清除错误，允许下轮继续
-    "is_valid_syntax": True, # 重置语法标志
-}
-```
-
-#### `wiki_update_node(state)` 闭包
-
-```python
-def wiki_update_node(state):
-    knowledge.update_wiki_after_eval(state)  # 写入 Wiki
-    query = f"Alpha factor ideas related to {state.get('role_prompt')}"
-    return {"wiki_context": knowledge.wiki.retrieve(query)}  # 刷新上下文
-```
+**`increment_iteration`**（节点，非路由）：
+- `iteration += 1`
+- **保留**跨轮字段：`best_ic`、`best_code_expression`、`patience_counter`、`market_regime_summary`、`macro_news_summary`
+- **清空**单轮字段：`hypothesis_name`、`hypothesis_description`、`rationale`、`code_expression`、`math_formula`、`variables_defined`、`backtest_metrics`、`review_summary`、`is_effective`、`suggested_improvements`、`error`
+- `is_simulated` 重置为 `False`，`is_valid_syntax` 重置为 `True`
 
 ---
 
-## 6. 模块详解：Agent 层
+## 6. 各模块详解
 
-### 6.1 `agents/idea_agent.py` — IdeaAgent
+### 6.1 IdeaAgent
 
-**职责**：综合多源知识（RAG + Wiki + 市场数据 + 宏观新闻），通过 LLM 提出新的量化因子假说。
+**文件**：`agents/idea_agent.py`  
+**LLM 温度**：0.7（创意优先）
 
-**LLM 温度**：`0.7`（高温，鼓励创新假说）
+**执行流程**：
 
-#### `IdeaAgent.__init__(knowledge, provider, model)`
-- `knowledge`：`HybridKnowledge` 实例，提供统一的知识检索接口
-- 通过 `get_llm(temperature=0.7)` 初始化 LLM 客户端
+1. 从 `HybridKnowledge.retrieve()` 获取 RAG + Wiki 融合上下文（查询基于角色 prompt，去重后截断至 6000 字符）
+2. 若 ricequant 模式且 `macro_news_summary` 为空：RAG 检索宏观新闻（"央行政策、贸易数据、通胀趋势"），缓存在 state（跨轮复用）
+3. 若 ricequant 模式且 `market_regime_summary` 为空：调用 `RiceQuantEval.get_market_regime()` 拉取价格趋势、波动率、成交量等统计数据，缓存在 state（跨轮复用）。拉取失败时降级为占位文本 `"[市场数据暂时不可用]"`，不阻断流程
+4. 拼接 `combined_context = rag_wiki + 宏观 + 市场状态`，截断至 6000 字符
+5. 若 `iteration > 1` 且存在 `suggested_improvements`：将上轮评审建议注入 system_msg 和 user_prompt 末尾，要求 LLM 明确响应反馈
+6. 调用 LLM，解析 `HypothesisOutput` JSON
 
-#### `IdeaAgent._strip_markdown_json(text) -> str` (静态方法)
-清理 LLM 返回的 JSON 字符串：
-1. 去除 ` ```json ` / ` ``` ` 代码块包装
-2. 清除 `\x00-\x08`、`\x0b-\x0c`、`\x0e-\x1f` 等控制字符
-
-#### `IdeaAgent.__call__(state) -> dict`
-
-**步骤 1：读取上下文**
-从 state 中读取 `iteration`、`previous_improvements`、`evaluation_mode` 等字段。
-
-**步骤 2：混合知识检索**
-```python
-base_query = f"Quantitative trading strategies...related to: {role_prompt}"
-combined_knowledge = self.knowledge.retrieve(base_query)
-# 返回 RAG 文档 + Wiki 因子卡片的拼接文本
-```
-
-**步骤 3：宏观新闻检索**（仅 `ricequant` 模式，首次）
-```python
-macro_context = self.knowledge.rag.retrieve(macro_query, n_results=3)
-```
-
-**步骤 4：市场制度分析**（仅 `ricequant` 模式，首次）
-调用 `RiceQuantEval.get_market_regime()`，获取市场走势、波动率、趋势文字描述。
-- 日期有效性验证：`m_start >= effective_end` 时跳过，记录警告
-- 失败时 fallback：`"[市场数据暂时不可用，请基于通用量化逻辑生成假说]"`
-
-**步骤 5：构建 Prompt 并调用 LLM**
-
-系统 Prompt 包含：角色描述、混合知识上下文（最多 6000 字符）、跨 Agent 学习指令。
-
-用户 Prompt 在 `iteration > 1` 时注入上一轮具体改进建议，明确要求 LLM 采纳并修改策略。
-
-**步骤 6：解析 JSON → `HypothesisOutput`**
+**输出字段**（写入 state）：
 ```json
-{"hypothesis_name": "...", "hypothesis_description": "...", "rationale": "..."}
-```
-
-**返回值**（写入 State）：
-```python
 {
-    "rag_context": combined_knowledge,
-    "macro_news_summary": macro_context,
-    "market_regime_summary": market_regime,
-    "hypothesis_name": result.hypothesis_name,
-    "hypothesis_description": result.hypothesis_description,
-    "rationale": result.rationale,
-    "messages": [...]
+  "hypothesis_name": "string",
+  "hypothesis_description": "string",
+  "rationale": "string",
+  "rag_context": "string",
+  "macro_news_summary": "string",
+  "market_regime_summary": "string"
 }
 ```
 
-**错误处理**：所有异常被捕获，记录原始 LLM 响应（DEBUG 级别），返回 `{"error": str(e)}`。
+**关键 Prompt 约束**（硬编码在代码里）：
+- 必须产生**连续信号**（continuous signal），在截面上平滑分布，覆盖全部股票的排名谱
+- 禁止重复 Wiki 中记载的失败逻辑或相同数学结构
+- 信号应关联宏观经济逻辑（央行信号、贸易数据、通胀趋势）
+- 需与市场状态匹配（高波动率时期 vs 趋势市）
 
 ---
 
-### 6.2 `agents/factor_agent.py` — FactorAgent
+### 6.2 FactorAgent
 
-**职责**：将假说两步转换为可执行的 Qlib 表达式：假说文本 → 数学公式 → Qlib 代码。包含自我纠错重试机制。
+**文件**：`agents/factor_agent.py`  
+**LLM 温度**：0.1（精确优先）
 
-**LLM 温度**：`0.1`（低温，保证代码生成确定性）
+**执行流程**：
 
-#### 类常量
+**第一步 — 数学公式化（单次调用）**：
+- 输入：`hypothesis_description` + `rationale`
+- 输出：`FormalizationOutput`（`math_formula` LaTeX 字符串 + `variables_defined` 字典）
 
-```python
-QLIB_OPERATORS = {
-    "Rank", "CSRank", "CSZScore", "Mean", "Std", "Median", "EMA", "Abs",
-    "Ref", "Log", "Sum", "If", "Greater", "Less", "And", "Or", "Delta",
-    "Corr", "Correlation", "Cov", "Ts_Rank", "Ts_ArgMax", "Ts_ArgMin",
-    "Ts_Percentile", "Winsorize", "GroupNeutral", "Percentile", "Clip",
-    "Count", "Sign", "Sqrt"
-}  # 算子白名单（验证和 Prompt 注入均使用此集合）
+**第二步 — Qlib 代码实现（带重试对话循环，最多 2 次重试）**：
+1. 携带 OPERATOR_SIGNATURES + 字段白名单 + 11 条强制规则的 system prompt
+2. 基于 `math_formula` + `variables_defined` 请求 LLM 生成 `code_expression`
+3. 调用 `_validate_qlib_expression()` 做完整 AST 验证（见第 7.3 节）
+4. 验证通过后调用 `RiceQuantEval.dry_run()` 做运行时干跑（在 5×1 小数据集上执行）
+5. 若有失败：将错误信息作为 assistant + user 消息追加到对话末尾，再次请求 LLM 修复（sliding window：只保留最初 2 条消息 + 最新一轮重试消息对，避免无限 token 增长）
+6. 重试次数耗尽时，`is_valid_syntax=False` 但仍返回最后生成的表达式（给 eval 节点一次尝试机会）
 
-QLIB_FIELDS = {"$close", "$open", "$high", "$low", "$volume", "$vwap"}
-# 数据字段白名单
-
-OPERATOR_SIGNATURES = """
-- Rank(df): 截面百分比排名
-- CSRank(df): 同 Rank(df)
-- Mean(df, n): n 日滚动均值
-...
-"""  # 注入到 Prompt 的算子文档，帮助 LLM 正确使用
-```
-
-#### `FactorAgent._strip_markdown_json(text) -> str` (静态方法)
-
-增强版 JSON 清理，核心解决 LLM 生成 LaTeX 公式时的反斜杠转义问题：
-
-1. 去除代码块包装，提取 `{...}` 范围
-2. 清除控制字符
-3. **先尝试 `json.loads()`**——若成功直接返回，不做任何反斜杠处理
-4. 若解析失败，才执行反斜杠修复正则：
-   ```python
-   re.sub(r'(?<!\\)\\(?!(?:["\\/]|u[0-9a-fA-F]{4}))', r'\\\\', text)
-   ```
-   含义：匹配不合法的单反斜杠（排除合法的 `\"`, `\\`, `\/`, `\uXXXX`），将其加倍转义。专门解决 `\text{}`、`\frac{}`、`\alpha` 等 LaTeX 命令在 JSON 中失效的问题。
-
-#### `FactorAgent._validate_qlib_expression(expr) -> tuple[bool, str]`
-
-对 Qlib 表达式做静态安全验证（6 道关卡）：
-
-1. **空值检查**：表达式为空则失败
-2. **拒绝检查**：含 "Cannot be expressed" 等字样说明 LLM 返回解释而非代码
-3. **括号平衡**：逐字符验证括号嵌套深度
-4. **字段白名单**：所有 `$xxx` 引用必须在 `QLIB_FIELDS` 内
-5. **Python 语法**：将 `$field` 替换为 `field_xxx`，用 `ast.parse()` 验证
-6. **算子白名单 + 参数数量**：遍历 AST 的所有 `ast.Call` 节点，验证函数名在 `QLIB_OPERATORS` 内，并检查已知二元/三元算子的参数数量
-
-#### `FactorAgent.__call__(state) -> dict`
-
-**步骤 1：Formalization（假说 → 数学公式）**
-
-Prompt 要求 LLM 严格输出符合 `FormalizationOutput` 的 JSON：
+**LLM 生成的 JSON Schema**：
 ```json
-{"math_formula": "F_t = ...", "variables_defined": {"r_t": "第t日收益率"}}
-```
-
-**步骤 2：Implementation（数学公式 → Qlib 代码）+ 自我纠错循环**
-
-循环参数：`max_retries = 2`，最多共执行 3 次。
-
-每次循环：
-1. 调用 LLM 生成 `ImplementationOutput`：
-   ```json
-   {"code_expression": "Rank(Delta($close, 5) / Ref($close, 5))", "is_valid_syntax": true}
-   ```
-2. 调用 `_validate_qlib_expression()` 做静态验证
-3. 若通过，再调用 `RiceQuantEval.dry_run()` 做动态干运行验证（用随机数据）
-4. 双重通过 → 成功，break
-5. 失败 → 构建纠错消息，进入下一轮重试
-
-纠错消息模板（滑动窗口，仅保留基础 2 条 + 最后一次失败对话）：
-```python
-messages = messages[:2] + [
-    ("assistant", f'{{"code_expression": "{safe_code}", "is_valid_syntax": false}}'),
-    ("user", f"The code has a syntax error: {safe_feedback}. Please FIX IT..."),
-]
-# safe_code 和 safe_feedback 已将 { } 转义为 {{ }} 防止 LangChain 模板误解析
-```
-
-**返回值**：
-```python
 {
-    "math_formula": ..., "variables_defined": ...,
-    "code_expression": ..., "is_valid_syntax": ...,
-    "messages": [...]
+  "code_expression": "string",
+  "is_valid_syntax": true
 }
 ```
+
+**System Prompt 中的 11 条强制规则**（已编码，修改需同步更新规则编号）：
+
+| 规则编号 | 内容 |
+|---|---|
+| 1 | 只使用 OPERATOR_SIGNATURES 中列出的算子 |
+| 2 | 数据字段只能用白名单中的 6 个（`$close/$open/$high/$low/$volume/$vwap`），禁止 `$beta_spx`、`$market_cap` 等 |
+| 3 | 窗口参数必须是常量正整数（5、10、20 等），禁止动态表达式 |
+| 4 | 若需要未列出的算子，用现有算子组合近似实现 |
+| 5 | 避免空洞逻辑（`$close/$close`、`Sign(1)` 等），因子必须有截面方差 |
+| 6 | 只返回纯 JSON，不加 markdown |
+| 7 | 正确 JSON 转义所有特殊字符 |
+| 8 | 避免纯二元信号（`If(cond, 1, 0)` 作为最外层），优先连续表达式 |
+| 8（重复）| **禁止 Look-ahead Bias**：`Ref(x, n)` 中 n 不得为负数 |
+| 9 | **禁止自相关**：`Corr(a, a, n)` 或 `Cov(a, a, n)` 两参数不得相同 |
+| 10 | **禁止恒等式**：`Div(x, x)`、`Sub(x, x)` 等两参数相同的运算恒为常数 |
+| 11 | `Rank()` 和 `CSRank()` 只接受 1 个参数，不传窗口大小 |
+
+> **注意**：规则 8 编号重复（代码中存在两条规则 8）是历史遗留，不影响功能但在维护时应注意统一编号。
 
 ---
 
-### 6.3 `agents/eval_agent.py` — EvalAgent
+### 6.3 EvalAgent
 
-**职责**：执行因子回测，进行 LLM 反思审查，更新早停指标，将经验保存到 RAG。
+**文件**：`agents/eval_agent.py`  
+**LLM 温度**：0.4（评审）
 
-**LLM 温度**：`0.4`（适度灵活以进行分析推理）
+**执行流程**：
 
-#### `EvalAgent._execute_alphaeval_backtest(code, mode, engine, test_start_date, test_end_date) -> dict`
+1. 调用 `_execute_alphaeval_backtest()` 执行真实回测（`RiceQuantEval` 或 `AlphaEval`）
+2. 若抛出任何异常 → 降级为**哈希确定性模拟指标**，`_simulated=True`（见第 10 节）
+3. 提取 `is_simulated`、`daily_returns`、`plot_paths`，其余为回测指标
+4. 调用 LLM 进行反思性评审，生成 `ReflexiveReviewOutput`（`review_summary` + `is_effective` + `suggested_improvements`）
+5. 若 `NOT is_simulated`：将本轮经验写入 RAG（`add_experience`）
+6. 更新早停状态（`best_ic`、`patience_counter`），**模拟状态完全冻结**
 
-执行真实回测，失败时回退到模拟指标。
+**模拟状态保护逻辑**（`eval_agent.py` 第 202–225 行）：
 
-**成功（真实回测）返回**：
 ```python
-{
-    "information_coefficient": float,  # IC：因子值与次日收益的 Spearman 相关系数均值
-    "rank_ic": float,                  # Rank IC：基于排名的 IC
-    "rre": float,                      # Realized Return Efficiency（稳健性指标）
-    "sharpe": float,                   # 顶层分组的年化 Sharpe 比率
-    "max_drawdown": float,             # 顶层分组累计收益的最大回撤
-    "pfs1": float,                     # Portfolio Score 1（顶层组年化收益）
-    "pfs2": float,                     # Portfolio Score 2（底层组年化收益）
-    "diversity": float,                # 因子多样性分数
-    "llm_score": float,                # RiceQuant 内置 LLM 评分
-    "daily_returns": dict,             # 日期 → 日收益率映射
-}
-```
-
-**失败回退（模拟指标）**：
-```python
-seed = int(hashlib.md5(code.encode()).hexdigest()[:8], 16)
-rng = random.Random(seed)
-# 相同代码每次生成相同的伪随机指标（确定性）
-# 附加 "_simulated": True 标记，供 EvalAgent 和 Manager 识别过滤
-```
-
-回退触发条件：`FileNotFoundError`（数据缺失）、`ValueError`（数据异常）、`ImportError`（rqdatac 未安装）或任意其他异常。
-
-#### `EvalAgent.__call__(state) -> dict`
-
-**步骤 1：执行回测**
-读取 `code_expression`、日期参数，调用 `_execute_alphaeval_backtest()`。提取 `_simulated` 和 `daily_returns` 字段后从 metrics 中移除（保持 metrics 纯净）。
-
-**步骤 2：LLM 反思审查（Reflexive Review）**
-构建 Prompt，传入假说、代码、指标，LLM 输出 `ReflexiveReviewOutput`：
-```json
-{
-  "review_summary": "IC=0.031，因子显示较好的预测能力...",
-  "is_effective": true,
-  "suggested_improvements": "考虑在高波动期使用条件激活..."
-}
-```
-
-**步骤 3：RAG 经验保存**（仅真实回测结果，跳过模拟指标）
-```python
-if not is_simulated:
-    self.knowledge.rag.add_experience(hypothesis, code, metrics, is_effective, review)
-```
-
-**步骤 4：早停指标更新**
-```python
-if current_ic > best_ic:
+if is_simulated:
+    # 冻结所有早停状态，treat 本轮为 no-op
+    new_best_ic = best_ic          # 不更新
+    new_patience_counter = patience_counter  # 不递增，也不清零
+    new_best_code = state.get("best_code_expression", code)
+elif current_ic > best_ic:
     new_best_ic = current_ic
     new_patience_counter = 0
-    new_best_code = code          # 记录最优代码
+    new_best_code = code
 else:
     new_best_ic = best_ic
     new_patience_counter = patience_counter + 1
-    new_best_code = state.get("best_code_expression", code)  # 保留历史最优
+    new_best_code = state.get("best_code_expression", code)
 ```
 
-**返回值**：包含 `backtest_metrics`、`daily_returns`、`review_summary`、`is_effective`、`is_simulated`、`suggested_improvements`、`best_ic`、`best_code_expression`、`patience_counter`。
+**回测指标说明**：
+
+| 指标键 | 含义 |
+|---|---|
+| `information_coefficient` | IC：因子值与下期收益的 Pearson 相关（主选择指标）|
+| `rank_ic` | RankIC：因子排名与收益排名的 Spearman 相关 |
+| `oos_ic` | OOS（Out-of-Sample）阶段 IC，OOS 分割点为 2023-01-01 |
+| `sharpe` | G5-G1 分层多空组合的年化 Sharpe 比率 |
+| `max_drawdown` | 最大回撤（负值）|
+| `rre` | Rank Return Efficiency（排名收益效率）|
+| `plot_paths` | 图表文件绝对路径字典（`equity`, `layers`）|
 
 ---
 
-### 6.4 `agents/summary_agent.py` — SummaryAgent
+### 6.4 SummaryAgent
 
-**职责**：在 Manager 阶段（LangGraph 工作流外）为每个通过筛选的因子生成 Markdown 研究报告和权益曲线图表。
+**文件**：`agents/summary_agent.py`  
+**LLM 温度**：0.3
 
-**LLM 温度**：`0.3`（稳定的专业报告输出）
+作用：为每个通过 Manager 筛选的因子生成结构化研究报告。
 
-#### `SummaryAgent.generate_equity_curve(returns, factor_id) -> str`
-- 绘制累计收益曲线 `(1 + returns).cumprod()`
-- 保存为 `results/charts/{factor_id}_curve.png`
-- `returns.empty` 时返回空字符串
-
-#### `SummaryAgent.generate_markdown_report(factor_data) -> str`
-生成包含以下章节的 Markdown 报告并保存至 `results/reports/{factor_id}.md`：
-1. **规格描述**：假说名称 + Qlib 代码
-2. **性能指标表**：IC / Rank IC / RRE
-3. **权益曲线**：图片链接
-4. **专业分析**：LLM 生成的经济学解读（含 "Economic Rationale Analysis" 小节）
+- `generate_equity_curve(returns, factor_id)`：绘制累积收益曲线 PNG，存入 `results/charts/`
+- `generate_markdown_report(factor_data)`：调用 LLM 生成含经济直觉分析的 Markdown 报告（存入 `results/reports/`），内嵌图片路径（来自 `RiceQuantEval.plot_paths` 或 `generate_equity_curve`）
 
 ---
 
-## 7. 模块详解：核心能力层
+### 6.5 PortfolioManager
 
-### 7.1 `core/llm.py`
+**文件**：`manager.py`
 
-多提供商 LLM 统一网关，返回 LangChain `ChatOpenAI` 兼容客户端。
+**两轮筛选逻辑**（`evaluate_and_combine`）：
 
-#### `get_llm_config(provider=None) -> dict`
-- 指定 `provider`：直接返回该提供商的 API Key，不存在则抛 `ValueError`
-- 未指定：按顺序遍历所有提供商，返回第一个有 Key 的配置（自动检测）
+**第一轮 — 绝对门槛**：
+- `perf_metric（IC）> 0.005`
+- `perf_metric` 直接来自 SubAgent 的 `backtest_metrics["information_coefficient"]`
+- 模拟因子 `daily_returns` 为空，在 Manager 中因 `empty returns series` 被自动剔除（即使误传了高模拟 IC）
 
-**支持的提供商**：
+**第二轮 — 相关性去重**：
+- 新因子与 `final_pool` 中每个已有因子的日收益序列做 Pearson 相关
+- 相关性需要至少 10 个重叠数据点（避免样本不足的虚假相关）
+- Pearson ≥ 0.7 视为冗余，剔除新因子
 
-| 提供商 | 环境变量 | API 端点 | 默认模型 |
+**遗传杂交**（`run_swarm` 末尾）：
+- 条件：`alpha_pool` 中至少有 2 个因子
+- 将 top-2 因子的假说和代码注入特殊角色 prompt
+- 杂交因子同样需过 IC > 0.01 + Pearson < 0.7 两关
+
+**并行执行细节**：
+- `ProcessPoolExecutor(max_workers=len(roles))`
+- 每个 SubAgent 进程启动前随机 sleep 0.1–1.0 秒（分散 SQLite 写入压力）
+- 超时 600 秒后跳过（`future.result(timeout=600)`）
+
+---
+
+## 7. 因子表达式系统
+
+### 7.1 数据字段白名单
+
+**仅支持以下 6 个字段**，均以 `$` 前缀引用：
+
+| 字段 | 含义 | pandas 矩阵键 |
+|---|---|---|
+| `$close` | 收盘价 | `fields['close']` |
+| `$open` | 开盘价 | `fields['open']` |
+| `$high` | 最高价 | `fields['high']` |
+| `$low` | 最低价 | `fields['low']` |
+| `$volume` | 成交量 | `fields['volume']` |
+| `$vwap` | 成交量加权均价（total_turnover / volume）| `fields['vwap']` |
+
+**任何其他字段均不存在于数据库**。常见幻觉字段（会被验证器立即拒绝）：
+
+`$beta`、`$beta_spx`、`$market_cap`、`$pe_ratio`、`$pb`、`$dividend`、`$factor`、`$sector`、`$index`、`$PPI`、`$CPI`、`$swap`、`$cash`、`$debt`、`$shares`、`$cap`、`$free_float`、`$turnover_rate`
+
+> `$vwap` 是在 `compute_factors()` 中计算的：`fields['vwap'] = total_turnover / volume.replace(0, NaN)`，然后 ffill + fallback to close。
+
+---
+
+### 7.2 算子完整签名表
+
+#### 截面算子（横向：某天对全部股票操作）
+
+| 算子 | 签名 | 参数数量 | 返回值范围 |
 |---|---|---|---|
-| `kimi` | `LLM_KEY` / `KIMI_API_KEY` | `api.moonshot.cn/v1` | `kimi-k2-turbo-preview` |
-| `qwen` | `QWEN_API_KEY` | `dashscope.aliyuncs.com/...` | `qwen-max` |
-| `glm` | `GLM_KEY` / `ZHIPU_API_KEY` | `open.bigmodel.cn/api/paas/v4` | `glm-5` |
-| `openai` | `OpenAI_KEY` / `OPENAI_API_KEY` | `api.openai.com/v1` | `gpt-4o` |
-| `deepseek` | `DEEPSEEK_API_KEY` | `api.deepseek.com/v1` | `deepseek-reasoner` |
-| `openrouter` | `OPENROUTER_API_KEY` | `openrouter.ai/api/v1` | `deepseek/deepseek-r1` |
-| `groq` | `GROQ_API_KEY` | `api.groq.com/openai/v1` | `llama-3.3-70b-versatile` |
-| `ollama` | `OLLAMA_API_KEY` | `$OLLAMA_BASE_URL` | `deepseek-r1:14b` |
-| `vllm` | `VLLM_API_KEY` | `$VLLM_BASE_URL` | `meta-llama/Llama-3-70b-chat-hf` |
-| `claude` (proxy) | `ClaudeCode_KEY` / `ANTHROPIC_API_KEY` | `api.gptsapi.net/v1` | `claude-3-5-sonnet-20241022` |
+| `Rank` | `Rank(df)` | **恰好 1 个**（禁止传窗口！）| (0, 1] |
+| `CSRank` | `CSRank(df)` | **恰好 1 个** | (0, 1] |
+| `CSZScore` | `CSZScore(df)` | 1（n 被忽略，兼容性接受）| (-∞, +∞)，标准化 |
+| `GroupNeutral` | `GroupNeutral(df)` | 1 | 减去截面均值后 |
+| `Winsorize` | `Winsorize(df, pct=0.05)` | 1–2 | clip 至分位数区间 |
+| `Percentile` | `Percentile(df)` | 1 | 等价于 Rank |
+| `Scale` | `Scale(df, a=1)` | 1–2 | sum(abs) = a |
 
-#### `get_llm(temperature, model_name, provider) -> BaseChatModel`
-构建 `ChatOpenAI` 实例，统一配置：
-- `max_retries=3`：自动重试 3 次
-- `request_timeout=60`：60 秒超时，防止 API 挂起阻塞工作流
+#### 时间序列算子（纵向：单只股票的时间轴）
 
-**各 Agent 温度设置**：
-
-| Agent | 温度 | 理由 |
+| 算子 | 签名 | 说明 |
 |---|---|---|
-| `IdeaAgent` | 0.7 | 鼓励创新假说 |
-| `EvalAgent` | 0.4 | 分析判断需适度灵活 |
-| `SummaryAgent` | 0.3 | 专业报告需稳定 |
-| `FactorAgent` | 0.1 | 代码生成需高确定性 |
+| `Mean(df, n)` | `Mean(df, n)` | n 日滚动均值 |
+| `Std(df, n)` | `Std(df, n)` | n 日滚动标准差 |
+| `Median(df, n)` | `Median(df, n)` | n 日滚动中位数 |
+| `EMA(df, n)` | `EMA(df, n)` | 指数移动平均，span=n |
+| `WMA(df, n)` | `WMA(df, n)` | 线性加权移动平均，span=n |
+| `Sum(df, n)` | `Sum(df, n)` | n 日滚动求和 |
+| `Ref(df, n)` | `Ref(df, n)` | n 日**前**的值（**n 必须为正整数**；负数 = 未来数据，AST 验证器拒绝！）|
+| `Delta(df, n)` | `Delta(df, n)` | df − Ref(df, n)，即 n 日变化量 |
+| `Ts_Rank(df, n)` | `Ts_Rank(df, n)` | 过去 n 日中当前值的百分位排名（Rust plugin）|
+| `Ts_Max(df, n)` | `Ts_Max(df, n)` | n 日滚动最大值 |
+| `Ts_Min(df, n)` | `Ts_Min(df, n)` | n 日滚动最小值 |
+| `Ts_ArgMax(df, n)` | `Ts_ArgMax(df, n)` | 过去 n 日最大值出现在几天前（Rust plugin）|
+| `Ts_ArgMin(df, n)` | `Ts_ArgMin(df, n)` | 过去 n 日最小值出现在几天前（Rust plugin）|
+| `Ts_Percentile(df, n, p=50)` | `Ts_Percentile(df, n, p)` | 过去 n 日第 p 百分位数值（p 在 0–100，默认 50）|
 
----
+> **所有时间序列算子的窗口参数 n 必须是常量正整数**（如 5、10、20），不能是字段引用、变量或表达式。
 
-### 7.2 `core/rag.py`
+#### 相关性算子
 
-基于 ChromaDB 的向量检索模块，提供两类知识：
-- **文档知识库**（静态）：来自 `data/rag_docs/`
-- **回测经验库**（动态）：每次评估后通过 `add_experience()` 累积
-
-#### `RAGModule.__init__(rebuild, embedding_provider, use_gpu)`
-选择 Embedding 函数，加载或重建 ChromaDB。
-
-**支持的 Embedding**：
-
-| 提供商 | 模型 | 维度 |
+| 算子 | 签名 | 约束 |
 |---|---|---|
-| `glm` | `embedding-3` | 2048 |
-| `openai` | `text-embedding-3-small` | 1536 |
-| `local` | `BAAI/bge-m3`（HuggingFace） | 1024 |
-| `cohere` | `embed-multilingual-v3.0` | 1024 |
+| `Corr(df1, df2, n)` / `Correlation(df1, df2, n)` | 3 个参数 | df1 和 df2 的 AST 不得相同（否则恒为 1.0）|
+| `Cov(df1, df2, n)` | 3 个参数 | df1 和 df2 的 AST 不得相同 |
 
-#### `RAGModule._init_knowledge_base()`
-递归扫描 `data/rag_docs/`，支持 `.txt`、`.pdf`、`.md`。将文件分块（最大 1000 字符，100 字符重叠），批量写入 ChromaDB（每批 8 条）。
+#### 数学单参数算子
 
-#### `RAGModule.retrieve(query, n_results=3) -> str`
-混合检索策略：
-1. **语义检索**：ChromaDB 向量余弦相似度
-2. **BM25 检索**：基于词频的关键词匹配
-3. **去重合并**：以文档 ID 去重
-4. **经验检索**：额外从 `experience` 集合检索历史回测记录
+| 算子 | 签名 | 说明 |
+|---|---|---|
+| `Abs(df)` | 1 个参数 | 绝对值 |
+| `Log(df)` | 1 个参数 | 自然对数（df 须为正）|
+| `Sign(df)` | 1 个参数 | 符号函数，返回 -1/0/1 |
+| `Sqrt(df)` | 1 个参数 | 平方根 |
+| `Exp(df)` | 1 个参数 | e 的 df 次方（pandas 版 clip 上限 500 防溢出）|
+| `Ceil(df)` | 1 个参数 | 向上取整 |
+| `Floor(df)` | 1 个参数 | 向下取整 |
+| `Neg(df)` | 1 个参数 | 取反（等价于 `-df`）|
+| `Inv(df)` | 1 个参数 | 倒数（1/df）|
 
-返回格式化文本（各片段用 `---` 分隔）。
+> **Polars 版本注意**：以上单参数算子已通过 `_ensure_expr(x)` 处理，支持直接传入 Python `int`/`float` 常量（如 `Sign(1)`）。
 
-#### `RAGModule.add_experience(hypothesis, code, metrics, is_effective, review)`
-使用 `fcntl.flock()` 文件锁保护并发写入（适用于多进程模式）：
+#### 数学双参数算子与别名
+
+| 算子 | 别名 | 说明 |
+|---|---|---|
+| `Add(a, b)` | `Plus(a, b)` | 加法 |
+| `Sub(a, b)` | `Minus(a, b)`, `Subtract(a, b)` | 减法（两参数相同时 AST 验证拒绝）|
+| `Mul(a, b)` | `Mult(a, b)`, `Multiply(a, b)` | 乘法 |
+| `Div(a, b)` | `Divi(a, b)`, `Divide(a, b)` | 除法（两参数相同时 AST 验证拒绝）|
+| `Pow(a, b)` | — | 幂运算 |
+| `Max(a, b)` | — | 逐元素取大 |
+| `Min(a, b)` | — | 逐元素取小 |
+
+#### 逻辑与条件算子
+
+| 算子 | 签名 | 说明 |
+|---|---|---|
+| `If(cond, a, b)` | 3 个参数 | 逐元素条件：True → a，False → b |
+| `Greater(a, b)` | — | a > b |
+| `Less(a, b)` | — | a < b |
+| `GreaterEqual(a, b)` | — | a >= b |
+| `LessEqual(a, b)` | — | a <= b |
+| `Equal(a, b)` | — | a == b |
+| `NotEqual(a, b)` | — | a != b |
+| `And(a, b)` | — | 逻辑与 |
+| `Or(a, b)` | — | 逻辑或 |
+| `Not(a)` | — | 逻辑非 |
+| `Clip(df, lower, upper)` | — | 截断至 [lower, upper] |
+
+#### 内部算子（Rust 编译器生成，不由 LLM 直接使用）
+
+| 算子 | 说明 |
+|---|---|
+| `Const(x)` | 将常量 x 包装为 Polars `pl.lit(x)`，由 Rust 编译器自动插入 |
+
+---
+
+### 7.3 AST 验证规则
+
+`FactorAgent._validate_qlib_expression(expr: str) -> (bool, str)` 顺序执行以下检查（任一失败即返回 `(False, 错误信息)`）：
+
+1. **非空检查**：`expr` 不能为空或纯空白
+2. **LLM 拒绝语检测**：含 `"Cannot be expressed"` 或 `"whitelist"` 说明 LLM 返回了解释文本而非代码，直接拒绝
+3. **括号平衡**：使用 depth 计数器遍历全字符串，检测多余 `)` 或未闭合 `(`
+4. **字段引用检查**：表达式中必须至少包含一个 `$field`（纯常量无意义）
+5. **字段白名单**：正则 `\$\w+` 提取全部字段引用，逐一对照 `QLIB_FIELDS`，不在白名单中的字段报错并列出白名单内容
+6. **AST 解析**：将 `$field` 替换为 `field_xxx` 后 `ast.parse(expr, mode="eval")`，SyntaxError 时报具体错误信息
+7. **算子白名单**：遍历所有 `ast.Call` 节点，检查 `node.func.id` 是否在 `QLIB_OPERATORS` 中（允许 `fields`、`np`、`pd`）
+8. **单参数算子上限检查**：`Rank`/`CSRank` 的位置参数 `> 1` 时拒绝（详见 `unary_ops` 集合中的其他算子检查）
+9. **双参数算子下限检查**：`Mean`、`Std`、`Ref`、`Delta`、`Corr` 等需要 `arg_count >= 2`
+10. **三参数算子下限检查**：`Corr`、`Cov`、`Ts_Percentile`、`If` 需要 `arg_count >= 3`
+11. **恒等式检测（Tautology）**：`Div/Divi/Divide/Sub/Subtract/Minus` 的两个参数 `ast.dump()` 相同时拒绝（结果恒为常数）
+12. **自相关检测**：`Corr/Correlation/Cov` 的前两个参数 `ast.dump()` 相同时拒绝（结果恒为 1.0）
+13. **Look-ahead 检测**：`Ref(x, n)` 中若 n 为负整数（`ast.Constant` 或 `ast.UnaryOp(USub, Constant)` 解析），则拒绝
+
+---
+
+### 7.4 Rust 编译器 vs Python 回退
+
+**`PolarsEngine.evaluate(expression)`** 两步降级：
+
+**步骤 1 — Rust 编译器**（`lib.compile_alpha(expression)`）：
+- 速度最快，将 Qlib 表达式编译为 Polars 惰性表达式字符串
+- 若返回以 `"Error:"` 开头的字符串，降级到步骤 2
+
+**步骤 2 — Python 回退**（`_python_compile_alpha`）：
+- 正则将 `$field` 替换为裸名称
+- eval 时依赖 `_ColFallback.__missing__` 将未知名称自动映射到 `pl.col(name)`
+- 仍然失败则抛出异常
+
+**`_eager_eval`**（`compute_all` 调用的路径）：
+- 解析表达式为 Python AST
+- 递归调用 `_eval_ast_node` 逐节点求值
+- 为 `_CS_OPS` 和 `_TS_PLUGIN_OPS` 的复合参数物化临时列（见第 8.2 节）
+
+---
+
+## 8. 求值引擎
+
+### 8.1 Pandas 矩阵引擎
+
+**激活**：`--engine pandas`（默认，稳定性优于 Polars）
+
+**设计思想**：将所有股票的某字段展开为 `(datetime × instrument)` 二维矩阵（`pd.DataFrame`）：
+- 时间序列算子（Rolling）沿列（时间轴）操作
+- 截面算子（Rank、CSZScore 等）沿行（截面，`axis=1`）操作
+
+**eval 上下文**（`compute_factors()` 内部 `context` 字典）中包含的已实现函数：
+
+| 类别 | 函数 |
+|---|---|
+| 截面 | `Rank`, `CSRank`, `CSZScore`, `GroupNeutral`, `Winsorize`, `Percentile`, `Scale` |
+| 时序 | `Mean`, `Std`, `Median`, `EMA`, `WMA`, `Sum`, `Ref`, `Delta`, `Ts_Rank`, `Ts_Max`, `Ts_Min`, `Ts_ArgMax`, `Ts_ArgMin`, `Ts_Percentile` |
+| 相关 | `Corr`, `Cov`, `Correlation` |
+| 数学 | `Abs`, `Log`, `Sign`, `Sqrt`, **`Exp`**, **`Ceil`**, **`Floor`**, `Neg`, `Inv` |
+| 双参数 | `Add`, `Sub`, `Mul`, `Div`, `Mult`, `Divi`, `Plus`, `Minus`, `Pow`, `Max`, `Min`, `Divide`, `Multiply`, `Subtract`, `Negate` |
+| 逻辑 | `Greater`, `Less`, `GreaterEqual`, `LessEqual`, `Equal`, `NotEqual`, `And`, `Or`, `Not`, `If`, `Clip`, `Count` |
+| 杂项 | `Const`, **`Scale`**, **`WMA`** |
+
+> 加粗函数为近期补充（2026-04-15），之前版本存在 `name 'Exp' is not defined` 运行时错误。
+
+**未知字段降级**（`compute_factors()` 第 575–590 行）：
+- 包含 `"vol"` → `fields['volume']`
+- 包含 `"share"` → `1.0`
+- 其他 → `fields['close']`
+
+**安全机制**：`SafeEvalTransformer`（`rq_eval.py`）将 eval 上下文中未知的 `Name` 节点转为字符串常量，阻止代码注入。
+
+---
+
+### 8.2 Polars 引擎与 eager_eval
+
+**激活**：`--engine polars`
+
+**`PolarsEngine._eager_eval(df, expr_str)`** 解决的核心问题：
+
+在 Polars 中，`.over('instrument')` 嵌套在 `.over('datetime')` 内部会产生**全 null 输出**。`_eager_eval` 通过"两步物化"规避此限制：
+
+1. 解析表达式为 Python AST
+2. 递归调用 `_eval_ast_node` 求值
+3. 遇到 `_CS_OPS` 算子时，若其**第一个数据参数**为复合表达式（非裸列引用），先物化为临时列（`__cs_arg_N__`），再将 `pl.col(tmp)` 传入算子
+4. 遇到 `_TS_PLUGIN_OPS` 算子时，同样物化其**第一个数据参数**（Rust plugin 只能接收裸列引用）
+5. 计算完成后统一删除所有临时列
+
 ```python
-with open(lock_file, "w") as lf:
-    fcntl.flock(lf, fcntl.LOCK_EX)
-    # 写入 ChromaDB experience 集合
-    fcntl.flock(lf, fcntl.LOCK_UN)
-# finally: os.unlink(lock_file)  — 清理锁文件
+_CS_OPS = frozenset({
+    "Rank", "CSRank", "CSZScore", "GroupNeutral", "Winsorize", "Percentile", "Scale"
+})
+_TS_PLUGIN_OPS = frozenset({
+    "Ts_Rank",    # Rust plugin
+    "Ts_ArgMax",  # Rust plugin
+    "Ts_ArgMin",  # Rust plugin
+})
 ```
 
----
+**示例**：`CSRank(Ts_Rank(Log($close), 18))` 的求值过程：
+1. `Log($close)` = `pl.col("close").log(math.e)` → 复合表达式
+2. `Ts_Rank(复合, 18)` → `Ts_Rank` 在 `_TS_PLUGIN_OPS` 中 → 物化 `Log($close)` 为 `__ts_arg_0__`
+3. `register_ts_rank(pl.col("__ts_arg_0__"), 18).over("instrument")` → 正确执行
+4. 结果为 `pl.col("__cs_arg_1__")` 传入 `CSRank`（`_CS_OPS`）→ `.rank().over("datetime")`
+5. 清理 `__ts_arg_0__` 和 `__cs_arg_1__`
 
-### 7.3 `core/wiki.py`
-
-结构化因子卡片知识库（LLMWiki）。每张卡片：
-- 持久化为 `data/wiki_db/{slug}.md`（带 YAML front-matter 的 Markdown）
-- 同时在 ChromaDB `wiki_index` 集合中建立向量索引
-
-#### `LLMWiki.add_or_update_page(slug, title, content, metadata)`
-1. 生成 Markdown 文件（带 front-matter）
-2. 写入 `data/wiki_db/{slug}.md`
-3. Upsert 到 ChromaDB（同 slug 自动覆盖旧记录）
-4. 追加日志到 `data/wiki_db/log.md`
-5. 重新编译 `data/wiki_db/index.md`（全量索引）
-
-**Markdown 文件格式**：
-```markdown
----
-title: 流动性冲击反转因子
-updated: 2024-01-15T12:00:00
-type: factor_card
----
-
-**Hypothesis**: ...
-**Implementation (Qlib)**: `Rank(Delta($close, 5))`
-**IC / RankIC**: 0.0321 / 0.0289
-**Effectiveness**: ✅ EFFECTIVE
-**Review Summary**: ...
-**Suggested Improvements**: ...
-```
-
-#### `LLMWiki.retrieve(query, n_results=3) -> str`
-从 ChromaDB 检索最相关因子卡片，每条截取前 1000 字符。
-
-#### `LLMWiki.get_page(slug) -> Optional[dict]`
-从 Markdown 文件读取单张卡片，解析 YAML front-matter，返回 `{title, content, metadata}` 字典。
-
-#### `LLMWiki.list_pages() -> List[str]`
-列出所有 `.md` 文件（排除 `index.md` 和 `log.md`）的 slug 列表。
-
----
-
-### 7.4 `core/hybrid_knowledge.py`
-
-将 RAG 和 Wiki 封装为统一接口，所有 Agent 通过此接口访问知识。
-
-#### `HybridKnowledge.__init__(rebuild_rag, embedding_provider, use_gpu, llm_provider, llm_model)`
-初始化 `RAGModule` 和 `LLMWiki`，保存 LLM 配置供 `bootstrap_wiki()` 使用。
-
-#### `HybridKnowledge.bootstrap_wiki(force=False)`
-调用 `WikiBootstrapper`，从 RAG 文档中提取结构化知识写入 Wiki。由 Manager 在主进程中执行一次（`--wiki-bootstrap` 参数）。
-
-#### `HybridKnowledge.retrieve(query, n_results=3) -> str`
-同时调用 `rag.retrieve()` 和 `wiki.retrieve()`，拼接返回：
+**`_ensure_expr(x)`** 辅助函数：
 ```python
-combined = f"{rag_context}\n\n{wiki_context}"
+def _ensure_expr(x):
+    if isinstance(x, (int, float)):
+        return pl.lit(float(x))
+    return x
 ```
+确保 `Sign(1)`、`Abs(-2.5)`、`Exp(0)` 等常量参数不报 `AttributeError`。
 
-#### `HybridKnowledge.update_wiki_after_eval(state) -> dict`
-评估完成后自动更新 Wiki（无论是否模拟指标，均写入但附加 `simulated` 元数据）。
+---
 
-**Slug 生成规则**（防止同名碰撞）：
+## 9. RiceQuant 回测流程
+
+**文件**：`core/alphaeval/rq_eval.py`，`RiceQuantEval` 类
+
+### 回测参数
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `test_start_date` | `"2018-01-01"` | 回测开始（含 IS 和 OOS）|
+| `test_end_date` | `"2025-12-31"` | 回测结束 |
+| `oos_split_date` | `"2023-01-01"`（**硬编码**）| IS/OOS 分割点，早于此日期为 IS |
+| `market` | `"000300.XSHG"`（沪深 300）| 股票池 |
+| `daily_normalize` | `True` | 每日截面 Z-score 标准化 |
+| `engine` | `"pandas"` | 因子计算引擎 |
+| `noise_level` | `0.0` | 向原始数据注入高斯噪声（鲁棒性测试用）|
+| `output_dir` | `"results/reports"` | 图表输出目录 |
+
+### 完整执行步骤
+
+**`fetch_data()`**：
+1. `rq.index_components(market, test_end_date)` 获取成分股列表
+2. `rq.get_price(instruments, fields=["close","open","high","low","volume","total_turnover"])` 拉取 OHLCV
+3. MultiIndex 调整：`(order_book_id, date)` → `(datetime, instrument)`
+4. 若 `noise_level > 0`：对每个数值列按各自标准差比例注入高斯噪声
+5. label 计算：`close.shift(-1) / close - 1`（在 instrument 分组内 shift，避免跨股票数据泄漏）
+6. 统一日期类型为 `datetime64[ns]`
+
+**`compute_factors()`**（pandas 引擎）：
+1. 将各字段 unstack 为 `(datetime × instrument)` 矩阵
+2. 计算 vwap：`total_turnover / volume.replace(0, NaN)` → ffill → fallback to close
+3. 通过 AST 安全求值执行表达式
+4. `_normalize_factors()`：每日截面 Z-score 标准化（若 `daily_normalize=True`），填充 inf/nan → 0
+5. 因子矩阵加权合并：`factor_data.dot(weights)` → `alphacombo`
+
+**`run()`**（核心回测）：
+1. 拼接 `alphacombo` 与 `label_data`，dropna
+2. 全期 IC：`alphacombo.corr(label, method='pearson')`
+3. IS IC（`< oos_split_date`）和 OOS IC（`>= oos_split_date`）分别计算
+4. 调用 `calculate_layered_returns()` 分 5 组（G1 最低因子值，G5 最高）
+5. G5-G1 多空收益 → `daily_ret`
+6. Sharpe：`daily_ret.mean() / daily_ret.std() * sqrt(252)`
+7. 最大回撤：`(cum_ret / cum_ret.cummax() - 1).min()`
+8. 调用 `generate_plots()` 生成图表
+
+**`calculate_layered_returns(all_data, n_groups=5)`**：
+- `groupby('datetime', group_keys=False)['factor'].apply(assign_groups)` 分组
+  - `group_keys=False`：防止 pandas 新版本 `apply` 默认 `group_keys=True` 导致额外索引层级（产生 3 级 MultiIndex 的 bug 已修复）
+- `pd.qcut(x.rank(method='first'), n_groups, labels=['G1'...'G5'])` 等分分位数
+
+**`generate_plots(daily_ret, layer_ret, factor_name)`**：
+- 权益曲线：`(1 + daily_ret.fillna(0)).cumprod()`，标注 OOS 分割红线
+- 分层收益：G1–G5 各组累积收益
+- 保存为 PNG（`results/reports/<safe_name>_equity.png` 和 `_layers.png`）
+
+**`dry_run(expression)`**（静态方法）：
+- 用 5 行×1 列的假数据（`close=1..5`、`volume=1000`、`vwap=1..5`）运行表达式
+- 不访问 RiceQuant API，不需要认证
+- 返回 `(True, "OK")` 或 `(False, "错误信息")`
+
+---
+
+## 10. 模拟回退机制
+
+当真实回测失败（`FileNotFoundError`/`ValueError`/`ImportError` 或任何其他 `Exception`）时，`_execute_alphaeval_backtest()` 降级为：
+
 ```python
-base_slug = "".join([c if c.isalnum() else "_" for c in raw_name]).lower()
-slug = f"{base_slug}_iter{iteration}"
+seed = int(hashlib.md5(code.encode()).hexdigest()[:8], 16)
+rng = random.Random(seed)
+return {
+    "information_coefficient": round(rng.uniform(-0.05, 0.15), 3),
+    "rank_ic": round(rng.uniform(-0.05, 0.15), 3),
+    "rre": round(rng.uniform(0.0, 1.0), 3),
+    # ...其他随机指标...
+    "daily_returns": {},    # 空！无法生成权益曲线
+    "_simulated": True,
+}
 ```
 
-**写入的元数据**：
+**为何是哈希确定性而非完全随机**：相同的 `code_expression` 每次运行都产生相同的模拟 IC，避免同一因子在多轮中得到不同的模拟评分，使 Wiki 记录更稳定。
+
+**陷阱**：模拟 IC 范围（-0.05, 0.15）与真实 A 股优质因子 IC 范围（0.003–0.05）大量重叠，极易产生假阳性。
+
+**四层保护机制**：
+
+| 保护层 | 文件 | 机制 |
+|---|---|---|
+| 1 | `eval_agent.py` | `is_simulated=True` → 冻结 `best_ic` 和 `patience_counter` |
+| 2 | `workflow/graph.py` | 模拟 IC ≥ 0.05 → 跳过早停，打印 WARNING 继续 |
+| 3 | `eval_agent.py` | 模拟数据不写入 RAG（经验库不污染）|
+| 4 | `manager.py` | `daily_returns` 为空 → `returns series` 为空 → 第一轮过滤剔除 |
+
+**常见触发原因**：
+- RiceQuant Quota 耗尽（`Quota exceeded`，最常见）
+- RiceQuant 账号未认证或 Token 过期
+- 因子计算运行时错误（除零、字段不存在、括号层级错误等）
+- 数据日期范围无数据
+
+---
+
+## 11. 早停与 patience 机制
+
+### patience_counter 更新规则
+
+| 条件 | `best_ic` | `patience_counter` | `best_code_expression` |
+|---|---|---|---|
+| `is_simulated=True` | **不变** | **不变** | 不变 |
+| `current_ic > best_ic`（真实）| = `current_ic` | = 0（清零）| = 当前代码 |
+| `current_ic <= best_ic`（真实）| 不变 | += 1 | 不变 |
+
+### 早停触发条件（`route_after_wiki`）
+
+| 条件 | 结果 | 备注 |
+|---|---|---|
+| `current_ic >= 0.05 AND NOT is_simulated` | `"end"` | 发现优质因子，记 SUCCESS 日志 |
+| `current_ic >= 0.05 AND is_simulated` | 继续 | 打印 WARNING，防止 Quota 触发假早停 |
+| `patience_counter >= 4` | `"end"` | 连续 4 轮无 IC 改善 |
+| `iteration >= max_iterations` | `"end"` | 轮数耗尽 |
+
+### 参数调优建议
+
+| 参数 | 当前值 | 理由 |
+|---|---|---|
+| `max_iterations` | 5（默认）| 低于 5 轮 Wiki 知识无法充分积累；建议 5–7 |
+| `patience_counter 阈值` | 4 | 旧值 3 太保守；4 给更多探索空间 |
+| Manager IC 门槛 | 0.005 | A 股真实有效因子 IC 多在 0.003–0.008，旧值 0.01 过高 |
+| 早停 IC 门槛 | 0.05（非模拟）| 真实 IC ≥ 0.05 在 A 股属于极优质因子 |
+
+---
+
+## 12. 知识库系统
+
+### 12.1 RAGModule
+
+**文件**：`core/rag.py`
+
+- 向量数据库：ChromaDB，持久化在 `data/chroma_db/`
+- Embedding 模式：
+  - **API 模式**（默认）：按 LLM 提供商选择对应的 OpenAI-compatible embedding API
+  - **本地模式**（`USE_LOCAL_EMBEDDING=true`）：`Qwen/Qwen3-Embedding-4B`，支持 GPU（`--use-gpu`）；HuggingFace 镜像备用（`hf-mirror.com`）
+- 文档来源：`data/rag_docs/`（Markdown 格式）
+- `rebuild=True`（`--rebuild-rag`）：强制重新 Embedding 所有文档
+- `add_experience(hypothesis, code, metrics, is_effective, review)`：将每次**真实**回测经验以文档形式写入 ChromaDB，供后续 Agent 检索
+
+### 12.2 LLMWiki
+
+**文件**：`core/wiki.py`
+
+存储**经过验证的结构化因子卡片**，格式为带 YAML frontmatter 的 Markdown 文件。
+
+文件位置：
+- `data/wiki_vault/`：人类可读 Markdown（可用 Obsidian 打开查看）
+- `data/wiki_db/`：ChromaDB 向量索引（机器检索用）
+
+**卡片 Frontmatter 结构**：
+```yaml
+---
+title: "因子名称（人类可读）"
+slug: "snake_case_unique_id"
+type: "factor_card"
+status: "active"      # active | failed | deprecated
+summary: "一句话描述因子逻辑"
+updated: "2026-04-15"
+tags: ["momentum", "mean_reversion", "volume"]
+related: ["correlated_factor_slug"]
+---
+
+## 核心逻辑
+
+（因子的经济直觉和数学描述）
+
+## 代码实现
+
+```
+Qlib 表达式
+```
+
+## 历史表现
+
+IC 均值: 0.023 | RankIC: 0.021 | OOS IC: 0.019
+```
+
+**卡片来源**：
+- `WikiBootstrapper`（`--wiki-bootstrap`）：在 swarm 启动前将 `data/rag_docs/` 中的文档批量 LLM 编译为卡片，存入 `wiki_vault/`
+- `HybridKnowledge.update_wiki_after_eval(state)`：每轮 `wiki_update` 节点后调用，将本轮因子的结果（无论成功或失败）写入 Wiki，供后续 Agent 学习
+
+**去重机制**：Wiki 按 `slug` 去重；同一因子多次实验时更新 `status` 和性能指标，不创建重复卡片
+
+### 12.3 HybridKnowledge
+
+**文件**：`core/hybrid_knowledge.py`
+
+融合两个知识源的门面类，屏蔽 RAG 和 Wiki 的实现细节。
+
+```
+retrieve(query, n_results=3) 流程：
+  1. rag_context  = RAG.retrieve(query, n_results)   → 原始语料检索结果
+  2. wiki_context = Wiki.retrieve(query, n_results)  → 结构化因子卡片检索结果
+  3. 去重：提取 wiki_context 中所有 **标题** 模式（`re.match(r"\*\*(.+?)\*\*", line)`）
+         → 若 rag_context 某行（小写后）包含这些标题中的任意一个 → 丢弃该行
+  4. 返回："[RAG CONTEXT]\n{去重后}\n\n[WIKI CONTEXT]\n{wiki_context}"
+```
+
+`update_wiki_after_eval(state)`：
+- 从 state 提取 `hypothesis_name`、`code_expression`、`backtest_metrics`、`is_effective`、`suggested_improvements`
+- 生成或更新对应 Wiki 卡片
+- 更新 `data/wiki_vault/log.md`（追加本轮记录）和 `data/wiki_vault/index.md`
+
+`bootstrap_wiki(force=False)`：
+- 调用 `WikiBootstrapper.run(force=False)`，若 `force=False` 则跳过已有卡片的文档
+
+---
+
+## 13. LLM 网关
+
+**文件**：`core/llm.py`
+
+`get_llm(temperature, model_name, provider)` 返回 LangChain `BaseChatModel`（`ChatOpenAI` 兼容实例）。
+
+### 支持的 Provider
+
+| Provider 名 | 环境变量 | 默认模型 | Base URL |
+|---|---|---|---|
+| `kimi` | `LLM_KEY` / `KIMI_API_KEY` | `kimi-k2-turbo-preview` | `https://api.moonshot.cn/v1` |
+| `qwen` | `QWEN_API_KEY` | `qwen-max` | dashscope（阿里）|
+| `glm` | `GLM_KEY` / `ZHIPU_API_KEY` | `glm-5` | bigmodel（智谱）|
+| `openai` | `OpenAI_KEY` / `OPENAI_API_KEY` | `gpt-4o` | `https://api.openai.com/v1` |
+| `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-reasoner` | `https://api.deepseek.com/v1` |
+| `claude` | `ClaudeCode_KEY` / `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` | Anthropic |
+| `openrouter` | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-4-6` | `https://openrouter.ai/api/v1` |
+| `groq` | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | Groq |
+| `ollama` | 固定 `"ollama"` | `llama3` | `http://localhost:11434/v1` |
+| `vllm` | 固定 `"vllm"` | `meta-llama/...` | `http://localhost:8000/v1` |
+
+**自动检测顺序**：不指定 `--llm-provider` 时，按上表从上到下扫描，使用第一个有效 API key 的 provider。
+
+**Temperature 约定**：
+
+| Agent | Temperature | 设计意图 |
+|---|---|---|
+| IdeaAgent | 0.7 | 鼓励多样性，产生新颖假说 |
+| FactorAgent | 0.1 | 精确代码生成，避免随机语法错误 |
+| EvalAgent | 0.4 | 评审需要一定灵活性，但不能太发散 |
+| SummaryAgent | 0.3 | 专业报告写作，保持客观 |
+
+---
+
+## 14. Manager 与 SubAgent 协调
+
+### SubAgent 初始状态
+
+每个 `AlphaResearcher.run()` 启动时注入 LangGraph 的初始状态：
+
 ```python
 {
-    "type": "factor_card",
-    "status": "proven" if is_effective else "failed",
-    "ic": ic, "rank_ic": rank_ic,
-    "iteration": iteration,
-    "is_effective": is_effective,
-    "simulated": is_simulated,
+    "iteration": 1,
+    "max_iterations": max_iterations,         # 默认 5，由 --iterations 覆盖
+    "role_prompt": role_prompt,               # 角色描述字符串
+    "evaluation_mode": evaluation_mode,       # "ricequant" | "qlib"
+    "evaluation_engine": evaluation_engine,   # "pandas" | "polars"
+    "market_analysis_start_date": market_start,
+    "market_analysis_end_date": market_end,
+    "best_ic": -999.0,                        # 初始化为极小值
+    "patience_counter": 0,
+    "messages": ["[System] Starting SubAgent with Role: ..."],
+    # 所有其他字段均为 None（TypedDict total=False）
 }
 ```
 
----
+### SubAgent 结果对象（`AlphaResearcher.run()` 返回）
 
-## 8. 模块详解：因子评估层
-
-### 8.1 `core/alphaeval/rq_eval.py`
-
-RiceQuant 因子评估引擎，通过 `rqdatac` 获取 A 股数据，支持 Pandas 和 Polars 两套计算路径。
-
-#### `init_rq_auth()`
-通过 `RQ_USER`/`RQ_PASS` 或 `RQ_TOKEN` 认证 RiceQuant API。在 Manager 主进程调用一次，子进程中自动复用凭证。
-
-#### `SafeEvalTransformer(ast.NodeTransformer)`
-AST 安全变换器，防止代码注入。核心 `visit_Call` 方法：将未知函数名替换为字符串字面量，使得 `os.system("rm -rf /")` 变成无害的 `"os.system"(...)` 表达式（会产生 `TypeError` 而非执行危险操作）。
-
-#### `RiceQuantEval.__init__(factor_expressions, test_start_date, test_end_date, universe, engine)`
-
-| 参数 | 默认 | 说明 |
-|---|---|---|
-| `factor_expressions` | 必填 | Qlib 表达式列表 |
-| `test_start_date` | `"2017-01-01"` | 回测起始日期 |
-| `test_end_date` | `"2020-10-31"` | 回测结束日期 |
-| `universe` | `"CSI300"` | 股票池（沪深300） |
-| `engine` | `"pandas"` | 计算引擎 |
-
-#### `RiceQuantEval._get_n(n) -> int` (静态方法)
-安全提取时间窗口参数。若 `n` 是 `pd.Series`（LLM 错误传入），取最后一个非 NaN 值；失败则返回默认值 20。
-
-#### `RiceQuantEval.compute_factors()` — Pandas 路径
-
-构建完整的 Qlib 算子 `context` 字典，包含约 40 个函数，所有时序函数按 `axis=0`（时间轴）操作，数据格式为 `DataFrame(index=date, columns=stock)`。
-
-**数据字段**（通过 rqdatac 获取）：
-- `fields["close"]`：收盘价（`$close`）
-- `fields["open"]`：开盘价（`$open`）
-- `fields["high"]`：最高价（`$high`）
-- `fields["low"]`：最低价（`$low`）
-- `fields["volume"]`：成交量（`$volume`）
-- `fields["vwap"]`：成交均价（`$vwap`）
-
-**执行流程**：
-1. 获取价量数据，构建 fields 字典
-2. 对每个因子表达式：用正则替换 `$field` → `fields['field']`，通过 `SafeEvalTransformer` 安全编译，`eval()` 执行
-3. 失败时抛出 `RuntimeError`（不填零，让 EvalAgent 知晓失败）
-
-**完整算子列表**（Pandas 实现）：
-- 数学：`Abs`, `Log`, `Sign`, `Sqrt`, `Exp`, `Ceil`, `Floor`
-- 时序：`Mean(df,n)`, `Std(df,n)`, `Median(df,n)`, `Sum(df,n)`, `EMA(df,n)`, `Ref(df,n)`, `Delta(df,n)`
-- 相关：`Corr(df1,df2,n)`（Spearman）, `Cov(df1,df2,n)`
-- 排名：`Rank(df)`（截面 pct）, `CSRank(df)`, `Ts_Rank(df,n)`, `Ts_Percentile(df,n,p)`
-- 极值：`Ts_ArgMax(df,n)`, `Ts_ArgMin(df,n)`
-- 条件：`If(cond,a,b)`, `Greater(a,b)`, `Less(a,b)`, `And(a,b)`, `Or(a,b)`
-- 截面：`CSZScore(df)`, `Winsorize(df,pct)`, `GroupNeutral(df)`
-- 其他：`Clip(df,lo,hi)`, `Count`, `Scale`, `WMA`
-
-#### `RiceQuantEval.compute_factors_polars()` — Polars 路径
-
-将数据转为长格式 Polars DataFrame（列：`datetime`, `instrument`, `close`, ...），调用 `PolarsEngine.compute_all()` 批量计算，转回 Pandas 格式供后续分析。
-
-#### `RiceQuantEval.get_market_regime(start_date, end_date, lookback_days) -> str`
-
-获取 CSI300 指数的市场制度描述：
-- 通过 rqdatac 获取指数日行情
-- 计算总收益率、年化波动率、趋势（基于 MA）
-- 返回格式化的中文描述字符串
-
-**错误处理**：将 `"Quota exceeded"`/`"rate limit"` 错误与其他错误分别处理（单一 `except` 块内用 `if/elif` 分支，避免死代码）。
-
-#### `RiceQuantEval.run()` — 主回测
-
-**完整流程**：
-1. 调用 `compute_factors()` 或 `compute_factors_polars()`
-2. 获取标签数据（次日收益率 `return_1d`）
-3. 因子数据与标签数据对齐（inner join by `[datetime, instrument]`）
-4. 清理 `inf/nan`；若对齐后数据为空，抛出 `ValueError("All factor data is NaN/Inf...")`
-5. **IC 计算**：每日截面 Spearman 相关系数，取均值
-6. **Rank IC**：每日截面排名相关系数均值
-7. **Quintile 分层回测**（5组）：计算各层次日均收益，顶层为 `pfs1`，底层为 `pfs2`
-8. **Sharpe**：基于顶层组日收益，年化计算
-9. **最大回撤**：顶层组累计收益的 MDD
-
-#### `RiceQuantEval.run_robustness_test(noise_level=0.05)`
-
-对因子加 5% 高斯噪声，重算 IC，与原始 IC 对比：
 ```python
-self.rre = max(0.0, min(1.0, noisy_ic / orig_ic))
-```
-`rre` 越接近 1，因子越稳健。
-
-#### `RiceQuantEval.dry_run(expression) -> tuple[bool, str]` (静态方法)
-
-用虚拟数据（30 只股票 × 252 交易日）验证表达式可执行性，不需要真实市场数据。
-
-- 为所有支持的 `$field` 生成随机数
-- 在 context 中 eval 表达式
-- 成功且有非 NaN 值 → `(True, "OK")`
-- 失败 → `(False, 错误描述)`
-
----
-
-### 8.2 `core/alphaeval/polars_engine.py`
-
-Polars 高性能因子计算引擎，包含：
-1. Rust 编译器（`polars_plugins.compile_alpha()`）
-2. Python AST 逐步求值器（解决 Polars `.over()` 嵌套限制）
-
-#### 模块级算子函数（全部注册到 `PolarsEngine.context`）
-
-**截面算子**（`.over("datetime")`）：
-```python
-Rank(x)        # 截面百分比排名 = rank / count
-CSRank(x)      # 同 Rank
-CSZScore(x)    # (x - mean) / std，std=0 时用 1.0 替代
-Winsorize(x, pct=0.05)    # 截断超出 [pct, 1-pct] 分位的值
-GroupNeutral(x)           # 截面去均值（市场中性化）
-Percentile(x)             # 截面百分位排名
-Scale(x, a=1)             # 按截面绝对值之和归一化
-```
-
-**时序算子**（`.over("instrument")`）：
-```python
-Mean(x, n)     # Rolling mean（n=None 时退化为截面均值）
-Std(x, n)      # Rolling 标准差
-Median(x, n)   # Rolling 中位数
-Sum(x, n)      # Rolling 求和
-EMA(x, n)      # 指数移动平均（ewm_mean）
-WMA(x, n)      # 加权移动平均（用 ewm_mean 近似）
-Ref(x, n)      # 取 n 日前的值（shift(n)）
-Delta(x, n)    # x - Ref(x, n)
-Corr(x, y, n)  # Rolling Spearman 相关
-Cov(x, y, n)   # Rolling 协方差
-Ts_Rank(x, n)  # Rust 插件实现的时序百分比排名
-Ts_ArgMax(x, n) / Ts_ArgMin(x, n)  # Rust 插件：最大/最小值距今天数
-Ts_Percentile(x, n, p=50)  # n 日内第 p 百分位数值
-Ts_Max(x, n) / Ts_Min(x, n)  # Rolling 最大/最小值
-```
-
-**数学/逻辑算子**：
-```python
-Abs, Log, Sign, Sqrt, Exp, Ceil, Floor, Round, Sin, Cos, Tan
-If(cond, a, b) = pl.when(cond).then(a).otherwise(b)
-Greater(a,b), Less(a,b), GreaterEqual, LessEqual, Equal, NotEqual
-And(*args)     # 变长参数，functools.reduce 链式 &
-Or(*args)      # 变长参数，functools.reduce 链式 |
-```
-
-**别名**（兼容 LLM 可能生成的非标准名称）：
-```python
-Add=a+b, Sub=a-b, Mul=a*b, Div=a/b
-Multiply=Mul, Divide=Div, Subtract=Sub, Negate=Neg
-Neg=-a, Inv=1/a, Pow=a**b
-Max=pl.max_horizontal(a,b), Min=pl.min_horizontal(a,b)
-```
-
-#### `_get_int(n, op_name) -> int`
-安全的窗口参数转换。若 `n` 是 `pl.Expr`（LLM 错误传入序列），抛出描述性 `ValueError`。
-
-#### `_python_compile_alpha(expression) -> str`
-纯 Python 回退编译器，仅将 `$fieldname` 替换为 `pl.col('fieldname')`。
-
-#### `_preprocess_expression(expression) -> str`
-预处理：去首尾空白，合并多余空格。
-
-#### `PolarsEngine.evaluate(expression) -> pl.Expr`
-
-**双层编译策略**：
-1. `lib.compile_alpha(expression)` — Rust 编译器（性能最优）
-2. 若返回 `"Error:..."` 或 eval 失败 → 回退到 `_python_compile_alpha()`
-3. 在 `{"__builtins__": {}}` 受限环境中 `eval()`，结果强制转 `Float64`
-
-#### `PolarsEngine.compute_all(df, expressions) -> pl.DataFrame`
-批量计算，单个失败时以 `null` 列代替，继续计算其他因子。
-
-#### `PolarsEngine._eager_eval(df, expr_str) -> pl.DataFrame`
-
-**解决 Polars `.over()` 嵌套全 null 问题的核心方法**。
-
-问题背景：`Rank(Delta($close, 5))` 在 Polars 中，内层 `Delta` 需要 `.over("instrument")`（按股票分组），外层 `Rank` 需要 `.over("datetime")`（按日期截面）。Polars 不允许这种嵌套，会产生全 null 输出。
-
-解决方案：解析 AST，逐节点求值。当遇到截面算子（`_CS_OPS` 集合）且其参数是复合表达式时，先将该参数物化为临时列：
-```python
-if is_cs and isinstance(arg_val, pl.Expr) and not self._is_bare_col(arg_node):
-    tmp = f"__cs_arg_{len(tmp_cols)}__"
-    df_container[0] = df_container[0].with_columns(arg_val.alias(tmp))
-    tmp_cols.append(tmp)
-    arg_val = pl.col(tmp)  # 用物化后的裸列名替换复合表达式
-```
-
-截面算子集合：`{"Rank", "CSRank", "CSZScore", "GroupNeutral", "Winsorize", "Percentile", "Scale"}`
-
-#### `PolarsEngine._eval_ast_node(node, df_container, tmp_cols)`
-
-递归 AST 求值器，处理节点类型：
-- `ast.Constant` → 字面量
-- `ast.Attribute` → `pl.col`, `pl.lit` 等属性访问
-- `ast.Name` → 从 `context` 查找函数
-- `ast.UnaryOp` → `-x`（USub）、`+x`（UAdd）、`~x`（Not）
-- `ast.BinOp` → `+`, `-`, `*`, `/`, `**`, `&`, `|`
-- `ast.Compare` → `>`, `<`, `>=`, `<=`, `==`, `!=`
-- `ast.Call` → 函数调用，触发截面算子的参数物化逻辑
-
----
-
-### 8.3 `core/alphaeval/modeltester.py`
-
-微软 Qlib 框架适配器（`--mode qlib` 时使用）。`AlphaEval` 类封装 Qlib 的 Alpha158 评估流程，接口与 `RiceQuantEval` 一致（有 `.run()`、`.ic`、`.rankic` 属性），使 `EvalAgent` 可以无缝切换。
-
----
-
-### 8.4 `polars_plugins/src/lib.rs`
-
-Rust 编写的 Polars 扩展插件，提供：
-1. 高性能时序算子（`ts_rank`、`ts_argmax`、`ts_argmin`）
-2. Qlib 表达式编译器（`compile_alpha`）
-
-#### Rust 时序算子
-
-三个算子均通过 `#[polars_expr]` 宏注册为 Polars 插件，使用 `rayon` 并行计算：
-
-- **`ts_rank(inputs, window_size)`**：窗口内当前值的百分比排名（`rank/count`），NaN 安全
-- **`ts_argmax(inputs, window_size)`**：窗口内最大值的位置距今天数
-- **`ts_argmin(inputs, window_size)`**：窗口内最小值的位置距今天数
-
-均在 `PolarsEngine` 中通过 `register_plugin_function()` 调用，结果再加 `.over("instrument")`。
-
-#### 表达式编译器 AST
-
-```rust
-enum Expr {
-    Literal(String),                      // 数值字面量：5, 0.05
-    Field(String),                        // 字段引用：$close → Field("close")
-    Binary(Box<Expr>, String, Box<Expr>), // 二元运算：a + b, a > b
-    Call(String, Vec<Expr>),              // 函数调用：Rank($close)
+{
+    "role": role_prompt,
+    "hypothesis": hypothesis_name,             # 最终假说名称
+    "code": code_expression,                   # 最终代码表达式
+    "metrics": backtest_metrics,               # 完整指标字典
+    "perf_metric": float,                      # = IC，主排序指标
+    "returns": pd.Series,                      # 日期索引日收益序列（模拟时为空）
+    "is_effective": bool,                      # LLM 评审结论
+    "error": Optional[str],                    # 若 workflow 异常则非空
+    "plot_paths": dict,                        # 图片绝对路径（equity, layers）
 }
 ```
 
-#### 解析器函数（nom 组合子）
+`perf_metric` 强制等于 `backtest_metrics["information_coefficient"]`（不使用 Sharpe 或其他指标），与 Manager 门槛（0.005）统一。
 
-- `identifier`：匹配 `[A-Za-z0-9_.]` 组成的标识符
-- `number`：匹配数字（含可选负号和小数点），如 `-5.0`
-- `unary_neg`：匹配 `-` 后接任意 `primary`，生成 `Call("Neg", [expr])`
-- `primary`：优先级最高，依次尝试：函数调用 → 括号表达式 → `$field` → 数字 → 一元负号 → 裸标识符
-- `term`：处理 `*`, `/`, `&`, `|`（左结合）
-- `parse_expression`：处理 `+`, `-` 及所有比较运算符（左结合）
+### SQLite 表结构
 
-#### 代码生成 `to_python(expr) -> String`
-
-| AST 节点 | 生成 Python |
-|---|---|
-| `Literal("5")` | `"5"` |
-| `Field("close")` | `"pl.col('close')"` |
-| `Binary(a, "+", b)` | `"(a + b)"` |
-| `Call("Rank", [x])` | `"Rank(x)"` |
-
-#### `compile_alpha(expression) -> PyResult<String>`
-
-入口函数，解析后若有剩余未解析输入，返回 `"Error: Unparsed trailing input: '...'"` 供 Python 侧检测并触发回退编译器。
-
-**重新编译命令**：
-```bash
-cd polars_plugins && maturin develop --release
-```
-
----
-
-## 9. 模块详解：Schemas 层
-
-### `schemas/messages.py`
-
-所有 LLM 结构化输出的 Pydantic 模型，通过 `model_validate_json()` 解析 LLM 的 JSON 输出。
-
-#### `HypothesisOutput`（IdeaAgent 输出）
-```python
-class HypothesisOutput(BaseModel):
-    hypothesis_name: str         # 因子名称（简短有辨识度）
-    hypothesis_description: str  # 详细描述
-    rationale: str               # 金融逻辑和经济学依据
-```
-
-#### `FormalizationOutput`（FactorAgent 第一步输出）
-```python
-class FormalizationOutput(BaseModel):
-    math_formula: str                 # 正式数学公式（可含 LaTeX）
-    variables_defined: Dict[str, str] # 变量释义字典
-```
-
-#### `ImplementationOutput`（FactorAgent 第二步输出）
-```python
-class ImplementationOutput(BaseModel):
-    code_expression: str    # Qlib 表达式
-    is_valid_syntax: bool   # LLM 自评估（不可信，由 FactorAgent 独立验证覆盖）
-```
-
-#### `ReflexiveReviewOutput`（EvalAgent 反思审查输出）
-```python
-class ReflexiveReviewOutput(BaseModel):
-    review_summary: str         # 回测结果分析摘要（含具体指标值）
-    is_effective: bool          # 是否有效：IC > 0.02 AND Rank IC > 0.02
-    suggested_improvements: str # 具体可操作的改进建议（传给下一轮 IdeaAgent）
-```
-
----
-
-## 10. 模块详解：顶层入口
-
-### 10.1 `sub_agent.py`
-
-单个研究员 Agent 的封装，可被 `ProcessPoolExecutor` 在子进程中运行。
-
-#### `AlphaResearcher.__init__(...)`
-接收所有运行参数（role_prompt, max_iterations, evaluation_mode 等），调用 `build_workflow()` 构建独立的 LangGraph 应用。
-
-#### `AlphaResearcher.run() -> dict`
-
-**构建初始状态**并调用 `self.app.stream(initial_state)` 流式执行工作流。逐节点累积 `final_state`：
-```python
-for output in self.app.stream(initial_state):
-    for node_name, state_update in output.items():
-        final_state.update(state_update)
-```
-
-**错误处理**：异常时记录 `final_state["error"]`，确保 Manager 能检测。
-
-**返回值标准化**：
-- `perf_metric`：优先用 Sharpe（避免 IC 和 Sharpe 混用——但当前代码中确实混用，是已知设计问题）
-- `returns_series`：日期字符串索引转 `pd.Timestamp`（`format="%Y-%m-%d", errors="coerce"`），NaT 行被删除并记录警告
-
-```python
-return {
-    "role": self.role_prompt,
-    "hypothesis": final_state.get("hypothesis_name"),
-    "code": final_state.get("code_expression"),
-    "metrics": metrics,
-    "perf_metric": perf_metric,
-    "returns": returns_series,
-    "is_effective": final_state.get("is_effective", False),
-    "error": final_state.get("error")
-}
-```
-
-#### `run_agent_task(kwargs)` 全局函数
-
-ProcessPoolExecutor 的任务入口（模块级函数，可被 pickle）。添加 `random.uniform(0.1, 1.0)` 随机延迟，防止多进程同时写 SQLite。
-
----
-
-### 10.2 `manager.py`
-
-多 Agent 群体协调器。
-
-#### `PortfolioManager.__init__(roles, **kwargs)`
-
-默认 3 个角色（均值回归、动量、统计套利）。初始化 SQLite 数据库：
 ```sql
+-- results/alpha_miner.db，WAL 模式
 CREATE TABLE IF NOT EXISTS alpha_pool (
-    id TEXT PRIMARY KEY,
-    role TEXT, hypothesis TEXT, code TEXT,
-    ic REAL, rank_ic REAL, report_path TEXT,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-)
+    id           TEXT PRIMARY KEY,     -- "alpha_" + UUID hex[:8]
+    role         TEXT,                 -- 角色 prompt
+    hypothesis   TEXT,                 -- 假说名称
+    code         TEXT,                 -- Qlib 表达式
+    ic           REAL,                 -- IC 值
+    rank_ic      REAL,                 -- RankIC 值
+    report_path  TEXT,                 -- Markdown 报告绝对路径
+    metrics_json TEXT,                 -- 完整 metrics 字典的 JSON 字符串
+    returns_json TEXT,                 -- {iso_date: float} 日收益字典
+    is_effective INTEGER,              -- 0 或 1
+    perf_metric  REAL                  -- = IC
+);
 ```
 
-#### `PortfolioManager.evaluate_and_combine(results_list) -> list`
-
-**第一关：IC 阈值过滤**（`threshold = 0.01`）
-- 跳过有 `error` 的结果
-- IC <= 0.01 的因子被淘汰，记录 Culled 日志
-
-**第二关：相关性去冗余**（阈值 0.7）
-- 对齐两个因子的日收益序列（`.dropna()`）
-- 重叠少于 10 个数据点 → 跳过（视为不相关）
-- Pearson 相关 > 0.7 → 标记为冗余，丢弃
-
-通过两关的因子获得唯一 ID `f"alpha_{uuid4().hex[:8]}"` 并进入最终池。
-
-#### `PortfolioManager.run_swarm(parallel=False)`
-
-主流程：
-1. **全局认证**（ricequant 模式）：`init_rq_auth()`
-2. **Wiki Bootstrap**（`--wiki-bootstrap`）：主进程初始化，防止子进程重复执行
-3. **并行/串行执行**：`ProcessPoolExecutor` 或 for 循环
-4. **筛选**：`evaluate_and_combine()`
-5. **遗传交叉**（≥ 2 个因子时）：
-   - 按 IC 排序，取 Top-2 作为父代
-   - 构建包含两个父代详细信息的 crossover_role prompt
-   - 运行一个新的 `run_agent_task()` 生成混合因子
-   - 对混合因子同样做 IC 阈值 + 相关性过滤
-6. **报告生成**：`summary_agent.generate_markdown_report(factor)`
-7. **SQLite 持久化**（每因子独立 try/except，防止单个失败影响其他）：
-   ```python
-   try:
-       cursor.execute("INSERT OR REPLACE INTO alpha_pool ...")
-       conn.commit()
-   except Exception as db_err:
-       logger.warning(...)  # 记录失败，继续处理其他因子
-   ```
-8. **JSON 备份**：日期键通过 `.isoformat()` 转为字符串
+数据库的 WAL 模式（`PRAGMA journal_mode=WAL`）允许并发读取——TUI/HTTP API 读取时不会被 SubAgent 写入操作阻塞。
 
 ---
 
-### 10.3 `main.py`
+## 15. 输出结构
 
-单 Agent 顺序执行入口。与 `manager.py` 的主要区别：
-- 只运行一个 SubAgent（无群体协调、无遗传交叉）
-- 支持通过 `scripts/fetch_macro_news.py` 预获取宏观新闻
-- 不做 IC 阈值过滤，直接输出最终因子信息
+```
+results/
+├── alpha_miner.db           # SQLite 因子池（主要存储，WAL 模式）
+├── factor_pool.json         # JSON 备份（字段结构与 SQLite 相同）
+├── reports/
+│   ├── <factor_name>.md           # LLM 生成的 Markdown 研究报告
+│   ├── <factor_name>_equity.png   # 权益曲线（含 OOS 红色分割线，由 RiceQuantEval 生成）
+│   └── <factor_name>_layers.png   # G1–G5 分层累积收益图
+└── charts/
+    └── <factor_id>_curve.png      # SummaryAgent 生成的简版权益曲线
 
-**日志配置**：
+data/
+├── rag_docs/                # RAG 原始文档（Markdown 格式，手动维护）
+├── chroma_db/               # ChromaDB 向量索引（RAG 用）
+├── wiki_vault/              # LLMWiki Markdown 卡片（可用 Obsidian 打开）
+│   ├── index.md             # 因子总览索引
+│   ├── log.md               # 每轮更新日志
+│   ├── market_regime_base.md    # 市场状态基础文档
+│   ├── strategy_families_base.md # 策略族群基础文档
+│   └── <factor_slug>.md     # 各因子卡片（由系统自动生成）
+└── wiki_db/                 # ChromaDB 向量索引（Wiki 用）
+    ├── glm_embedding-3/     # GLM embedding 索引
+    └── openai_text-embedding-3-large/  # OpenAI embedding 索引
+```
+
+---
+
+## 16. AlphaMinerState 字段说明
+
+**文件**：`workflow/state.py`，`class AlphaMinerState(TypedDict, total=False)`
+
+`total=False` 表示所有字段均可选，未设置时为 `None`。
+
+| 字段 | 类型 | 生命周期 | 说明 |
+|---|---|---|---|
+| `iteration` | `int` | 持久（跨轮递增）| 当前轮数，从 1 开始 |
+| `max_iterations` | `int` | 持久 | 最大轮数上限 |
+| `rag_context` | `str` | 单轮（不清空）| 本轮检索到的 RAG+Wiki 拼接文本 |
+| `wiki_context` | `str` | 单轮（wiki_update 节点更新）| Wiki 检索结果 |
+| `market_regime_summary` | `str` | **跨轮缓存** | 市场状态描述，IdeaAgent 首次拉取后缓存 |
+| `macro_news_summary` | `str` | **跨轮缓存** | 宏观新闻摘要，IdeaAgent 首次拉取后缓存 |
+| `hypothesis_name` | `str` | 单轮（increment 清空）| 本轮假说名称 |
+| `hypothesis_description` | `str` | 单轮（increment 清空）| 假说详细描述 |
+| `rationale` | `str` | 单轮（increment 清空）| 经济直觉说明 |
+| `math_formula` | `str` | 单轮（increment 清空）| LaTeX 数学公式 |
+| `variables_defined` | `Dict[str, str]` | 单轮（increment 清空）| 公式变量定义字典 |
+| `code_expression` | `str` | 单轮（increment 清空）| Qlib 表达式字符串 |
+| `is_valid_syntax` | `bool` | 单轮（increment 重置 True）| AST 验证结果 |
+| `backtest_metrics` | `Dict[str, float]` | 单轮（increment 清空）| 回测指标字典 |
+| `daily_returns` | `Dict[str, float]` | 单轮（SubAgent 结束时读取）| `{iso_date: float}` 日收益 |
+| `review_summary` | `str` | 单轮（increment 清空）| LLM 评审摘要 |
+| `is_effective` | `bool` | 单轮（increment 清空）| LLM 评审是否认定有效 |
+| `is_simulated` | `bool` | 单轮（increment 重置 False）| 本轮是否使用模拟指标 |
+| `suggested_improvements` | `str` | 单轮（increment 清空）| 传递给下一轮 IdeaAgent 的改进建议 |
+| `best_ic` | `float` | **持久**（模拟数据不更新）| 历史最佳真实 IC，初始 -999.0 |
+| `best_code_expression` | `Optional[str]` | **持久** | 产生 best_ic 的代码表达式 |
+| `patience_counter` | `int` | **持久**（模拟数据不更新）| 连续无改善轮数 |
+| `role_prompt` | `Optional[str]` | 持久（从不改变）| 本 SubAgent 的角色描述 |
+| `evaluation_mode` | `str` | 持久 | `"ricequant"` 或 `"qlib"` |
+| `evaluation_engine` | `str` | 持久 | `"pandas"` 或 `"polars"` |
+| `market_analysis_start_date` | `Optional[str]` | 持久 | 市场分析起始日 |
+| `market_analysis_end_date` | `Optional[str]` | 持久 | 市场分析截止日 |
+| `market_analysis_lookback_days` | `Optional[int]` | 持久 | 回望天数（默认 60）|
+| `error` | `Optional[str]` | 单轮（increment 清空）| 节点错误信息 |
+| `messages` | `List[str]` | **追加合并**（`Annotated[List, operator.add]`）| 全程日志消息流 |
+
+---
+
+## 17. 关键参数速查
+
+| 参数 | 文件:行 | 当前值 | 可配置方式 |
+|---|---|---|---|
+| IC 过滤门槛 | `manager.py:182` | `0.005` | 直接修改源码 |
+| 相关性剔除阈值 | `manager.py:226` | `0.7` | 直接修改源码 |
+| 早停 IC 门槛 | `graph.py:55` | `0.05`（仅真实数据）| 直接修改源码 |
+| patience 上限 | `graph.py:59` | `4` | 直接修改源码 |
+| SubAgent 默认迭代数 | `sub_agent.py:10` | `5` | `--iterations` 命令行参数 |
+| OOS 分割日期 | `rq_eval.py:119` | `"2023-01-01"`（硬编码）| 修改源码 |
+| 默认股票池 | `rq_eval.py:109` | `"000300.XSHG"`（沪深 300）| `RiceQuantEval(market=...)` |
+| 默认回测开始 | `rq_eval.py:107` | `"2018-01-01"` | `--market-start` |
+| 默认回测结束 | `rq_eval.py:108` | `"2025-12-31"` | `--market-end` |
+| FactorAgent 最大重试 | `factor_agent.py:~351` | `2` | 直接修改源码 |
+| SubAgent 启动抖动 | `manager.py:23` | `0.1–1.0 秒` | 直接修改源码 |
+| SubAgent 超时 | `manager.py:284` | `600 秒` | 直接修改源码 |
+| 遗传杂交 IC 门槛 | `manager.py:327` | `0.01` | 直接修改源码（高于普通因子门槛）|
+| context 截断长度 | `idea_agent.py:~117` | `6000 字符` | 直接修改源码 |
+| 市场状态回望天数 | `idea_agent.py:~81` | `60 天` | state 字段 `market_analysis_lookback_days` |
+
+---
+
+## 18. 已知问题与规避方式
+
+### 问题 1：RiceQuant Quota 耗尽
+
+**现象**：大量 `RiceQuant backtest unexpected failure: Quota exceeded`，后续 IC 全为模拟随机值。
+
+**根本原因**：RiceQuant 按数据调用量计费，多进程并发时极易超限。
+
+**保护**：`is_simulated=True` 全面隔离，4 层保护防止污染（见第 10 节）。
+
+**规避措施**：
+- 减少 `--iterations`（每轮一次完整 RQ 请求）
+- 避免 `--parallel`（串行可复用单次数据拉取）
+- 指定更短的回测区间（`--market-start 2020-01-01 --market-end 2022-12-31`）
+- 多个 SubAgent 间共享一次数据拉取（需架构改造）
+
+---
+
+### 问题 2：Polars 嵌套表达式求值
+
+**现象**：`CSRank(Ts_Rank(Log($close), 18))` 等深层嵌套在 Polars 引擎下产生全 null 输出，或 Rust plugin 函数报 `TypeError`。
+
+**根本原因**：
+- Polars `.over('instrument')` 嵌套在 `.over('datetime')` 内会产生全 null
+- Rust plugin 函数只能接收裸 `pl.col()` 引用，不能接收复合惰性表达式
+
+**保护**：`_eager_eval` 的 `_CS_OPS` + `_TS_PLUGIN_OPS` 物化机制（见第 8.2 节）。
+
+**规避措施**：
+- 复杂嵌套因子优先用 `--engine pandas` 测试；Polars 引擎用于性能优化，不用于调试
+- 遇到 Polars 错误时，检查是否为新增的嵌套模式，考虑将相关算子加入 `_TS_PLUGIN_OPS`
+
+---
+
+### 问题 3：LLM 幻觉字段
+
+**现象**：`FactorAgent` 生成含 `$beta_spx`、`$market_cap`、`$sector` 等不存在字段的表达式。
+
+**根本原因**：LLM 将常见量化文献中的变量名直接用作字段名，而非遵守白名单。
+
+**保护**：`_validate_qlib_expression` 字段白名单检查（步骤 5），错误信息中列出完整白名单，触发 FactorAgent 重试时 LLM 能看到正确字段列表。
+
+**规避措施**：在 system prompt 中显式列出禁止字段示例（已实现），并在每次重试时重申白名单（已通过 sliding window 对话传递）。
+
+---
+
+### 问题 4：LLM 生成恒等式因子
+
+**现象**：`Divide($close, $close)`、`Sub($volume, $volume)` 等截面全为常数的因子通过语法检查，最终因 empty returns 被 Manager 剔除，但浪费了一次回测 Quota。
+
+**根本原因**：LLM 为了通过验证器，简化公式到极端情况。
+
+**保护**：AST 级恒等式检测（验证步骤 11），在回测前即拦截。
+
+---
+
+### 问题 5：Rank 传入双参数
+
+**现象**：LLM 参考 WorldQuant Alpha101 写法，调用 `Rank($close, 20)`（将窗口参数传给截面 Rank）。
+
+**根本原因**：Alpha101 的 rank 函数有时序参数，但我们的系统 `Rank` 是纯截面操作。
+
+**保护**：验证器 `unary_ops` 集合检查，`Rank`/`CSRank` 位置参数 > 1 时拒绝，错误信息明确说明"Rank 是截面操作，无窗口参数"。
+
+---
+
+### 问题 6：Look-ahead Bias（未来数据）
+
+**现象**：`Ref($close, -1)` 使用负偏移引用未来价格。
+
+**保护**：验证步骤 13，`Ref` 第二参数为负整数时拒绝。
+
+---
+
+### 问题 7：Self-Correlation（自相关）
+
+**现象**：`Corr(Delta($close,3), Delta($close,3), 30)` 自相关，结果恒为 1.0，是无效因子。
+
+**保护**：验证步骤 12，两数据参数 `ast.dump()` 相同时拒绝。
+
+---
+
+### 问题 8：Exp/Ceil/Floor 在 pandas 引擎中不存在
+
+**现象**：`name 'Exp' is not defined`，LLM 生成了合法白名单算子，但 pandas eval 上下文中未注册。
+
+**保护**：已于 2026-04-15 将 `Exp`、`Ceil`、`Floor`、`Scale`、`WMA` 补充到 `context` 字典（`rq_eval.py` 第 557–580 行）。
+
+---
+
+## 19. 测试
+
+### pytest 测试套件
+
+```bash
+# 全量测试
+python -m pytest tests/
+
+# 数值一致性：pandas 与 polars 引擎结果对比
+python -m pytest tests/test_numerical_consistency.py
+
+# Polars 算子全面测试（含嵌套）
+python -m pytest tests/test_polars_ops_extensive.py -v
+```
+
+### 独立脚本（非 pytest，需要 RiceQuant 账号）
+
+```bash
+python test_eval.py    # 端到端回测流程测试
+python test_ctx.py     # 上下文检索与知识库测试
+```
+
+### 验证器单元测试（无需任何外部账号）
+
 ```python
-logger.add("results/run_{time}.log", rotation="10 MB", retention="10 days", level="DEBUG")
+from agents.factor_agent import FactorAgent
+fa = FactorAgent.__new__(FactorAgent)
+
+# 应通过（ok=True）
+assert fa._validate_qlib_expression("CSRank(Ts_Rank(Log($close), 18))")[0]
+assert fa._validate_qlib_expression("Div(Delta($close,5), Ref($close,5))")[0]
+assert fa._validate_qlib_expression("Corr(Delta($close,5), Delta($volume,5), 20)")[0]
+assert fa._validate_qlib_expression("Exp(Std($close, 10))")[0]
+
+# 应拒绝（ok=False）
+assert not fa._validate_qlib_expression("Rank($close, 20)")[0]           # Rank 双参数
+assert not fa._validate_qlib_expression("Divide($close, $close)")[0]     # 恒等式
+assert not fa._validate_qlib_expression("Sub($volume, $volume)")[0]      # 恒等式
+assert not fa._validate_qlib_expression("Ref($close, -1)")[0]            # look-ahead
+assert not fa._validate_qlib_expression("Corr(Delta($close,3), Delta($close,3), 30)")[0]  # 自相关
+assert not fa._validate_qlib_expression("Rank($beta_spx)")[0]            # 非法字段
+assert not fa._validate_qlib_expression("SomeFakeOp($close, 10)")[0]     # 非法算子
+assert not fa._validate_qlib_expression("Ref($close, Mean($close, 5))")[0]  # 动态窗口（无字段引用）
+```
+
+### Polars 引擎快速验证
+
+```python
+import polars as pl
+from core.alphaeval.polars_engine import Sign, Abs, Exp, PolarsEngine
+
+# 常量参数测试
+assert isinstance(Sign(1), pl.Expr)
+assert isinstance(Abs(-2.5), pl.Expr)
+assert isinstance(Exp(0), pl.Expr)
+
+# _TS_PLUGIN_OPS 集合验证
+pe = PolarsEngine()
+assert "Ts_Rank" in pe._TS_PLUGIN_OPS
+assert "Ts_ArgMax" in pe._TS_PLUGIN_OPS
 ```
 
 ---
 
-## 11. 完整数据流与流程说明
+## 20. 开发规范
 
-### 11.1 单次因子挖掘流程（LangGraph 内部）
+### 新增算子
 
-```
-初始状态 {iteration:1, max_iterations:3, role_prompt:"...", best_ic:-999, patience:0}
-         │
-         ▼
-    ┌─────────────────────────────────────────┐
-    │            idea_agent                    │
-    │  1. 检索 RAG 文档 + Wiki 卡片            │
-    │  2. 获取市场制度分析 (RiceQuant)          │
-    │  3. 获取宏观新闻 (RAG)                   │
-    │  4. 拼接上下文（≤6000字符）              │
-    │  5. LLM(temp=0.7) 生成假说 JSON          │
-    │  ────────────────────────────────────── │
-    │  输出: hypothesis_name/description/rationale│
-    └────────────────┬────────────────────────┘
-                     │ route_after_idea（检查 error, hypothesis_name）
-                     ▼
-    ┌─────────────────────────────────────────┐
-    │           factor_agent                   │
-    │  Step 1: LLM(temp=0.1) 假说→数学公式     │
-    │    输出: math_formula, variables_defined  │
-    │                                          │
-    │  Step 2: LLM(temp=0.1) 公式→Qlib代码     │
-    │    + 自我纠错循环（最多 2 次重试）        │
-    │    ① _validate_qlib_expression()         │
-    │    ② RiceQuantEval.dry_run()             │
-    │  ────────────────────────────────────── │
-    │  输出: code_expression, is_valid_syntax   │
-    └────────────────┬────────────────────────┘
-                     │ route_after_factor（检查 error, code_expression）
-                     ▼
-    ┌─────────────────────────────────────────┐
-    │            eval_agent                    │
-    │  Step 1: 真实回测 (RiceQuantEval.run())  │
-    │    ├─ 若失败 → 模拟指标（_simulated=True）│
-    │    └─ 成功 → IC, Rank IC, Sharpe, ...    │
-    │                                          │
-    │  Step 2: LLM(temp=0.4) 反思审查          │
-    │    输出: review_summary, is_effective,    │
-    │           suggested_improvements         │
-    │                                          │
-    │  Step 3: 若真实回测 → add_experience(RAG) │
-    │                                          │
-    │  Step 4: 早停指标更新                     │
-    │    best_ic, best_code, patience_counter  │
-    └────────────────┬────────────────────────┘
-                     │ route_after_eval（始终 → wiki_update）
-                     ▼
-    ┌─────────────────────────────────────────┐
-    │           wiki_update                    │
-    │  update_wiki_after_eval(state)           │
-    │  写入因子卡片到 data/wiki_db/            │
-    │  刷新 wiki_context 供下一轮使用          │
-    └────────────────┬────────────────────────┘
-                     │ route_after_wiki（早停判断）
-            ┌────────┴────────┐
-         continue           end
-        （iteration<max      （IC≥0.05
-         且patience<3）       或patience≥3
-                              或iteration==max）
-            │
-            ▼
-    ┌───────────────┐
-    │   increment   │  iteration += 1，重置 error/is_valid_syntax
-    └───────┬───────┘
-            │ 固定边
-            └──────────────> idea_agent（下一轮）
-```
+遵循"三处必改"原则：
 
-### 11.2 因子表达式完整转换链示例
+**1. 实现引擎**（至少一处，建议两处都改）：
 
-```
-原始假说：
-"利用近期成交量异常放大预测短期价格反转"
+- **Polars 引擎**（`core/alphaeval/polars_engine.py`）：
+  - 在文件顶层定义算子函数，单参数算子内调用 `_ensure_expr(x)` 处理常量参数
+  - 若算子内部使用 Rust plugin（`register_plugin_function`）：加入 `_TS_PLUGIN_OPS`
+  - 若算子内部使用 `.over('datetime')`（截面）：加入 `_CS_OPS`
+  - 在 `PolarsEngine.context` 字典中注册
 
-FactorAgent Step1（数学公式）：
-math_formula = "F_t = -\Delta P_t \cdot Z_V(t)"
-variables_defined = {"Delta_P_t": "第t日价格变化", "Z_V(t)": "成交量截面Z分"}
+- **Pandas 引擎**（`core/alphaeval/rq_eval.py`，`compute_factors()` 内部）：
+  - 在函数体内定义同名函数（操作 `(datetime × instrument)` 二维矩阵）
+  - 在 `context` 字典中注册
+  - 注意：pandas 矩阵引擎中时序操作沿 Rolling 轴（单只股票），截面操作沿 `axis=1`
 
-FactorAgent Step2（Qlib代码）：
-code_expression = "Rank(-Delta($close, 1)) * Rank(CSZScore($volume))"
-
-验证链：
-  _validate_qlib_expression():
-    ✓ 括号平衡
-    ✓ $close, $volume 在白名单
-    ✓ AST 解析成功
-    ✓ Rank, Delta, CSZScore 均在算子白名单
-    ✓ Delta 有 2 个参数
-  dry_run():
-    ✓ 用随机数据执行成功，产生非 NaN 值
-
-Polars 引擎执行：
-  Rust: compile_alpha("Rank(-Delta($close, 1)) * Rank(CSZScore($volume))")
-      → "Rank(Neg(Delta(pl.col('close'), 1))) * Rank(CSZScore(pl.col('volume')))"
-
-  _eager_eval() AST 遍历：
-    1. 解析整体为 BinOp(Mul)
-    2. 左侧 Call("Rank", [UnaryOp(Neg, Call("Delta", [$close, 1]))])
-       - Delta 是时序算子：Delta(pl.col('close'), 1).over("instrument")
-       - 物化为临时列 __cs_arg_0__（因为 Rank 是截面算子，参数是复合表达式）
-       - Rank(__cs_arg_0__) 按 datetime 截面排名
-    3. 右侧 Call("Rank", [Call("CSZScore", [$volume])])
-       - CSZScore(pl.col('volume')) 按 datetime 截面 Z-Score
-       - 物化为临时列 __cs_arg_1__
-       - Rank(__cs_arg_1__) 按 datetime 截面排名
-    4. 两个 Rank 结果相乘
-    5. 清除临时列
-
-RiceQuantEval 指标：
-  IC = 0.0289（每日截面 Spearman 相关均值）
-  Rank IC = 0.0245
-  Sharpe = 1.23（顶层分组年化）
-  RRE = 0.87（噪声稳健性）
-
-EvalAgent 反思：
-  is_effective = True（IC=0.0289 > 0.02）
-  suggested_improvements = "考虑在高波动期增加波动率条件过滤，降低假信号..."
-```
-
-### 11.3 跨迭代学习机制
-
-```
-迭代 1：
-  IdeaAgent 生成 "简单动量强度因子"
-  FactorAgent → Rank(EMA($close, 10) / EMA($close, 50))
-  EvalAgent → IC=0.008（低于有效阈值）
-  反思 → "震荡市场中简单动量效果差，建议波动率调整"
-  Wiki → 写入失败卡片（status="failed", simulated=False）
-
-迭代 2：
-  IdeaAgent 读取 Wiki（"上轮动量因子失败：IC=0.008，建议波动率调整"）
-  生成 "波动率调整动量因子"
-  FactorAgent → Rank(Delta($close, 20) / Std($close, 20))
-  EvalAgent → IC=0.031（有效！），patience_counter 重置为 0
-  Wiki → 写入成功卡片（status="proven"）
-  RAG → add_experience（记录成功经验供检索）
-
-迭代 3：
-  IdeaAgent 读取成功卡片 + 新一轮改进建议
-  ...若连续 3 轮 IC 不再提升 → patience_counter = 3 → 工作流结束
-```
+**2. 算子白名单**（`agents/factor_agent.py`）：
+  - 将算子名加入 `QLIB_OPERATORS` 集合（`FactorAgent` 类顶部）
+  - 在 `OPERATOR_SIGNATURES` 字符串中添加完整签名说明（含参数含义和约束）
+  - 更新对应的参数数量检查集合：
+    - 1 个参数的算子 → 加入 `unary_ops`
+    - 2 个参数的算子 → 加入 `binary_ops`
+    - 3 个参数的算子 → 加入 `ternary_ops`
 
 ---
 
-## 12. 配置参数全览
+### 新增 LLM Provider
 
-### 12.1 环境变量（`.env`）
+在 `core/llm.py` 中：
 
-```ini
-# === LLM 提供商（至少一个）===
-LLM_KEY=               KIMI_API_KEY=          # Kimi/Moonshot
-ZHIPU_API_KEY=         GLM_KEY=               # 智谱 GLM（兼顾 Embedding）
-OPENAI_API_KEY=        OpenAI_KEY=            # OpenAI
-DEEPSEEK_API_KEY=                             # DeepSeek
-QWEN_API_KEY=                                 # 通义千问
-GROQ_API_KEY=                                 # Groq（免费高速）
-OPENROUTER_API_KEY=                           # OpenRouter
-ClaudeCode_KEY=        ANTHROPIC_API_KEY=     # Claude（代理）
-
-# === 本地 LLM ===
-OLLAMA_BASE_URL=http://localhost:11434/v1
-VLLM_BASE_URL=http://localhost:8000/v1
-
-# === RiceQuant ===
-RQ_USER=用户名
-RQ_PASS=密码
-RQ_TOKEN=token值  # 与 USER/PASS 二选一
-```
-
-### 12.2 关键运行时参数
-
-| 参数位置 | 当前值 | 含义 |
-|---|---|---|
-| `graph.py` route_after_wiki `current_ic >= 0.05` | 0.05 | IC 早停阈值（异常优秀时提前结束） |
-| `graph.py` route_after_wiki `patience >= 3` | 3 | 无改进早停轮数 |
-| `manager.py` evaluate_and_combine `threshold` | 0.01 | 因子进入最终池最低 IC |
-| `manager.py` evaluate_and_combine 相关性 | 0.7 | Pearson 相关性剔除阈值 |
-| `manager.py` 最小相关样本量 | 10 | 计算相关性所需最少重叠点 |
-| `idea_agent.py` 上下文截断 | 6000 | 知识上下文最大字符数 |
-| `factor_agent.py` max_retries | 2 | 代码自我纠错最多次数 |
-| `llm.py` request_timeout | 60s | 单次 API 超时 |
-| `llm.py` max_retries | 3 | LLM 自动重试次数 |
-| `rq_eval.py` noise_level | 0.05 | 稳健性测试噪声水平（5% 高斯噪声） |
-| `rag.py` batch_size | 8 | ChromaDB 批量写入大小 |
-| `wiki.py` 卡片截断 | 1000字符 | 检索返回的单卡片最大长度 |
+1. `get_llm_config()` 的 `providers` 字典中添加 `"new_provider": os.getenv("NEW_PROVIDER_API_KEY")`
+2. `get_llm()` 中添加 `elif provider == "new_provider":` 分支，设置 `base_url` 和默认 `model_name`
+3. 在 `.env.example` 中添加对应变量示例
 
 ---
 
-## 13. 输出文件说明
+### 修改路由逻辑
 
-### `results/alpha_miner.db`
-SQLite 数据库，存储所有通过筛选的因子。
-```bash
-sqlite3 results/alpha_miner.db \
-  "SELECT hypothesis, code, ic, rank_ic FROM alpha_pool ORDER BY ic DESC"
-```
+路由函数（`workflow/graph.py`）必须保持**纯函数**：
+- 只读取 `state`，不修改
+- 只返回字符串节点名称（或 `"end"`）
+- 不调用任何有副作用的函数
 
-### `results/alpha_pool.json`
-JSON 备份，与 SQLite 内容相同，额外包含 `daily_returns` 字典（日期 ISO 字符串 → 日收益率）。
-
-### `results/reports/{factor_id}.md`
-每个因子的 Markdown 研究报告：规格描述 + 性能指标表 + 权益曲线图 + LLM 经济学解读。
-
-### `results/charts/{factor_id}_curve.png`
-权益曲线图，顶层分组的累计收益率随时间变化。
-
-### `data/wiki_db/`
-```
-data/wiki_db/
-├── index.md                     # 自动维护的全量因子索引
-├── log.md                       # 所有写入操作的日志记录
-└── {hypothesis_slug}_iter{n}.md # 每个因子实验的结构化卡片
-```
-
-### `data/chroma_db/`
-ChromaDB 向量数据库：`knowledge`（RAG 文档）、`experience`（回测经验）集合。
+状态修改应在：
+- Agent 节点（`__call__` 方法返回的字典）
+- `increment_iteration` 函数
 
 ---
 
-## 14. 已知问题与注意事项
+### 新增验证规则
 
-### 14.1 功能性问题
+在 `FactorAgent._validate_qlib_expression()` 的 `for node in ast.walk(tree)` 循环内，遵循以下模式：
 
-1. **`rq_eval.py` Percentile 实现错误**
-   当前实现等同于 Rank（返回百分比排名）而非指定百分位数的数值。
-   ```python
-   # 当前（错误）
-   def Percentile(df, p): return df.rank(axis=1, pct=True)
-   # 正确应为
-   def Percentile(df, p): return df.apply(lambda x: x.quantile(float(p)/100))
-   ```
-
-2. **模拟指标无法区分**
-   真实回测失败时回退到哈希确定性模拟指标，Manager 无法区分"零 alpha 因子"和"数据获取失败"。
-
-3. **早停 IC 阈值偏高**
-   `route_after_wiki` 中 `IC >= 0.05` 在实际 A 股因子中极难达到，早停几乎不会通过此路径触发。
-
-4. **`perf_metric` 量纲不统一**
-   `sub_agent.py` 中若 Sharpe 可用则用 Sharpe，否则用 IC——两者量纲不同，Manager 的 `threshold=0.01` 判断不适用于 Sharpe。
-
-### 14.2 使用限制
-
-- **RiceQuant 权限**：需要有效订阅，免费账号可能无法获取完整历史数据
-- **Polars 版本**：要求 `polars >= 1.0.0`；Rust 插件需要 `maturin >= 1.0`
-- **并行模式**：多进程 `spawn` 启动在 Windows 上较慢；建议 Linux/macOS
-- **内存**：大时间范围（>5年）+ 全市场因子计算需要 >8GB 内存
-- **ChromaDB 并发**：多进程写入使用文件锁，但读写并发可能有脏读（轻量负载通常无影响）
-
-### 14.3 调试技巧
-
-```bash
-# 查看详细运行日志
-tail -f results/run_*.log
-
-# 单因子干运行（无需 RiceQuant 凭证）
-python -c "
-from core.alphaeval.rq_eval import RiceQuantEval
-ok, msg = RiceQuantEval.dry_run('Rank(Delta(\$close, 5) / Ref(\$close, 5))')
-print(ok, msg)
-"
-
-# 测试 Polars 编译器
-python test_compile.py
-
-# 检查 Wiki 积累情况
-cat data/wiki_db/index.md
-
-# 查看 SQLite 因子库
-sqlite3 results/alpha_miner.db \
-  "SELECT id, hypothesis, ic FROM alpha_pool ORDER BY ic DESC LIMIT 10"
+```python
+# 在恰当位置插入
+if op in {"待检查算子名"}:
+    # 验证逻辑
+    if <错误条件>:
+        return (
+            False,
+            f"明确说明：是什么问题 + 如何修复的错误信息（LLM 在重试时会看到此信息）",
+        )
 ```
 
-### 14.4 扩展指南
+**原则**：
+- 错误信息必须**可操作**：告诉 LLM 具体哪里错了、应该怎么改
+- 不要使用过于宽泛的错误信息（如"表达式无效"），这会导致 LLM 无法定向修复
 
-**添加新 LLM 提供商**：在 `core/llm.py` 的 `get_llm()` 中添加 `elif provider == "new_name":` 分支，设置 `base_url` 和默认 `model_name`；在 `get_llm_config()` 的 `providers` 字典中添加环境变量映射。
+---
 
-**添加新 Qlib 算子**：
-1. `rq_eval.py` context 字典：添加 Pandas 实现
-2. `polars_engine.py`：添加 Polars 实现函数并注册到 `self.context`
-3. `factor_agent.py` `QLIB_OPERATORS` 集合：添加名称
-4. `factor_agent.py` `OPERATOR_SIGNATURES`：添加签名文档
+### 状态清理约定（increment 节点）
 
-**添加新数据字段**：在 `rq_eval.py` 数据获取代码和 `factor_agent.py` 的 `QLIB_FIELDS` 集合中同步添加。
+`increment_iteration()` 函数（`workflow/graph.py`）负责清空所有**单轮临时字段**。
 
-**修改早停策略**：调整 `workflow/graph.py` 中 `route_after_wiki()` 的判断逻辑。
+**规则**：新增任何仅用于单轮的 state 字段时，**必须**在 `increment_iteration` 返回的字典中显式设为 `None`（或适当的默认值），否则上一轮残留值会在下一轮中被错误使用（状态污染）。
 
-**修改筛选策略**：调整 `manager.py` 中 `evaluate_and_combine()` 的 `threshold`（IC 阈值）和相关性阈值（0.7）。
+**跨轮字段（不清空）**：`best_ic`、`patience_counter`、`best_code_expression`、`market_regime_summary`、`macro_news_summary`、`role_prompt`、`evaluation_mode`、`evaluation_engine`、`market_analysis_*`
+
+---
+
+### 模拟状态的处理原则
+
+任何新增的基于回测指标的逻辑，都必须检查 `is_simulated` 标志：
+
+```python
+if not is_simulated:
+    # 只有真实回测数据才执行的逻辑
+    do_something_with_real_metrics()
+```
+
+绝对不能在 `is_simulated=True` 时：
+- 更新 `best_ic` 或 `patience_counter`
+- 向 RAG 或 Wiki 写入经验
+- 将因子纳入 Manager 筛选候选池（`daily_returns` 为空自然被剔除，但不应依赖此默认行为）
+
+---
+
+### 代码格式与注释
+
+- 关键业务逻辑必须有行内注释说明**为什么**这么做，而非只说做了什么
+- 修改早停逻辑、验证规则、知识库更新等高风险路径时，在 PR 中说明对哪些陷阱做了测试
+- 所有 LLM prompt 的修改需同步更新本文档第 6 节对应的"关键 Prompt 约束"或"强制规则"列表

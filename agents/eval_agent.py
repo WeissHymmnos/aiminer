@@ -34,8 +34,8 @@ class EvalAgent:
         code: str,
         mode: str = "ricequant",
         engine: str = "pandas",
-        test_start_date: str = "2017-01-01",
-        test_end_date: str = "2020-10-31",
+        test_start_date: str = "2018-01-01",
+        test_end_date: str = "2025-12-31",
     ) -> Dict[str, float]:
         """
         Uses RiceQuantEval or AlphaEval framework to backtest and evaluate.
@@ -69,14 +69,12 @@ class EvalAgent:
 
             return {
                 "information_coefficient": evaluator.ic,
-                "rank_ic": evaluator.rankic,
+                "oos_ic": getattr(evaluator, "oos_ic", evaluator.ic),
+                "rank_ic": getattr(evaluator, "rankic", 0.0),
                 "rre": getattr(evaluator, "rre", 0.0),
                 "sharpe": getattr(evaluator, "sharpe", 0.0),
                 "max_drawdown": getattr(evaluator, "max_dd", 0.0),
-                "pfs1": getattr(evaluator, "pfs1", 0.0),
-                "pfs2": getattr(evaluator, "pfs2", 0.0),
-                "diversity": getattr(evaluator, "diversity", 0.0),
-                "llm_score": getattr(evaluator, "llm_avg_score", 0.0),
+                "plot_paths": getattr(evaluator, "plot_paths", {}),
                 "daily_returns": getattr(evaluator, "daily_returns", {}),
             }
         except (FileNotFoundError, ValueError, ImportError) as e:
@@ -121,8 +119,8 @@ class EvalAgent:
         hypothesis_desc = state.get("hypothesis_description", "")
         mode = state.get("evaluation_mode", "qlib")
         engine = state.get("evaluation_engine", "pandas")
-        test_start = state.get("market_analysis_start_date", "2017-01-01")
-        test_end = state.get("market_analysis_end_date", "2020-10-31")
+        test_start = state.get("market_analysis_start_date", "2018-01-01")
+        test_end = state.get("market_analysis_end_date", "2025-12-31")
 
         logger.info("[EvalAgent] Starting evaluation and reflexive review")
 
@@ -143,10 +141,11 @@ class EvalAgent:
             )
             is_simulated = metrics.get("_simulated", False)
             daily_returns = metrics.get("daily_returns", {})
+            plot_paths = metrics.get("plot_paths", {})
             metrics = {
                 k: v
                 for k, v in metrics.items()
-                if k not in ("_simulated", "daily_returns")
+                if k not in ("_simulated", "daily_returns", "plot_paths")
             }
             if is_simulated:
                 logger.warning(
@@ -201,11 +200,22 @@ class EvalAgent:
                 )
 
             # 4. Update Early Stopping Metrics
+            # IMPORTANT: Simulated metrics must NOT update best_ic or patience counter —
+            # fake high IC from quota-exceeded fallback would otherwise trigger early stop
+            # and freeze the patience counter at 0, preventing any real exploration.
             current_ic = metrics.get("information_coefficient", 0.0)
             best_ic = state.get("best_ic", -999.0)
             patience_counter = state.get("patience_counter", 0)
 
-            if current_ic > best_ic:
+            if is_simulated:
+                # Freeze all early-stopping state; treat this iteration as a no-op
+                logger.warning(
+                    "[EvalAgent] Simulated metrics detected — best_ic and patience_counter unchanged."
+                )
+                new_best_ic = best_ic
+                new_patience_counter = patience_counter
+                new_best_code = state.get("best_code_expression", code)
+            elif current_ic > best_ic:
                 new_best_ic = current_ic
                 new_patience_counter = 0
                 new_best_code = code
@@ -217,6 +227,7 @@ class EvalAgent:
             return {
                 "backtest_metrics": metrics,
                 "daily_returns": daily_returns,
+                "plot_paths": plot_paths,
                 "review_summary": review_result.review_summary,
                 "is_effective": review_result.is_effective,
                 "is_simulated": is_simulated,

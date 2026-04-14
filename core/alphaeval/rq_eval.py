@@ -89,9 +89,13 @@ def init_rq_auth():
     raise ValueError("RiceQuant Auth Failed: No valid credentials found or accepted.")
 
 
+import matplotlib.pyplot as plt
+from matplotlib import font_manager
+from pathlib import Path
+
 class RiceQuantEval:
     """
-    RiceQuant-compatible evaluator that uses rqdatac for data fetching.
+    RiceQuant-compatible evaluator with IS/OOS split, layered analysis, and plotting.
     """
 
     def __init__(
@@ -100,30 +104,93 @@ class RiceQuantEval:
         weights: Optional[List[float]] = None,
         train_start_date: str = "2010-01-01",
         train_end_date: str = "2016-12-31",
-        test_start_date: str = "2017-01-01",
-        test_end_date: str = "2020-10-31",
+        test_start_date: str = "2018-01-01",
+        test_end_date: str = "2025-12-31",
         market: str = "000300.XSHG",  # CSI 300
         daily_normalize: bool = True,
         engine: str = "pandas",
         noise_level: float = 0.0,
+        output_dir: str = "results/reports"
     ):
         self.factor_expressions = factor_expressions
         self.weights = weights if weights else [1.0] * len(factor_expressions)
-        self.train_start_date = train_start_date
-        self.train_end_date = train_end_date
         self.test_start_date = test_start_date
         self.test_end_date = test_end_date
+        self.oos_split_date = "2023-01-01"
         self.market = market
         self.daily_normalize = daily_normalize
         self.engine = engine
         self.noise_level = noise_level
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self.ic = 0.0
         self.rankic = 0.0
-        self.rre = 0.0  # Robustness score
+        self.oos_ic = 0.0
+        self.sharpe = 0.0
+        self.max_dd = 0.0
+        self.rre = 0.0
+        self.plot_paths = {}
 
-        # Auth is now handled globally, ensure it's initialized
+        self._configure_matplotlib()
         init_rq_auth()
+
+    def _configure_matplotlib(self):
+        preferred_fonts = ["Microsoft YaHei", "SimHei", "Arial Unicode MS"]
+        installed = {font.name for font in font_manager.fontManager.ttflist}
+        for f in preferred_fonts:
+            if f in installed:
+                plt.rcParams["font.family"] = f
+                break
+        plt.rcParams["axes.unicode_minus"] = False
+
+    def calculate_layered_returns(self, all_data, n_groups=5):
+        """Compute returns for n_groups sorted by factor value."""
+        def assign_groups(x):
+            if len(x) < n_groups:
+                return pd.Series(np.nan, index=x.index)
+            # Use qcut to split into equal sized groups
+            try:
+                return pd.qcut(x.rank(method='first'), n_groups, labels=[f"G{i+1}" for i in range(n_groups)])
+            except:
+                return pd.Series(np.nan, index=x.index)
+
+        all_data = all_data.copy()
+        all_data['group'] = all_data.groupby('datetime', group_keys=False)['factor'].apply(assign_groups)
+        layer_ret = all_data.groupby(['datetime', 'group'])['label'].mean().unstack('group')
+
+        return layer_ret
+
+    def generate_plots(self, daily_ret, layer_ret, factor_name):
+        """Generate and save backtest plots."""
+        safe_name = "".join([c if (c.isalnum() or c in "._-") else "_" for c in factor_name])[:50]
+        plot_paths = {}
+
+        # 1. Cumulative Returns (Equity Curve)
+        plt.figure(figsize=(10, 5))
+        cum_ret = (1 + daily_ret.fillna(0)).cumprod()
+        cum_ret.plot(title=f"Factor Equity Curve: {factor_name}")
+        plt.axvline(x=pd.to_datetime(self.oos_split_date), color='r', linestyle='--', label='OOS Split')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        eq_path = self.output_dir / f"{safe_name}_equity.png"
+        plt.savefig(eq_path, dpi=120)
+        plt.close()
+        plot_paths['equity'] = str(eq_path.resolve())
+
+        # 2. Layered Returns
+        plt.figure(figsize=(10, 5))
+        layer_cum = (1 + layer_ret.fillna(0)).cumprod()
+        layer_cum.plot(title="Layered Cumulative Returns (G1-G5)")
+        plt.axvline(x=pd.to_datetime(self.oos_split_date), color='r', linestyle='--', label='OOS Split')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        lay_path = self.output_dir / f"{safe_name}_layers.png"
+        plt.savefig(lay_path, dpi=120)
+        plt.close()
+        plot_paths['layers'] = str(lay_path.resolve())
+
+        return plot_paths
 
     def fetch_data(self):
         """Fetch price data from RiceQuant."""
@@ -375,6 +442,28 @@ class RiceQuantEval:
         def Sqrt(df):
             return np.sqrt(df.clip(lower=0))
 
+        def Exp(df):
+            return np.exp(df.clip(upper=500))  # clip to avoid overflow
+
+        def Ceil(df):
+            return np.ceil(df)
+
+        def Floor(df):
+            return np.floor(df)
+
+        def Scale(df, a=1):
+            abs_sum = df.abs().sum(axis=1).replace(0, np.nan)
+            return df.div(abs_sum, axis=0) * float(a)
+
+        def WMA(df, n):
+            nn = max(1, _get_n(n))
+            weights = np.arange(1, nn + 1, dtype=float)
+            weights /= weights.sum()
+            return df.rolling(nn, min_periods=1).apply(
+                lambda x: np.dot(x[-len(weights):], weights[-len(x):]) / weights[-len(x):].sum(),
+                raw=True,
+            )
+
         def Ts_ArgMax(df, n):
             nn = max(1, _get_n(n))
 
@@ -464,6 +553,9 @@ class RiceQuantEval:
             "Correlation": Corr,
             "Sign": Sign,
             "Sqrt": Sqrt,
+            "Exp": lambda df: np.exp(df),
+            "Pow": lambda a, b: a**b,
+            "Inv": lambda df: 1.0 / (df + 1e-9),
             "Ts_ArgMax": Ts_ArgMax,
             "Ts_ArgMin": Ts_ArgMin,
             "Ts_Max": lambda df, n: df.rolling(max(1, _get_n(n))).max(),
@@ -493,6 +585,12 @@ class RiceQuantEval:
             "Equal": lambda a, b: a == b,
             "NotEqual": lambda a, b: a != b,
             "Not": lambda a: ~a,
+            # Math functions missing from original context
+            "Exp": Exp,
+            "Ceil": Ceil,
+            "Floor": Floor,
+            "Scale": Scale,
+            "WMA": WMA,
         }
 
         factor_matrices = []
@@ -707,7 +805,7 @@ class RiceQuantEval:
                 return (
                     f"=== RICEQUANT MARKET ANALYSIS ({self.market}) ===\n"
                     f"Period: {target_start} to {target_end}\n"
-                    "⚠️ Real-time market data unavailable (quota exceeded). Using fallback analysis.\n"
+                    "Real-time market data unavailable (quota exceeded). Using fallback analysis.\n"
                     "- Trend: Mixed/Sideways\n"
                     "- Risk: Normal Volatility (estimated)\n"
                     "- Volume: Stable\n"
@@ -787,38 +885,39 @@ class RiceQuantEval:
         all_data = all_data.replace([np.inf, -np.inf], np.nan).dropna()
 
         if all_data.empty:
-            raise ValueError(
-                f"Combined factor and label data is empty. Factors non-nan: {len(self.alphacombo.dropna())}, Labels non-nan: {len(self.label_data.dropna())}"
-            )
+            raise ValueError("Combined factor and label data is empty.")
 
-        # Core Metrics
-        self.ic = round(
-            float(
-                all_data.groupby(level="datetime")
-                .apply(lambda x: x["factor"].corr(x["label"]))
-                .fillna(0)
-                .mean()
-            ),
-            4,
-        )
-        self.rankic = round(
-            float(
-                all_data.groupby(level="datetime")
-                .apply(lambda x: x["factor"].rank().corr(x["label"].rank()))
-                .fillna(0)
-                .mean()
-            ),
-            4,
-        )
+        # Core Metrics (IC Series)
+        ic_series = all_data.groupby(level="datetime").apply(
+            lambda x: x["factor"].corr(x["label"])
+        ).fillna(0)
+        
+        self.ic = round(float(ic_series.mean()), 4)
+        
+        # OOS IC calculation
+        oos_mask = ic_series.index >= pd.to_datetime(self.oos_split_date)
+        if oos_mask.any():
+            self.oos_ic = round(float(ic_series[oos_mask].mean()), 4)
+        else:
+            self.oos_ic = self.ic
 
+        # PnL Metrics
         daily_ret = self.calculate_pnl(all_data)
         self.daily_returns = {
             str(k.date() if hasattr(k, "date") else k): float(v)
             for k, v in daily_ret.fillna(0).items()
         }
 
+        # Layered Analysis & Plots
+        try:
+            layer_ret = self.calculate_layered_returns(all_data)
+            self.plot_paths = self.generate_plots(daily_ret, layer_ret, self.factor_expressions[0])
+        except Exception as e:
+            logger.warning(f"Failed to generate backtest plots: {e}")
+            self.plot_paths = {}
+
         logger.info(
-            f"RiceQuant Evaluation - IC: {self.ic}, RankIC: {self.rankic}, Sharpe: {self.sharpe:.2f}"
+            f"RiceQuant Evaluation - IC: {self.ic}, OOS IC: {self.oos_ic}, Sharpe: {self.sharpe:.2f}"
         )
 
     @staticmethod

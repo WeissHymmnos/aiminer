@@ -80,9 +80,11 @@ class IdeaAgent:
                 m_end = state.get("market_analysis_end_date")
                 m_lookback = state.get("market_analysis_lookback_days", 60)
 
-                # Use today as fallback end date; validate m_start < m_end when both provided
-                today_str = datetime.today().strftime("%Y-%m-%d")
-                effective_end = m_end if m_end else today_str
+                # Default to 2018-2022 range for factor extraction context
+                default_analysis_end = "2022-12-31"
+                effective_end = m_end if m_end else default_analysis_end
+                if not m_start and not m_end:
+                    m_start = "2018-01-01"
                 if m_start and m_start >= effective_end:
                     logger.warning(
                         f"[IdeaAgent] market_analysis_start_date ({m_start}) >= end ({effective_end}), skipping regime fetch."
@@ -123,6 +125,9 @@ class IdeaAgent:
             "IMPORTANT: Pay close attention to the MACRO NEWS and MARKET ANALYSIS provided.\n"
             "1. Macro News: Use central bank signals, trade data, or inflation trends to justify the economic rationale.\n"
             "2. Market Analysis: Tailor your hypothesis to the current regime (e.g. High Volatility, Bearish).\n\n"
+            "SIGNAL QUALITY REQUIREMENT: Your hypothesis MUST produce a CONTINUOUS signal that varies smoothly across the entire cross-section of stocks. "
+            "Avoid binary (0/1) or threshold-based ideas that assign the same value to most stocks. "
+            "The best alpha factors rank ALL stocks along a continuous spectrum (e.g., momentum score, volatility ratio, mean-reversion magnitude), not just flag a few.\n\n"
             "You must respond with valid JSON matching this schema:\n"
             "{{\n"
             '  "hypothesis_name": "string",\n'

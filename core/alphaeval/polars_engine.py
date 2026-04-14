@@ -54,15 +54,21 @@ def register_ts_argmin(expr, window_size):
 # Applied in grouped context (over 'instrument' or 'datetime')
 
 
-def Rank(x):
+def Rank(x, n=None):
+    if isinstance(x, (int, float)):
+        return pl.lit(0.5)
     return x.rank(method="average").over("datetime") / x.count().over("datetime")
 
 
 def CSRank(x):
+    if isinstance(x, (int, float)):
+        return pl.lit(0.5)
     return x.rank(method="average").over("datetime") / x.count().over("datetime")
 
 
 def CSZScore(x, n=None):
+    if isinstance(x, (int, float)):
+        return pl.lit(0.0)
     # Cross-sectional normalization (n is ignored — accepted for LLM compatibility)
     mean = x.mean().over("datetime")
     std = x.std().over("datetime")
@@ -73,7 +79,7 @@ def CSZScore(x, n=None):
 def _get_int(n, op_name="Operator"):
     try:
         if isinstance(n, pl.Expr):
-            raise ValueError(f"{op_name} expects a constant integer for the period argument, not a series/expression. Check if you meant to use Sub() instead of Delta().")
+            raise ValueError(f"{op_name} expects a constant integer for the period argument, not a dynamic series. Fix the formula to use a fixed number (e.g., 5, 10, 20).")
         return int(float(n))
     except (ValueError, TypeError) as e:
         if "expects a constant" in str(e): raise e
@@ -81,81 +87,96 @@ def _get_int(n, op_name="Operator"):
 
 
 def Mean(x, n=None):
+    if isinstance(x, (int, float)): return pl.lit(float(x))
     if n is None:
         return x.mean().over("datetime")
     return x.rolling_mean(window_size=_get_int(n, "Mean")).over("instrument")
 
 
 def Std(x, n=None):
+    if isinstance(x, (int, float)): return pl.lit(0.0)
     if n is None:
         return x.std().over("datetime")
     return x.rolling_std(window_size=_get_int(n, "Std")).over("instrument")
 
 
 def Median(x, n=None):
+    if isinstance(x, (int, float)): return pl.lit(float(x))
     if n is None:
         return x.median().over("datetime")
     return x.rolling_median(window_size=_get_int(n, "Median")).over("instrument")
 
 
 def Sum(x, n):
+    if isinstance(x, (int, float)): return pl.lit(float(x) * _get_int(n, "Sum"))
     return x.rolling_sum(window_size=_get_int(n, "Sum")).over("instrument")
 
 
 def Ref(x, n):
+    if isinstance(x, (int, float)): return pl.lit(float(x))
     return x.shift(_get_int(n, "Ref")).over("instrument")
 
 
 def Delta(x, n):
+    if isinstance(x, (int, float)): return pl.lit(0.0)
     return (x - x.shift(_get_int(n, "Delta"))).over("instrument")
 
 
+def _ensure_expr(x):
+    """Wrap a native Python numeric into pl.lit() so Polars methods can be called on it."""
+    if isinstance(x, (int, float)):
+        return pl.lit(float(x))
+    return x
+
+
 def Abs(x):
-    return x.abs()
+    return _ensure_expr(x).abs()
 
 
 def Log(x):
-    return x.log(base=math.e)
+    return _ensure_expr(x).log(base=math.e)
 
 
 def Sign(x):
-    return x.sign()
+    if isinstance(x, (int, float)):
+        return pl.lit(1.0 if x > 0 else (-1.0 if x < 0 else 0.0))
+    return _ensure_expr(x).sign()
 
 
 def Sqrt(x):
-    return x.sqrt()
+    return _ensure_expr(x).sqrt()
 
 
 def Exp(x):
-    return x.exp()
+    return _ensure_expr(x).exp()
 
 
 def Ceil(x):
-    return x.ceil()
+    return _ensure_expr(x).ceil()
 
 
 def Floor(x):
-    return x.floor()
+    return _ensure_expr(x).floor()
 
 
 def Round(x, decimals=0):
-    return x.round(int(decimals))
+    return _ensure_expr(x).round(int(decimals))
 
 
 def Sin(x):
-    return x.sin()
+    return _ensure_expr(x).sin()
 
 
 def Cos(x):
-    return x.cos()
+    return _ensure_expr(x).cos()
 
 
 def Tan(x):
-    return x.tan()
+    return _ensure_expr(x).tan()
 
 
 def Not(x):
-    return ~x
+    return ~_ensure_expr(x)
 
 
 def If(cond, a, b):
@@ -499,6 +520,17 @@ class PolarsEngine:
             "Scale",
         }
     )
+    # Time-series plugin operators that use register_plugin_function — they
+    # receive an expression fed into a Rust plugin and cannot handle compound
+    # nested expressions directly.  Materialise their first argument as a
+    # temporary column so the plugin always receives a bare pl.col() reference.
+    _TS_PLUGIN_OPS = frozenset(
+        {
+            "Ts_Rank",
+            "Ts_ArgMax",
+            "Ts_ArgMin",
+        }
+    )
 
     def _eager_eval(self, df: pl.DataFrame, expr_str: str) -> pl.DataFrame:
         """
@@ -639,10 +671,11 @@ class PolarsEngine:
                 raise ValueError(f"Unknown function '{func_name}'")
 
             is_cs = func_name in self._CS_OPS
+            is_ts_plugin = func_name in self._TS_PLUGIN_OPS
 
             # Evaluate arguments (recursively)
             args = []
-            for arg_node in node.args:
+            for arg_idx, arg_node in enumerate(node.args):
                 arg_val = self._eval_ast_node(arg_node, df_container, tmp_cols)
 
                 # For CS ops: if the argument is a complex Polars expression
@@ -654,6 +687,20 @@ class PolarsEngine:
                     and not self._is_bare_col(arg_node)
                 ):
                     tmp = f"__cs_arg_{len(tmp_cols)}__"
+                    df_container[0] = df_container[0].with_columns(arg_val.alias(tmp))
+                    tmp_cols.append(tmp)
+                    arg_val = pl.col(tmp)
+
+                # For TS plugin ops: materialize only the first (data) argument
+                # if it is a compound expression.  The plugin function passes
+                # the series into Rust and cannot accept nested lazy expressions.
+                elif (
+                    is_ts_plugin
+                    and arg_idx == 0
+                    and isinstance(arg_val, pl.Expr)
+                    and not self._is_bare_col(arg_node)
+                ):
+                    tmp = f"__ts_arg_{len(tmp_cols)}__"
                     df_container[0] = df_container[0].with_columns(arg_val.alias(tmp))
                     tmp_cols.append(tmp)
                     arg_val = pl.col(tmp)

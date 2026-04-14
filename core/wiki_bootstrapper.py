@@ -24,7 +24,7 @@ class WikiBootstrapper:
             )
             return
 
-        logger.info("🚀 Wiki-ifying the shared knowledge base from RAG documents...")
+        logger.info("Wiki-ifying the shared knowledge base from RAG documents...")
 
         # 1. Market Regime Baseline
         self._summarize_to_wiki(
@@ -110,3 +110,4 @@ class WikiBootstrapper:
             )
         except Exception as e:
             logger.error(f"Failed to synthesize Wiki page {title}: {e}")
+

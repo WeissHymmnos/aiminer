@@ -89,28 +89,55 @@ class FactorAgent:
     QLIB_FIELDS = {"$close", "$open", "$high", "$low", "$volume", "$vwap"}
 
     OPERATOR_SIGNATURES = """
-- Rank(df): Cross-sectional rank (pct).
+Cross-sectional operators (applied across all stocks on a given day):
+- Rank(df): Cross-sectional rank, returns value in (0, 1].
 - CSRank(df): Same as Rank(df).
-- CSZScore(df): Cross-sectional Z-score.
+- CSZScore(df): Cross-sectional Z-score (mean=0, std=1).
+- GroupNeutral(df): Subtract cross-sectional mean.
+- Winsorize(df, pct): Clip outliers at pct and 1-pct quantiles (e.g., pct=0.05).
+- Percentile(df): Cross-sectional percentile rank in (0, 1].
+- Scale(df, a=1): Scale so that sum(abs(df)) == a across the cross-section.
+
+Time-series operators (applied along the time axis per instrument):
 - Mean(df, n): Rolling mean over n days.
 - Std(df, n): Rolling standard deviation over n days.
 - Median(df, n): Rolling median over n days.
-- EMA(df, n): Exponential moving average over n days.
-- Abs(df): Absolute value.
-- Ref(df, n): Value from n days ago.
-- Log(df): Natural logarithm.
+- EMA(df, n): Exponential moving average with span=n.
+- WMA(df, n): Weighted moving average with span=n.
 - Sum(df, n): Rolling sum over n days.
-- If(cond, a, b): element-wise if-then-else.
-- Greater(a, b), Less(a, b), And(a, b), Or(a, b): Logical operators.
-- Delta(df, n): df - Ref(df, n).
-- Corr(df1, df2, n): Rolling correlation over n days.
-- Cov(df1, df2, n): Rolling covariance over n days.
-- Ts_Rank(df, n): Time-series rank (pct) of current value over n days.
-- Ts_Percentile(df, n, p): The value at the p-th percentile over n days (p defaults to 50).
-- Ts_ArgMax(df, n), Ts_ArgMin(df, n): Days since max/min in n days.
-- Winsorize(df, pct): Cross-sectional winsorization.
-- GroupNeutral(df): Cross-sectional de-meaning.
-- Sign(df), Sqrt(df): Math functions.
+- Ref(df, n): Value from n days AGO (n must be a positive integer; negative n means future data and is FORBIDDEN).
+- Delta(df, n): df minus Ref(df, n), i.e., n-day change.
+- Ts_Rank(df, n): Time-series percentile rank of current value over past n days.
+- Ts_Max(df, n): Rolling max over n days.
+- Ts_Min(df, n): Rolling min over n days.
+- Ts_ArgMax(df, n): Days since the maximum in the past n days.
+- Ts_ArgMin(df, n): Days since the minimum in the past n days.
+- Ts_Percentile(df, n, p): p-th percentile value over n days (p in 0-100).
+
+Correlation / covariance (time-series, per instrument):
+- Corr(df1, df2, n): Rolling correlation over n days. df1 and df2 MUST be DIFFERENT expressions.
+- Cov(df1, df2, n): Rolling covariance over n days. df1 and df2 MUST be DIFFERENT expressions.
+
+Math unary:
+- Abs(df): Absolute value.
+- Log(df): Natural logarithm (df must be positive).
+- Sign(df): -1, 0, or +1.
+- Sqrt(df): Square root.
+- Exp(df): Exponential e^df.
+- Pow(df, n): df raised to the power n (e.g., Pow($close, 2)).
+- Ceil(df), Floor(df): Ceiling / floor.
+- Neg(df): Negate.
+- Inv(df): 1 / df.
+
+Math binary:
+- Add(a, b), Sub(a, b), Mul(a, b), Div(a, b): Arithmetic.
+- Max(a, b), Min(a, b): Element-wise max/min.
+
+Logic / conditional:
+- If(cond, a, b): Element-wise if-then-else.
+- Greater(a, b), Less(a, b), GreaterEqual(a, b), LessEqual(a, b): Comparisons.
+- And(a, b), Or(a, b), Not(a): Boolean operators.
+- Clip(df, lower, upper): Clip values to [lower, upper].
 """
 
     def __init__(self, provider: str = None, model: str = None):
@@ -272,6 +299,12 @@ class FactorAgent:
             "Less",
         }
         ternary_ops = {"Corr", "Correlation", "Cov", "Ts_Percentile", "If"}
+        # Operators that accept exactly 1 data argument (plus optional scalars)
+        unary_ops = {
+            "Rank", "CSRank", "CSZScore", "GroupNeutral", "Winsorize",
+            "Percentile", "Scale", "Abs", "Log", "Sign", "Sqrt", "Exp",
+            "Neg", "Inv", "Not", "Ceil", "Floor",
+        }
 
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
@@ -288,6 +321,18 @@ class FactorAgent:
                         )
 
                     arg_count = len(node.args) + len(node.keywords)
+                    if op in unary_ops and arg_count < 1:
+                        return (
+                            False,
+                            f"Operator '{op}' requires at least 1 argument, but got {arg_count}.",
+                        )
+                    # Rank/CSRank only take 1 data arg — extra positional args are invalid
+                    if op in {"Rank", "CSRank"} and len(node.args) > 1:
+                        return (
+                            False,
+                            f"Operator '{op}' takes exactly 1 argument, but got {len(node.args)}. "
+                            "Do NOT pass a window size to Rank() — it is always cross-sectional.",
+                        )
                     if op in binary_ops and arg_count < 2:
                         return (
                             False,
@@ -298,6 +343,37 @@ class FactorAgent:
                             False,
                             f"Operator '{op}' requires 3 arguments, but got {arg_count}.",
                         )
+
+                    # Tautology check: Div/Sub with identical operands → constant factor
+                    if op in {"Div", "Divi", "Divide", "Sub", "Subtract", "Minus"} and len(node.args) >= 2:
+                        if ast.dump(node.args[0]) == ast.dump(node.args[1]):
+                            return (
+                                False,
+                                f"'{op}' has identical first and second arguments — this always produces a constant (1.0 or 0.0) with zero cross-sectional variance. Use two DIFFERENT expressions.",
+                            )
+
+                    # Self-correlation check: Corr(a, a, n) or Cov(a, a, n)
+                    if op in {"Corr", "Correlation", "Cov"} and len(node.args) >= 2:
+                        if ast.dump(node.args[0]) == ast.dump(node.args[1]):
+                            return (
+                                False,
+                                f"'{op}' has identical first and second arguments — this is always 1.0 and meaningless. Use two DIFFERENT expressions.",
+                            )
+
+                    # Look-ahead check: Ref(x, n) with negative n
+                    if op == "Ref" and len(node.args) >= 2:
+                        n_arg = node.args[1]
+                        n_val = None
+                        if isinstance(n_arg, ast.Constant):
+                            n_val = n_arg.value
+                        elif isinstance(n_arg, ast.UnaryOp) and isinstance(n_arg.op, ast.USub):
+                            if isinstance(n_arg.operand, ast.Constant):
+                                n_val = -n_arg.operand.value
+                        if n_val is not None and n_val < 0:
+                            return (
+                                False,
+                                f"Ref(x, {n_val}) uses a negative offset which means FUTURE data — this is look-ahead bias and is forbidden. Use positive n for past data.",
+                            )
                 else:
                     return False, "Complex function calls are not supported."
 
@@ -360,15 +436,23 @@ class FactorAgent:
                     "You are an expert Qlib developer. Convert the following mathematical formula into a syntactically correct Qlib Alpha158 expression.\n\n"
                     "### SUPPORTED OPERATORS & SIGNATURES:\n"
                     f"{self.OPERATOR_SIGNATURES}\n\n"
-                    "### ALLOWED DATA FIELDS:\n"
-                    f"{', '.join(sorted(list(self.QLIB_FIELDS)))}\n\n"
+                    "### ALLOWED DATA FIELDS (STRICT WHITELIST):\n"
+                    f"ONLY these fields exist: {', '.join(sorted(list(self.QLIB_FIELDS)))}.\n"
+                    "DO NOT use any other fields such as $beta_spx, $market_cap, $pe_ratio, $factor, $sector, $index, etc.\n"
+                    "If your formula references a field not in the whitelist, replace it with an approximation using the allowed fields.\n\n"
                     "### MANDATORY RULES:\n"
                     "1. ONLY use the operators listed above. Do not assume any other operator exists.\n"
-                    "2. Use $field for data fields (e.g., $close, $volume, $vwap).\n"
-                    "3. Pay close attention to operator arguments (e.g., rolling windows n must be positive integers).\n"
-                    "4. If a logic requires an unlisted operator, simplify it using the allowed ones.\n"
-                    "5. You MUST respond with valid JSON only, no markdown, no explanations.\n"
-                    "6. Ensure all characters are correctly escaped for JSON compatibility.",
+                    "2. Use $field for data fields. **STRICTLY PROHIBITED**: $PPI, $CPI, $swap, $dividend, $beta, $cap, $cash, $debt, or any other field not in the whitelist.\n"
+                    "3. Window parameters (n, d, window_size) MUST be constant integers (e.g., 5, 10, 20). **NEVER** use a dynamic expression or field as a window size.\n"
+                    "4. If a logic requires an unlisted operator, simplify it using ONLY the allowed ones.\n"
+                    "5. AVOID hollow logic like $close/$close or Sign(1). The resulting factor must have meaningful cross-sectional variance.\n"
+                    "6. You MUST respond with valid JSON only, no markdown, no explanations.\n"
+                    "7. Ensure all characters are correctly escaped for JSON compatibility.\n"
+                    "8. AVOID pure binary signals (e.g., If(cond, 1, 0)). Prefer continuous expressions that vary smoothly across all stocks.\n"
+                    "8. ABSOLUTELY FORBIDDEN — LOOK-AHEAD BIAS: Ref(x, n) with n < 0 means FUTURE data and is strictly forbidden. Only use Ref(x, n) with positive n (past data).\n"
+                    "9. ABSOLUTELY FORBIDDEN — SELF-CORRELATION: Never use Corr(a, a, n) or Cov(a, a, n) where both arguments are the same expression (result is always trivially 1.0). The two series in Corr/Cov MUST be meaningfully different.\n"
+                    "10. ABSOLUTELY FORBIDDEN — TAUTOLOGICAL FACTORS: Never write Div(x, x), Sub(x, x), or any expression where both operands are identical (result is always 1.0 or 0.0 with zero cross-sectional variance). The numerator and denominator of any division MUST be different.\n"
+                    "11. Rank() and CSRank() take EXACTLY 1 argument — the data series. Do NOT pass a window size as a second argument.",
                 ),
                 (
                     "user",

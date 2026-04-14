@@ -48,16 +48,23 @@ def route_after_wiki(state: AlphaMinerState) -> str:
 
     metrics = state.get("backtest_metrics", {})
     current_ic = metrics.get("information_coefficient", 0.0)
+    is_simulated = state.get("is_simulated", False)
 
-    # 1. Early Stopping: High IC achieved
-    if current_ic >= 0.05:
+    # 1. Early Stopping: High IC achieved — only on real (non-simulated) data
+    is_simulated = state.get("is_simulated", False)
+    if current_ic >= 0.05 and not is_simulated:
         logger.success(f"[Early Stop] Exceptional IC reached: {current_ic:.4f}")
         return "end"
+    if current_ic >= 0.05 and is_simulated:
+        logger.warning(
+            f"[Router] IC={current_ic:.4f} looks exceptional but metrics are SIMULATED — "
+            "ignoring early stop trigger and continuing."
+        )
 
     # 2. Early Stopping: Patience exhausted
     patience = state.get("patience_counter", 0)
-    if patience >= 3:
-        logger.info("[Early Stop] No IC improvement for 3 consecutive iterations.")
+    if patience >= 4:
+        logger.info("[Early Stop] No IC improvement for 4 consecutive iterations.")
         return "end"
 
     if iteration < max_iterations:
