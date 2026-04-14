@@ -1,0 +1,35 @@
+# Git
+.git
+.gitignore
+
+# Rust Build Artifacts
+**/target/
+polars_plugins/target/
+Cargo.lock
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Data and Secrets (Should be mounted as volumes or provided via env)
+.env
+.env.local
+data/chroma_db/
+data/wiki_db/
+results/
+logs/
+
+# IDEs
+.vscode/
+.idea/
+
+# Tool artifacts
+.aider*
+repomix-output.xml
+project_bundle.md
+647e6a71-7510-49bc-9021-7af9d1bfae32/

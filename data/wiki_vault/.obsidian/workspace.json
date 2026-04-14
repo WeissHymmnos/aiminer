@@ -1,0 +1,215 @@
+{
+  "main": {
+    "id": "ca12b4c33f57c3c4",
+    "type": "split",
+    "children": [
+      {
+        "id": "99139bd23d50e50a",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "5d1f09023483cb79",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "hurst_macro_vol_momentum_iter1.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "hurst_macro_vol_momentum_iter1"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "33e6c7524ef8b497",
+    "type": "split",
+    "children": [
+      {
+        "id": "000c0df15fbe296a",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "7716d43f7568e4f5",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "文件列表"
+            }
+          },
+          {
+            "id": "4c8e83de6fac6470",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "搜索"
+            }
+          },
+          {
+            "id": "823f39eb7f86f720",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "书签"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "a75b9f2fe24abad3",
+    "type": "split",
+    "children": [
+      {
+        "id": "7e9c01059238b241",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "d3fbbd71dd26773f",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "hurst_macro_vol_momentum_iter1.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "hurst_macro_vol_momentum_iter1 的反向链接列表"
+            }
+          },
+          {
+            "id": "6865f6ac6593bb4e",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "hurst_macro_vol_momentum_iter1.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "hurst_macro_vol_momentum_iter1 的出链列表"
+            }
+          },
+          {
+            "id": "8aaa6853bcd8e4a3",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "标签"
+            }
+          },
+          {
+            "id": "19ffc9a7a5c4915c",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "添加笔记属性"
+            }
+          },
+          {
+            "id": "2925cdac3b06e998",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "hurst_macro_vol_momentum_iter1.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "hurst_macro_vol_momentum_iter1 的大纲"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:打开快速切换": false,
+      "graph:查看关系图谱": false,
+      "canvas:新建白板": false,
+      "daily-notes:打开/创建今天的日记": false,
+      "templates:插入模板": false,
+      "command-palette:打开命令面板": false,
+      "bases:新建数据库": false
+    }
+  },
+  "active": "5d1f09023483cb79",
+  "lastOpenFiles": [
+    "liquidity_adjusted_overnight_reversal_with_sector_dispersion_iter2.md",
+    "liquidity_filtered_overnight_gap_reversal_iter1.md",
+    "volume_accelerated_intraday_reversal_with_liquidity_wick_filter_iter1.md",
+    "liquidity_adjusted_overnight_gap_reversal_with_asymmetric_volume_confirmation_iter2.md",
+    "post_gap_liquidity_vacuum_reversal_iter2.md",
+    "liquidity_divergent_pairs_spillover_reversal_iter2.md",
+    "central_bank_dampened_flow_rebound_iter2.md",
+    "tail_hedge_net_demand_reversal_iter1.md",
+    "volatility_adjusted_overnight_gap_with_liquidity_exhaustion_iter2.md",
+    "liquidity_divergent_overnight_gap_reversal_with_sector_neutral_z_score_iter1.md",
+    "cross_sector_liquidity_rotation_reversal_iter1.md",
+    "liquidity_squeeze_post_gap_fade_iter2.md",
+    "hidden_markov_order_flow_exhaustion_reversal_iter2.md",
+    "hurst_slope_volume_divergence_reversal_iter2.md",
+    "orderflow_imbalance_micro_trend_exhaustion_iter1.md",
+    "liquidity_adjusted_intraday_fake_out_continuation_iter1.md",
+    "central_bank_hold_divergent_vwap_mean_reversion_iter2.md",
+    "supply_chain_vulnerability_overnight_reversal_iter2.md",
+    "order_flow_imbalance_micro_trend_exhaustion_iter1.md",
+    "hurst_filtered_liquidity_contrarian_iter1.md",
+    "liquidity_adjusted_overnight_gap_reversal_with_sector_neutralization_iter1.md",
+    "overnight_gap_reversal_with_liquidity_surge_filter_iter1.md",
+    "liquidity_contrarian_overnight_gap_mean_reversion_iter1.md",
+    "hmm_state_filtered_liquidity_surge_momentum_iter1.md",
+    "hurst_filtered_liquidity_exhaustion_reversal_iter1.md",
+    "vwap_deviation_liquidity_surge_reversal_iter1.md"
+  ]
+}

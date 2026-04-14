@@ -1,9 +1,9 @@
 import os
 import rqdatac as rq
-from loguru import logger
 from dotenv import load_dotenv
 
 load_dotenv()
+
 
 def test_connection():
     token = os.getenv("RQ_TOKEN")
@@ -11,7 +11,7 @@ def test_connection():
     password = os.getenv("RQ_PASS")
 
     print("\n=== RiceQuant Connection Test ===")
-    
+
     if token:
         print(f"Detected RQ_TOKEN (Length: {len(token)})")
         print(f"Token starts with: {token[:10]}...")
@@ -23,7 +23,7 @@ def test_connection():
             return
         except Exception as e:
             print(f"FAILED: Token Auth Error: {e}")
-    
+
     if user and password:
         print(f"Detected RQ_USER: {user}")
         try:
@@ -35,6 +35,7 @@ def test_connection():
             print(f"FAILED: Password Auth Error: {e}")
 
     print("\nNo valid credentials worked. Please check your export commands.")
+
 
 if __name__ == "__main__":
     test_connection()

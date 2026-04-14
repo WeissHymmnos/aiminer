@@ -9,6 +9,10 @@ data/chroma_db/
 data/rag_docs/macro_news/
 results/
 logs/
+target/
+**/target/
+repomix-output.xml
+project_bundle.md
 
 # Environment and Secrets
 .env

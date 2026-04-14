@@ -29,18 +29,15 @@ class WeightCalculator:
         if instruments is not None:
             self.instruments = instruments
         else:
-            self.instruments = D.instruments(
-                market="csi300", filter_pipe=None
-            )
+            self.instruments = D.instruments(market="csi300", filter_pipe=None)
 
         self.label_expr = "Ref($close, -1)/$close - 1"
 
         self.w_opt: Optional[np.ndarray] = None
         self.ic_train_single: Dict[str, float] = {}
-        self.ic_test_single:  Dict[str, float] = {}
-        self.ic_train_comb:   Optional[float] = None
-        self.ic_test_comb:    Optional[float] = None
-
+        self.ic_test_single: Dict[str, float] = {}
+        self.ic_train_comb: Optional[float] = None
+        self.ic_test_comb: Optional[float] = None
 
     def fetch_data(self, start_time: str, end_time: str):
         from qlib.data import D
@@ -48,13 +45,17 @@ class WeightCalculator:
         fdf = D.features(
             self.instruments,
             self.factor_expressions,
-            start_time=start_time, end_time=end_time, freq="day"
+            start_time=start_time,
+            end_time=end_time,
+            freq="day",
         )
         fdf.replace([np.inf, -np.inf], np.nan, inplace=True)
         ldf = D.features(
             self.instruments,
             [self.label_expr],
-            start_time=start_time, end_time=end_time, freq="day"
+            start_time=start_time,
+            end_time=end_time,
+            freq="day",
         )
         ldf.columns = ["label"]
 
@@ -62,20 +63,20 @@ class WeightCalculator:
             means = df.mean(axis=0, skipna=True)
             stds = df.std(axis=0, skipna=True, ddof=0)
             stds[stds < 1e-8] = 1
-            return df.sub(means, axis='columns').div(stds, axis='columns')
+            return df.sub(means, axis="columns").div(stds, axis="columns")
 
         fdf = (
-            fdf
-            .groupby(level="datetime", group_keys=False)
+            fdf.groupby(level="datetime", group_keys=False)
             .apply(zscore)
             .replace([np.inf, -np.inf], np.nan)
             .replace(np.nan, 0)
         )
 
-        
         return fdf, ldf
 
-    def compute_mean_ic(self, X: pd.DataFrame, y: pd.DataFrame, weights: np.ndarray) -> float:
+    def compute_mean_ic(
+        self, X: pd.DataFrame, y: pd.DataFrame, weights: np.ndarray
+    ) -> float:
         alpha = X.dot(weights)
         alpha_df = alpha.to_frame(name="alpha")
         all_data = alpha_df.join(y, how="inner").dropna()
@@ -83,13 +84,13 @@ class WeightCalculator:
         ic_series = all_data.groupby(level="datetime").apply(
             lambda x: x["factor"].corr(x["label"])
         )
-        
+
         try:
             if ic_series.isna().mean() > 0.5:
                 return 0.0
         except Exception:
             return 0.0
-        
+
         ic = ic_series.dropna().mean()
         ic = 0.0 if (not isinstance(ic, float) or np.isnan(ic)) else ic
         return ic
@@ -98,16 +99,19 @@ class WeightCalculator:
         def obj(u: np.ndarray) -> float:
             w = u / np.sum(np.abs(u))
             return -1 * self.compute_mean_ic(X, y, w)
+
         bounds = [(-1, 1)] * X.shape[1]
-        result = differential_evolution(obj, bounds, maxiter=maxiter, popsize=20, tol=1e-6, polish=False, disp=True)
+        result = differential_evolution(
+            obj, bounds, maxiter=maxiter, popsize=20, tol=1e-6, polish=False, disp=True
+        )
         u_opt = result.x
         w_opt = u_opt / np.sum(np.abs(u_opt))
         return w_opt
 
-    def fit(self):  
+    def fit(self):
         print("Start calculating linear weights.")
         X_train, y_train = self.fetch_data(self.start_date, self.end_date)
         self.w_opt = self.train_optimal_weights(X_train, y_train)
-        print("Finish calculating linear weights.")        
+        print("Finish calculating linear weights.")
 
         return self.w_opt

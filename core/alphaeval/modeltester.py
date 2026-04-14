@@ -10,11 +10,13 @@ from .combo import WeightCalculator
 # import warnings
 # warnings.filterwarnings("ignore")
 
+
 def zscore(df: pd.DataFrame) -> pd.DataFrame:
     means = df.mean(axis=0, skipna=True)
-    stds  = df.std(axis=0, skipna=True, ddof=0).replace(0, np.nan)
+    stds = df.std(axis=0, skipna=True, ddof=0).replace(0, np.nan)
     stds[stds < 1e-8] = 1
-    return df.sub(means, axis='columns').div(stds, axis='columns')
+    return df.sub(means, axis="columns").div(stds, axis="columns")
+
 
 class AlphaEval:
     def __init__(
@@ -24,9 +26,9 @@ class AlphaEval:
         train_start_date: str = "2010-01-01",
         train_end_date: str = "2016-12-31",
         test_start_date: str = "2017-01-01",
-        test_end_date: str = "2020-10-31",        
+        test_end_date: str = "2020-10-31",
         instruments: Optional[List[str]] = None,
-        daily_normalize: bool = True
+        daily_normalize: bool = True,
     ):
         from qlib.data import D
         from qlib import auto_init
@@ -41,11 +43,15 @@ class AlphaEval:
 
         qlib_data_path = os.getenv("QLIB_DATA_PATH", "~/.qlib/qlib_data/cn_data")
         expanded_path = os.path.expanduser(qlib_data_path)
-        
+
         if not os.path.exists(expanded_path):
-            raise FileNotFoundError(f"Qlib data path does not exist: {expanded_path}")
-        
-        auto_init(provider_uri=expanded_path, region='cn')
+            import logging
+
+            logging.getLogger(__name__).warning(
+                f"Qlib data path does not exist: {expanded_path}. Qlib features may fail."
+            )
+        else:
+            auto_init(provider_uri=expanded_path, region="cn")
 
         if instruments is not None:
             self.instruments = instruments
@@ -53,16 +59,25 @@ class AlphaEval:
             self.instruments = D.instruments(market="csi300")
 
         self._D = D
-        
+
         if weights is not None:
             self.weights = weights
+        elif len(self.factor_expressions) == 1:
+            self.weights = [1.0]
         else:
-            self.weights = WeightCalculator(self.factor_expressions, train_start_date, train_end_date, instruments).fit()
+            self.weights = WeightCalculator(
+                self.factor_expressions, train_start_date, train_end_date, instruments
+            ).fit()
 
         self.label_expr = "Ref($close, -1)/$close - 1"
 
     def fetch_data(self):
         from qlib.data.data import LocalDatasetProvider
+
+        # Resolve package path dynamically for Qlib inst_processors
+        noise_mod = (
+            f"{__package__}.noise_proc" if __package__ else "core.alphaeval.noise_proc"
+        )
 
         self.factor_data = self._D.features(
             self.instruments,
@@ -81,12 +96,9 @@ class AlphaEval:
             freq="day",
         )
 
-        close = (
-            df["$close"]
-            .droplevel("instrument") 
-        )
+        close = df["$close"].droplevel("instrument")
         close = close.dropna()
-        close = (close - close.min())/(close.max() - close.min())
+        close = (close - close.min()) / (close.max() - close.min())
         variance = close.dropna().var(ddof=1)
         print("Noise Var done.")
         provider = LocalDatasetProvider()
@@ -98,7 +110,7 @@ class AlphaEval:
             freq="day",
             inst_processors=[
                 {
-                    "class": "core.alphaeval.noise_proc.NoiseInjection",
+                    "class": f"{noise_mod}.NoiseInjection",
                     "kwargs": {"var": variance},
                 }
             ],
@@ -113,7 +125,7 @@ class AlphaEval:
             freq="day",
             inst_processors=[
                 {
-                    "class": "core.alphaeval.noise_proc.NoiseInjection_t",
+                    "class": f"{noise_mod}.NoiseInjection_t",
                     "kwargs": {"var": variance, "dof": 3},
                 }
             ],
@@ -131,29 +143,26 @@ class AlphaEval:
 
         if self.daily_normalize:
             self.factor_data = (
-                self.factor_data
-                .groupby(level="datetime", group_keys=False)
+                self.factor_data.groupby(level="datetime", group_keys=False)
                 .apply(zscore)
                 .replace([np.inf, -np.inf], np.nan)
                 .replace(np.nan, 0)
             )
 
             self.noise_factor_data1 = (
-                self.noise_factor_data1
-                .groupby(level="datetime", group_keys=False)
+                self.noise_factor_data1.groupby(level="datetime", group_keys=False)
                 .apply(zscore)
                 .replace([np.inf, -np.inf], np.nan)
                 .replace(np.nan, 0)
             )
 
             self.noise_factor_data2 = (
-                self.noise_factor_data2
-                .groupby(level="datetime", group_keys=False)
+                self.noise_factor_data2.groupby(level="datetime", group_keys=False)
                 .apply(zscore)
                 .replace([np.inf, -np.inf], np.nan)
                 .replace(np.nan, 0)
             )
-        
+
         self.alphacombo = self.factor_data.dot(self.weights)
         self.alphacombo = self.alphacombo.to_frame(name="alphacombo")
 
@@ -198,28 +207,29 @@ class AlphaEval:
                 denom = len(prev_longs) + len(prev_shorts)
                 turnover = trades / denom if denom > 0 else float("nan")
 
-            cost = turnover * 0.0015 if turnover else 0 # Suppose the cost of each transaction is 0.15%.
-            pnl = pnl - cost                
+            cost = (
+                turnover * 0.0015 if turnover else 0
+            )  # Suppose the cost of each transaction is 0.15%.
+            pnl = pnl - cost
             records.append((date, pnl, turnover, market_mean))
             prev_longs, prev_shorts = longs, shorts
 
         pnl_df = pd.DataFrame(
             records, columns=["datetime", "pnl", "turnover", "market_mean"]
         ).set_index("datetime")
-        self.pnl =  pnl_df.sort_index()
+        self.pnl = pnl_df.sort_index()
 
     def calculate_covariance_entropy(self) -> None:
         if not self.daily_normalize:
             clean_df = (
-                self.factor_data
-                .groupby(level="datetime", group_keys=False)
+                self.factor_data.groupby(level="datetime", group_keys=False)
                 .apply(zscore)
                 .replace([np.inf, -np.inf], np.nan)
                 .replace(np.nan, 0)
             )
-        else:    
+        else:
             clean_df = self.factor_data.dropna(how="any")
-        mat = clean_df.values 
+        mat = clean_df.values
         if mat.shape[0] < 2:
             raise ValueError(
                 "After discarding NaN, the number of samples is insufficient."
@@ -244,8 +254,7 @@ class AlphaEval:
         temperature: float = 0.2,
     ) -> None:
         client = OpenAI(
-            api_key=os.getenv("ClaudeCode_KEY"),
-            base_url="https://api.gptsapi.net/v1"
+            api_key=os.getenv("ClaudeCode_KEY"), base_url="https://api.gptsapi.net/v1"
         )
 
         prompt = (
@@ -286,7 +295,9 @@ class AlphaEval:
         self.llm_scores = []
         self.llm_explanations = []
 
-        if not isinstance(results, list) or len(results) != len(self.factor_expressions):
+        if not isinstance(results, list) or len(results) != len(
+            self.factor_expressions
+        ):
             raise ValueError(
                 f"Result numbers ({len(results)}) and factor numbers ({len(self.factor_expressions)}) not matched."
             )
@@ -300,14 +311,20 @@ class AlphaEval:
             self.llm_scores.append(score)
             self.llm_explanations.append(item["explanation"])
 
-        self.llm_avg_score = sum(self.llm_scores) / len(self.llm_scores) if self.llm_scores else 0.0
-
+        self.llm_avg_score = (
+            sum(self.llm_scores) / len(self.llm_scores) if self.llm_scores else 0.0
+        )
 
     def run(self):
         if self.alphacombo is None:
             self.fetch_data()
 
-        all_data = self.alphacombo.join(self.label_data, how="inner").join(self.noisecombo1, how="inner").join(self.noisecombo2, how="inner").dropna()
+        all_data = (
+            self.alphacombo.join(self.label_data, how="inner")
+            .join(self.noisecombo1, how="inner")
+            .join(self.noisecombo2, how="inner")
+            .dropna()
+        )
         all_data.columns = ["factor", "label", "noisy1", "noisy2"]
         ic_series = all_data.groupby(level="datetime").apply(
             lambda x: x["factor"].corr(x["label"])
@@ -322,17 +339,15 @@ class AlphaEval:
             lambda x: x["factor"].corr(x["noisy2"])
         )
 
-        factor_mat = (
-            self.alphacombo
-            .reset_index()
-            .pivot(index="datetime", columns="instrument", values="alphacombo")
+        factor_mat = self.alphacombo.reset_index().pivot(
+            index="datetime", columns="instrument", values="alphacombo"
         )
         ranks = factor_mat.rank(axis=1)
         probs = ranks.div(ranks.sum(axis=1), axis=0)
         probs_prev = probs.shift(1)
         eps = 1e-8
         kl = (probs * np.log((probs + eps) / (probs_prev + eps))).sum(axis=1)
-        rre_series = kl.dropna() 
+        rre_series = kl.dropna()
         rre_series = 1 / (1 + rre_series)
         self.ic = round(ic_series.mean(), 3)
         self.rankic = round(rank_ic_series.mean(), 3)
@@ -352,7 +367,6 @@ class AlphaEval:
         print("Diversity: ", self.diversity)
         print("LLM: ", self.llm_avg_score)
 
-
     def run_single_factor(self):
         if self.alphacombo is None:
             self.fetch_data()
@@ -368,7 +382,12 @@ class AlphaEval:
                 noise1.columns = ["noisy1"]
                 noise2 = self.noise_factor_data2[[f]].copy()
                 noise2.columns = ["noisy2"]
-                all_data = data.join(self.label_data, how="inner").join(noise1, how="inner").join(noise2, how="inner").dropna()
+                all_data = (
+                    data.join(self.label_data, how="inner")
+                    .join(noise1, how="inner")
+                    .join(noise2, how="inner")
+                    .dropna()
+                )
                 ic_series = all_data.groupby(level="datetime").apply(
                     lambda x: x["factor"].corr(x["label"])
                 )
@@ -382,32 +401,33 @@ class AlphaEval:
                     lambda x: x["factor"].corr(x["noisy2"])
                 )
 
-                factor_mat = (
-                    data
-                    .reset_index()
-                    .pivot(index="datetime", columns="instrument", values="factor")
+                factor_mat = data.reset_index().pivot(
+                    index="datetime", columns="instrument", values="factor"
                 )
                 ranks = factor_mat.rank(axis=1)
                 probs = ranks.div(ranks.sum(axis=1), axis=0)
                 probs_prev = probs.shift(1)
                 eps = 1e-8
                 kl = (probs * np.log((probs + eps) / (probs_prev + eps))).sum(axis=1)
-                rre_series = kl.dropna()  
+                rre_series = kl.dropna()
                 rre_series = 1 / (1 + rre_series)
                 ic = round(ic_series.mean(), 3)
                 rankic = round(rank_ic_series.mean(), 3)
                 rre = round(rre_series.mean(), 3) if len(rre_series) > 0 else np.nan
                 pfs1 = round(pfs1_series.mean(), 6)
                 pfs2 = round(pfs2_series.mean(), 6)
-                res.append({"factor":f, "ic":ic, "rankic":rankic, "RRE":rre, "PFS1":pfs1, "PFS2":pfs2, "LLM":self.llm_scores[i]})
+                res.append(
+                    {
+                        "factor": f,
+                        "ic": ic,
+                        "rankic": rankic,
+                        "RRE": rre,
+                        "PFS1": pfs1,
+                        "PFS2": pfs2,
+                        "LLM": self.llm_scores[i],
+                    }
+                )
             except Exception as e:
                 print(f"{f}, error: {e}")
 
         return res
-            
-            
-
-
-
-
-

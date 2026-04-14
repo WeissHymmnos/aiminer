@@ -1,0 +1,15 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "polars_plugins"
+version = "0.1.0"
+description = "Fast Polars plugins for Qlib-style alpha factors"
+authors = [{ name = "AI Miner Team" }]
+dependencies = ["polars>=1.0.0"]
+requires-python = ">=3.10"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "polars_plugins"

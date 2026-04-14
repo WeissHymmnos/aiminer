@@ -1,0 +1,163 @@
+import re
+from core.rag import RAGModule
+from core.wiki import LLMWiki
+from core.template_renderer import TemplateRenderer
+from typing import Any, Dict, List, Optional
+from loguru import logger
+
+
+class HybridKnowledge:
+    def __init__(
+        self,
+        rebuild_rag: bool = False,
+        embedding_provider: str = None,
+        use_gpu: bool = False,
+        llm_provider: str = None,
+        llm_model: str = None,
+    ):
+        self.rag = RAGModule(
+            rebuild=rebuild_rag, embedding_provider=embedding_provider, use_gpu=use_gpu
+        )
+        self.wiki = LLMWiki(embedding_provider=embedding_provider)
+        self.templates = TemplateRenderer()
+        self.llm_provider = llm_provider
+        self.llm_model = llm_model
+
+    def bootstrap_wiki(self, force: bool = False):
+        """Manually trigger the Wiki-ification process from RAG docs."""
+        from core.wiki_bootstrapper import WikiBootstrapper
+
+        bootstrapper = WikiBootstrapper(
+            self.wiki, self.rag, provider=self.llm_provider, model=self.llm_model
+        )
+        bootstrapper.run(force=force)
+
+    def retrieve(self, query: str, n_results: int = 3) -> str:
+        """Retrieve from both RAG (raw corpus) and Wiki (compiled knowledge).
+
+        The compiled wiki takes precedence: when a RAG snippet and a wiki
+        page share the same title (case-insensitive substring match), the
+        RAG duplicate is dropped. This avoids agents seeing the same
+        concept twice in their context window.
+        """
+        rag_context = self.rag.retrieve(query, n_results) or ""
+        wiki_context = self.wiki.retrieve(query, n_results) or ""
+
+        # Cheap dedup: collect wiki titles, drop any RAG line whose
+        # normalized form contains one of them.
+        wiki_titles: List[str] = []
+        for line in wiki_context.splitlines():
+            m = re.match(r"\*\*(.+?)\*\*", line.strip())
+            if m:
+                wiki_titles.append(m.group(1).strip().lower())
+
+        if wiki_titles:
+            kept = []
+            for line in rag_context.splitlines():
+                low = line.lower()
+                if any(t in low for t in wiki_titles):
+                    continue
+                kept.append(line)
+            rag_context = "\n".join(kept)
+
+        # Put compiled wiki first — it is higher signal per token.
+        return f"{wiki_context}\n\n{rag_context}".strip()
+
+    def query_wiki_pages(
+        self, query: str, top_k: int = 3, type_filter: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Passthrough for callers that want full wiki pages instead of
+        the truncated `retrieve()` format — used by the HTTP search API."""
+        return self.wiki.query_pages(query, top_k=top_k, type_filter=type_filter)
+
+    def lint_wiki(self, stale_days: int = 30) -> Dict[str, Any]:
+        """Trigger a wiki lint pass and return the structured report."""
+        return self.wiki.lint(stale_days=stale_days)
+
+    def update_wiki_after_eval(self, state: Dict[str, Any]):
+        """Auto-update the LLM Wiki after a factor eval.
+
+        Writes a `factor_card` page linked back to the `strategy_families_base`
+        baseline (so factor cards are not orphans) and tagged with the
+        evaluation mode and the sub-agent's role so lint/index/backlink
+        audits can group related cards later.
+        """
+        is_simulated = state.get("is_simulated", False)
+        if is_simulated:
+            logger.warning(
+                "[HybridKnowledge] Factor was simulated — writing to Wiki with 'simulated' flag."
+            )
+
+        try:
+            # Create a slug from hypothesis name, include iteration to avoid collisions
+            raw_name = state.get("hypothesis_name", "Unnamed_Factor")
+            base_slug = "".join([c if c.isalnum() else "_" for c in raw_name]).lower()
+            iteration = state.get("iteration", 0)
+            slug = (
+                f"{base_slug}_iter{iteration}"
+                if base_slug
+                else f"factor_iter{iteration}"
+            )
+
+            title = state.get("hypothesis_name", "Unnamed Factor")
+
+            metrics = state.get("backtest_metrics") or {}
+            ic = float(metrics.get("information_coefficient", 0.0) or 0.0)
+            rank_ic = float(metrics.get("rank_ic", 0.0) or 0.0)
+            is_effective = bool(state.get("is_effective", False))
+
+            hypothesis_desc = state.get("hypothesis_description", "") or ""
+            summary = hypothesis_desc.strip().replace("\n", " ")
+            if len(summary) > 160:
+                summary = summary[:159].rstrip() + "…"
+            if not summary:
+                summary = f"{title} (IC {ic:.4f} / RankIC {rank_ic:.4f})"
+
+            # Tags derive from the role prompt + evaluation mode so linting
+            # can later cluster cards by their originating expert.
+            role_prompt = (state.get("role_prompt") or "").strip()
+            tags: List[str] = []
+            if role_prompt:
+                tags.append(role_prompt[:40])
+            eval_mode = state.get("evaluation_mode")
+            if eval_mode:
+                tags.append(eval_mode)
+            if is_simulated:
+                tags.append("simulated")
+
+            # Link back to the bootstrapped baseline pages so factor cards
+            # are not orphans. `_backlink_audit` will reciprocate.
+            related = ["strategy_families_base", "market_regime_base"]
+
+            content = (
+                f"**Hypothesis**: {hypothesis_desc}\n\n"
+                f"**Rationale**: {state.get('rationale', '')}\n\n"
+                f"**Implementation (Qlib)**: `{state.get('code_expression', '')}`\n\n"
+                f"**Math Formula**: {state.get('math_formula', '')}\n\n"
+                f"**IC / RankIC**: {ic:.4f} / {rank_ic:.4f}\n\n"
+                f"**Effectiveness**: {'✅ EFFECTIVE' if is_effective else '❌ FAILED'}\n\n"
+                f"**Review Summary**: {state.get('review_summary', '')}\n\n"
+                f"**Suggested Improvements**: {state.get('suggested_improvements', 'None')}\n"
+            )
+
+            self.wiki.add_or_update_page(
+                slug=slug,
+                title=title,
+                content=content,
+                metadata={
+                    "type": "factor_card",
+                    "status": "proven" if is_effective else "failed",
+                    "summary": summary,
+                    "tags": tags,
+                    "related": related,
+                    "ic": ic,
+                    "rank_ic": rank_ic,
+                    "iteration": iteration,
+                    "is_effective": is_effective,
+                    "simulated": is_simulated,
+                },
+            )
+            return {}  # Side effect only
+        except Exception as e:
+            logger.error(f"Failed to update Wiki: {e}")
+            return {}

@@ -16,3 +16,8 @@ sentence-transformers
 tiktoken
 anthropic
 qlib @ git+https://github.com/microsoft/qlib.git
+polars>=0.20.0
+pytest>=8.0.0
+fastapi
+uvicorn
+matplotlib
