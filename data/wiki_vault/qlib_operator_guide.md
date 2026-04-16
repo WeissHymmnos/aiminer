@@ -1,12 +1,19 @@
 ---
 title: "Qlib Operator & Formula Reference"
 slug: "qlib_operator_guide"
-type: "technical_ref"
+type: "signal_primitive"
 status: "baseline"
 summary: "Qlib Operator & Formula Reference"
 updated: "2026-04-13T03:59:35.160210"
 tags: []
 related: []
+node_type: "signal_primitive"
+evidence_level: "baseline"
+canonical: "true"
+parents: []
+depends_on: []
+risk_flags: []
+metrics_ref: []
 ---
 
 # Qlib Operator & Formula Reference  

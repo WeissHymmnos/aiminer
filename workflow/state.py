@@ -3,6 +3,12 @@ import operator
 
 
 class AlphaMinerState(TypedDict, total=False):
+    run_id: str
+    agent_id: str
+    llm_provider: Optional[str]
+    llm_model: Optional[str]
+    llm_base_url: Optional[str]
+
     # Core tracking
     iteration: int
     max_iterations: int
@@ -40,6 +46,12 @@ class AlphaMinerState(TypedDict, total=False):
     role_prompt: Optional[str]
     evaluation_mode: str  # "qlib" or "ricequant"
     evaluation_engine: str  # "pandas" or "polars"
+    data_backend: str  # "ricequant" | "qlib" | "local"
+    market_mode: str  # "single" | "batch" | "mixed"
+    market_profile: str
+    market_profiles: List[str]
+    local_data_path: Optional[str]
+    local_data_layout: Optional[str]
 
     # Market Analysis Parameters
     market_analysis_start_date: Optional[str]

@@ -13,8 +13,13 @@ class SummaryAgent:
     Includes economic analysis, risk metrics, and equity curve visualization.
     """
 
-    def __init__(self, provider: str = None, model: str = None):
-        self.llm = get_llm(temperature=0.3, provider=provider, model_name=model)
+    def __init__(self, provider: str = None, model: str = None, base_url: str = None):
+        self.llm = get_llm(
+            temperature=0.3,
+            provider=provider,
+            model_name=model,
+            base_url=base_url,
+        )
         os.makedirs("results/reports", exist_ok=True)
         os.makedirs("results/charts", exist_ok=True)
 
@@ -46,7 +51,9 @@ class SummaryAgent:
         code = factor_data.get("code", "N/A")
         metrics = factor_data.get("metrics", {})
         returns = factor_data.get("returns", pd.Series())
-        plot_paths = factor_data.get("plot_paths", {})
+        plot_paths = dict(factor_data.get("plot_paths", {}) or {})
+        if returns is not None and not getattr(returns, "empty", True):
+            plot_paths.setdefault("equity", self.generate_equity_curve(returns, factor_id))
 
         # Build analysis via LLM
         prompt = ChatPromptTemplate.from_messages(

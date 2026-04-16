@@ -11,10 +11,14 @@
             "id": "ed87ac99f55df97e",
             "type": "leaf",
             "state": {
-              "type": "graph",
-              "state": {},
-              "icon": "lucide-git-fork",
-              "title": "关系图谱"
+              "type": "markdown",
+              "state": {
+                "file": "Clippings/商品期货 多品种日频双均线模型 作为给入门者的小礼物 - cicikml.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "商品期货 多品种日频双均线模型 作为给入门者的小礼物 - cicikml"
             }
           }
         ]
@@ -182,6 +186,8 @@
   },
   "active": "ed87ac99f55df97e",
   "lastOpenFiles": [
+    "Clippings/商品期货 多品种日频双均线模型 作为给入门者的小礼物 - cicikml.md",
+    "Clippings",
     "hurst_scaled_liquidity_weighted_cross_sectional_mean_reversion_iter3.md",
     "hurst_scaled_liquidity_weighted_order_imbalance_reversal_iter2.md",
     "cross_sectional_liquidity_adjusted_policy_shadow_beta_iter3.md",
@@ -206,7 +212,6 @@
     "index.md",
     "hurst_macro_vol_momentum_iter1.md",
     "liquidity_adjusted_overnight_reversal_with_sector_dispersion_iter2.md",
-    "liquidity_filtered_overnight_gap_reversal_iter1.md",
-    "volume_accelerated_intraday_reversal_with_liquidity_wick_filter_iter1.md"
+    "liquidity_filtered_overnight_gap_reversal_iter1.md"
   ]
 }

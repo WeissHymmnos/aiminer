@@ -7,7 +7,10 @@ from agents.summary_agent import SummaryAgent
 
 class TestSummaryAgent(unittest.TestCase):
     def setUp(self):
-        # 初始化并在测试中mock LLM避免实际网络调用
+        self.get_llm_patcher = patch("agents.summary_agent.get_llm")
+        mock_get_llm = self.get_llm_patcher.start()
+        mock_get_llm.return_value = MagicMock(model_name="mock-model")
+        self.addCleanup(self.get_llm_patcher.stop)
         self.agent = SummaryAgent()
 
     @patch("agents.summary_agent.ChatPromptTemplate")

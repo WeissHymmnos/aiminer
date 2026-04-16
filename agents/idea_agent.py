@@ -19,10 +19,19 @@ class IdeaAgent:
     """
 
     def __init__(
-        self, knowledge: HybridKnowledge, provider: str = None, model: str = None
+        self,
+        knowledge: HybridKnowledge,
+        provider: str = None,
+        model: str = None,
+        base_url: str = None,
     ):
         self.knowledge = knowledge
-        self.llm = get_llm(temperature=0.7, provider=provider, model_name=model)
+        self.llm = get_llm(
+            temperature=0.7,
+            provider=provider,
+            model_name=model,
+            base_url=base_url,
+        )
 
     @staticmethod
     def _strip_markdown_json(text: str) -> str:
@@ -69,9 +78,10 @@ class IdeaAgent:
 
         # Fetch Dynamic RiceQuant Market Insight if in ricequant mode (Skip if already in state)
         market_regime = state.get("market_regime_summary", "")
-        if not market_regime and mode == "ricequant":
+        data_backend = state.get("data_backend", mode)
+        if not market_regime and data_backend in {"ricequant", "local"}:
             try:
-                from core.alphaeval.rq_eval import RiceQuantEval
+                from core.evaluator_factory import build_evaluator, evaluation_config_from_mapping
 
                 logger.info("[IdeaAgent] Fetching dynamic market regime analysis...")
 
@@ -93,10 +103,25 @@ class IdeaAgent:
                         f"Invalid date range: start={m_start} >= end={effective_end}"
                     )
 
-                rq_eval = RiceQuantEval(
-                    factor_expressions=[], test_end_date=effective_end
+                evaluator = build_evaluator(
+                    factor_expressions=[],
+                    config=evaluation_config_from_mapping(
+                        {
+                            "data_backend": data_backend,
+                            "evaluation_mode": mode,
+                            "evaluation_engine": state.get("evaluation_engine", "pandas"),
+                            "market_mode": state.get("market_mode", "single"),
+                            "market_profile": state.get("market_profile", "cn_stock"),
+                            "market_profiles": state.get("market_profiles"),
+                            "local_data_path": state.get("local_data_path"),
+                            "local_data_layout": state.get("local_data_layout", "auto"),
+                            "market_start": m_start,
+                            "market_end": effective_end,
+                        }
+                    ),
+                    test_end_date=effective_end,
                 )
-                market_regime = rq_eval.get_market_regime(
+                market_regime = evaluator.get_market_regime(
                     start_date=m_start, end_date=m_end, lookback_days=m_lookback
                 )
                 logger.info(

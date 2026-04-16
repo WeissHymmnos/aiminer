@@ -1,19 +1,71 @@
 ---
 title: "Volume-VWAP Divergence Reversal"
 slug: "volume_vwap_divergence_reversal_iter1"
-type: "factor_card"
+type: "experiment_card"
 status: "failed"
 summary: "Hypothesis: Go long stocks whose intraday close is below VWAP but where the rolling 5-day correlation between ranked volume and ranked (Clo…"
 updated: "2026-04-13T13:52:07.246519"
 tags: []
-related: ["strategy_families_base"]
+related: ["strategy_families_base", "mean_reversion_family", "momentum_family", "volume_divergence_signal", "vwap_anchor_signal", "price_volume_data_source", "macro_data_source", "policy_pivot_regime", "information_coefficient_metric", "rank_ic_metric", "cross_sectional_long_short_execution", "long_only_selection_execution"]
+node_type: "factor_experiment"
+evidence_level: "theory"
+canonical: false
+parents: ["mean_reversion_family", "momentum_family"]
+depends_on: ["volume_divergence_signal", "vwap_anchor_signal", "price_volume_data_source", "macro_data_source", "policy_pivot_regime", "cross_sectional_long_short_execution", "long_only_selection_execution"]
+risk_flags: []
+metrics_ref: ["information_coefficient_metric", "rank_ic_metric"]
+strategy_family: ["mean_reversion_family", "momentum_family"]
+data_sources: ["price_volume_data_source", "macro_data_source"]
+market_regimes: ["policy_pivot_regime"]
+execution_patterns: ["cross_sectional_long_short_execution", "long_only_selection_execution"]
+related_experiments: []
 ---
 
-**Hypothesis**: Go long stocks whose intraday close is below VWAP but where the rolling 5-day correlation between ranked volume and ranked (Close/VWAP-1) has just turned positive; go short the opposite.  Factor = -Rank(Corr(Rank(Volume), Rank((Close-VWAP)/VWAP), 5)) * Sign(Close-VWAP)
-**Rationale**: In a cautious-policy, strong-momentum regime volume expansion increasingly validates price moves.  When a stock closes below VWAP yet the high-freq volume/price-dislocation correlation flips positive, it signals latent buy-pressure ready to close the gap, yielding short-term reversal alpha while staying aligned with the prevailing up-trend.
-**Implementation (Qlib)**: `-Rank(Corr(CSRank($volume), CSRank(($close - $vwap) / $vwap), 5)) * Sign($close - $vwap)`
+# Volume-VWAP Divergence Reversal
+
+## Summary
+
+Hypothesis: Go long stocks whose intraday close is below VWAP but where the rolling 5-day correlation between ranked volume and ranked (Clo…
+
+## Hypothesis
+
+Hypothesis: Go long stocks whose intraday close is below VWAP but where the rolling 5-day correlation between ranked volume and ranked (Clo…
+
+## Economic Rationale
+
+Rationale not yet captured.
+
+## Formula / Implementation
+
+**Implementation (Qlib)**: ```-Rank(Corr(CSRank($volume), CSRank(($close - $vwap) / $vwap), 5)) * Sign($close - $vwap)```
+
 **Math Formula**: \text{Factor}_{t} = -\text{Rank}_{\text{all } i}\left(\text{Corr}_{\tau=t-4}^{t}\left(\text{Rank}(V_{i,\tau}),\;\text{Rank}\left(\frac{C_{i,\tau}-\text{VWAP}_{i,\tau}}{\text{VWAP}_{i,\tau}}\right)\right)\right)\;\cdot\;\text{Sign}(C_{i,t}-\text{VWAP}_{i,t})
-**IC / RankIC**: 0.0780 / 0.0170
-**Effectiveness**: ❌ FAILED
-**Review Summary**: Strong directional IC (0.078) but very weak Rank IC (0.017) indicates the factor sorts poorly; long/short baskets overlap. RRE 0.27 and PFS2 0.52 show modest consistency. Diversity 0.83 is healthy. Factor is capturing a linear effect that does not translate into clean quintile spreads, likely because the 5-day correlation window is too noisy and the sign flip is too frequent.
-**Suggested Improvements**: Lengthen correlation window to 10-20 days to reduce noise; smooth correlation with exponential decay or z-score before taking sign; replace raw sign(Close-VWAP) with a percentile rank of intraday distance to VWAP so extreme deviations get higher weight; try separate long/short factors (long only when correlation turns from <-0.2 to >0.2 and price < VWAP bottom quintile, short opposite) to restore monotonicity; add liquidity filter (dollar-volume >20-day median) to ensure tradability.
+
+## Backtest Evidence
+
+- **Evidence Level:** `theory`
+- **Status:** `failed`
+- **IC / RankIC:** 0.0000 / 0.0000
+- **Effectiveness:** ❌ not validated
+
+## Interpretation
+
+Interpretation pending.
+
+## Failure Modes / Risks
+
+- None recorded
+
+## Related Concepts
+
+- [[mean_reversion_family]]
+- [[momentum_family]]
+- [[price_volume_data_source]]
+- [[macro_data_source]]
+- [[policy_pivot_regime]]
+- [[cross_sectional_long_short_execution]]
+- [[long_only_selection_execution]]
+
+## Next Steps
+
+Promote or refine after collecting stronger evidence.

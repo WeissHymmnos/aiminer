@@ -6,6 +6,7 @@ from agents.idea_agent import IdeaAgent
 from agents.factor_agent import FactorAgent
 from agents.eval_agent import EvalAgent
 from core.hybrid_knowledge import HybridKnowledge
+from core.settings import AiminerSettings, build_settings
 
 
 # Routing Functions
@@ -98,25 +99,51 @@ def increment_iteration(state: AlphaMinerState):
 
 
 def build_workflow(
+    settings: AiminerSettings | None = None,
     rebuild_rag: bool = False,
     llm_provider: str = None,
     llm_model: str = None,
     embedding_provider: str = None,
     use_gpu: bool = False,
 ):
+    settings = settings or build_settings(
+        {
+            "rebuild_rag": rebuild_rag,
+            "llm_provider": llm_provider,
+            "llm_model": llm_model,
+            "embedding_provider": embedding_provider,
+            "use_gpu": use_gpu,
+        }
+    )
+
     # Initialize shared knowledge base
     knowledge = HybridKnowledge(
-        rebuild_rag=rebuild_rag,
-        embedding_provider=embedding_provider,
-        use_gpu=use_gpu,
-        llm_provider=llm_provider,
-        llm_model=llm_model,
+        rebuild_rag=settings.rebuild_rag,
+        embedding_provider=settings.embedding_provider,
+        use_gpu=settings.use_gpu,
+        llm_provider=settings.llm_provider,
+        llm_model=settings.llm_model,
+        llm_base_url=settings.llm_base_url,
     )
 
     # Initialize agents
-    idea_agent = IdeaAgent(knowledge, provider=llm_provider, model=llm_model)
-    factor_agent = FactorAgent(provider=llm_provider, model=llm_model)
-    eval_agent = EvalAgent(knowledge, provider=llm_provider, model=llm_model)
+    idea_agent = IdeaAgent(
+        knowledge,
+        provider=settings.llm_provider,
+        model=settings.llm_model,
+        base_url=settings.llm_base_url,
+    )
+    factor_agent = FactorAgent(
+        provider=settings.llm_provider,
+        model=settings.llm_model,
+        base_url=settings.llm_base_url,
+    )
+    eval_agent = EvalAgent(
+        knowledge,
+        provider=settings.llm_provider,
+        model=settings.llm_model,
+        base_url=settings.llm_base_url,
+    )
 
     # Define Graph
     workflow = StateGraph(AlphaMinerState)

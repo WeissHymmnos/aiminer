@@ -29,6 +29,10 @@ class AlphaEval:
         test_end_date: str = "2020-10-31",
         instruments: Optional[List[str]] = None,
         daily_normalize: bool = True,
+        market_profile: str = "cn_stock",
+        qlib_market: str | None = None,
+        qlib_region: str | None = None,
+        qlib_data_path: str | None = None,
     ):
         from qlib.data import D
         from qlib import auto_init
@@ -40,8 +44,13 @@ class AlphaEval:
         self.test_start_date = test_start_date
         self.test_end_date = test_end_date
         self.daily_normalize = daily_normalize
+        self.market_profile = market_profile
 
-        qlib_data_path = os.getenv("QLIB_DATA_PATH", "~/.qlib/qlib_data/cn_data")
+        region = qlib_region or ("us" if market_profile == "us_stock" else "cn")
+        default_data_path = (
+            "~/.qlib/qlib_data/us_data" if region == "us" else "~/.qlib/qlib_data/cn_data"
+        )
+        qlib_data_path = qlib_data_path or os.getenv("QLIB_DATA_PATH", default_data_path)
         expanded_path = os.path.expanduser(qlib_data_path)
 
         if not os.path.exists(expanded_path):
@@ -51,12 +60,12 @@ class AlphaEval:
                 f"Qlib data path does not exist: {expanded_path}. Qlib features may fail."
             )
         else:
-            auto_init(provider_uri=expanded_path, region="cn")
+            auto_init(provider_uri=expanded_path, region=region)
 
         if instruments is not None:
             self.instruments = instruments
         else:
-            self.instruments = D.instruments(market="csi300")
+            self.instruments = D.instruments(market=qlib_market or ("sp500" if region == "us" else "csi300"))
 
         self._D = D
 

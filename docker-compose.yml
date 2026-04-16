@@ -16,26 +16,10 @@ services:
       - PYTHONUNBUFFERED=1
       # Overridable environment variables
       - USE_LOCAL_EMBEDDING=false
-    # Example command to run the TUI or API
+    # Example command to run the TUI
     # command: python tui.py
     # For background processing:
     # command: python main.py --iterations 5
     stdin_open: true # Allows interactive mode (useful for TUI)
     tty: true
-    restart: unless-stopped
-
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: aiminer:latest
-    container_name: aiminer_api
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./data:/app/data
-      - ./results:/app/results
-      - ./logs:/app/logs
-      - ./.env:/app/.env:ro
-    command: uvicorn api:app --host 0.0.0.0 --port 8000
     restart: unless-stopped

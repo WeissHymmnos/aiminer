@@ -4,13 +4,10 @@ import argparse
 import json
 import subprocess
 from datetime import datetime
-from dotenv import load_dotenv
 from loguru import logger
 
-# Load environment variables first, before initializing any agents or LangChain modules
-load_dotenv()
-
 from workflow.graph import build_workflow
+from core.settings import build_settings
 
 
 def setup_logging(verbose: bool = False):
@@ -118,6 +115,12 @@ def main():
         help="Evaluation mode",
     )
     parser.add_argument(
+        "--data-backend",
+        type=str,
+        choices=["qlib", "ricequant", "local"],
+        help="Data backend",
+    )
+    parser.add_argument(
         "--engine",
         type=str,
         choices=["pandas", "polars"],
@@ -130,15 +133,39 @@ def main():
     parser.add_argument(
         "--llm-provider",
         type=str,
-        choices=["kimi", "qwen", "claude", "glm"],
+        choices=["kimi", "qwen", "claude", "glm", "openai", "deepseek", "openrouter", "groq", "ollama", "vllm", "lmstudio"],
         help="LLM provider",
     )
     parser.add_argument("--llm-model", type=str, help="Specific LLM model name")
+    parser.add_argument("--llm-base-url", type=str, help="Override OpenAI-compatible base URL")
     parser.add_argument(
         "--embedding-provider",
         type=str,
-        choices=["local", "kimi", "qwen", "claude", "glm"],
+        choices=["local", "kimi", "qwen", "claude", "glm", "openai", "deepseek", "openrouter", "groq", "ollama", "vllm", "lmstudio"],
         help="Embedding provider for RAG",
+    )
+    parser.add_argument(
+        "--market-mode",
+        type=str,
+        choices=["single", "batch", "mixed"],
+        default="single",
+        help="Market execution mode",
+    )
+    parser.add_argument(
+        "--market-profile",
+        type=str,
+        choices=["cn_stock", "us_stock", "futures"],
+        default="cn_stock",
+        help="Market profile",
+    )
+    parser.add_argument("--market-profiles", type=str, help="Comma-separated market profiles")
+    parser.add_argument("--local-data-path", type=str, help="Local CSV/Parquet dataset path")
+    parser.add_argument(
+        "--local-data-layout",
+        type=str,
+        choices=["auto", "panel", "instrument_files"],
+        default="auto",
+        help="Local data layout",
     )
     parser.add_argument(
         "--market-start", type=str, help="Market analysis start date (YYYY-MM-DD)"
@@ -158,17 +185,41 @@ def main():
         help="Use GPU for local RAG embedding (if available)",
     )
     args = parser.parse_args()
+    settings = build_settings(
+        {
+            "iterations": args.iterations,
+            "mode": args.mode,
+            "data_backend": args.data_backend,
+            "engine": args.engine,
+            "wiki_bootstrap": args.wiki_bootstrap,
+            "llm_provider": args.llm_provider,
+            "llm_model": args.llm_model,
+            "llm_base_url": args.llm_base_url,
+            "embedding_provider": args.embedding_provider,
+            "market_mode": args.market_mode,
+            "market_profile": args.market_profile,
+            "market_profiles": args.market_profiles,
+            "local_data_path": args.local_data_path,
+            "local_data_layout": args.local_data_layout,
+            "market_start": args.market_start,
+            "market_end": args.market_end,
+            "market_lookback": args.market_lookback,
+            "use_gpu": args.use_gpu,
+            "rebuild_rag": args.rebuild_rag,
+            "verbose": args.verbose,
+        }
+    )
 
-    setup_logging(verbose=args.verbose)
+    setup_logging(verbose=settings.verbose)
     logger.info(
-        f"Initializing Multi-Agent AI Alpha Miner for {args.iterations} iteration(s) in {args.mode} mode..."
+        f"Initializing Multi-Agent AI Alpha Miner for {settings.max_iterations} iteration(s) in {settings.evaluation_mode} mode..."
     )
 
     # If market dates are provided, fetch macro news
-    rebuild_rag = args.rebuild_rag
-    if args.market_start and args.market_end:
+    rebuild_rag = settings.rebuild_rag
+    if settings.market_start and settings.market_end:
         logger.info(
-            f"Fetching macro news from {args.market_start} to {args.market_end}..."
+            f"Fetching macro news from {settings.market_start} to {settings.market_end}..."
         )
         try:
             result = subprocess.run(
@@ -176,9 +227,9 @@ def main():
                     sys.executable,
                     "scripts/fetch_macro_news.py",
                     "--start",
-                    args.market_start,
+                    settings.market_start,
                     "--end",
-                    args.market_end,
+                    settings.market_end,
                     "--count",
                     "3",
                 ],
@@ -197,39 +248,40 @@ def main():
             logger.error(f"Failed to fetch macro news: {e}")
 
     # Pass providers to workflow builder
-    app = build_workflow(
-        rebuild_rag=rebuild_rag,
-        llm_provider=args.llm_provider,
-        llm_model=args.llm_model,
-        embedding_provider=args.embedding_provider,
-        use_gpu=args.use_gpu,
-    )
+    app = build_workflow(settings=settings.model_copy(update={"rebuild_rag": rebuild_rag}))
 
     # Handle wiki bootstrap if requested (synchronous in main)
-    if args.wiki_bootstrap:
+    if settings.wiki_bootstrap:
         from core.hybrid_knowledge import HybridKnowledge
 
         knowledge = HybridKnowledge(
             rebuild_rag=rebuild_rag,
-            embedding_provider=args.embedding_provider,
-            use_gpu=args.use_gpu,
-            llm_provider=args.llm_provider,
-            llm_model=args.llm_model,
+            embedding_provider=settings.embedding_provider,
+            use_gpu=settings.use_gpu,
+            llm_provider=settings.llm_provider,
+            llm_model=settings.llm_model,
+            llm_base_url=settings.llm_base_url,
         )
         knowledge.bootstrap_wiki(force=False)
 
     initial_state = {
         "iteration": 1,
-        "max_iterations": args.iterations,
-        "evaluation_mode": args.mode,
-        "evaluation_engine": args.engine,
-        "market_analysis_start_date": args.market_start,
-        "market_analysis_end_date": args.market_end,
-        "market_analysis_lookback_days": args.market_lookback,
+        "max_iterations": settings.max_iterations,
+        "evaluation_mode": settings.evaluation_mode,
+        "evaluation_engine": settings.evaluation_engine,
+        "data_backend": settings.data_backend,
+        "market_mode": settings.market_mode,
+        "market_profile": settings.market_profile,
+        "market_profiles": settings.market_profiles,
+        "local_data_path": settings.local_data_path,
+        "local_data_layout": settings.local_data_layout,
+        "market_analysis_start_date": settings.market_start,
+        "market_analysis_end_date": settings.market_end,
+        "market_analysis_lookback_days": settings.market_lookback,
         "best_ic": -999.0,
         "patience_counter": 0,
         "messages": [
-            f"[System] Starting Alpha Miner Workflow in {args.mode} mode ({args.engine})"
+            f"[System] Starting Alpha Miner Workflow in {settings.evaluation_mode} mode ({settings.evaluation_engine})"
         ],
     }
 

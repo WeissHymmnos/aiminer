@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Literal
 from pydantic import BaseModel, Field
 
 
@@ -49,4 +49,41 @@ class ReflexiveReviewOutput(BaseModel):
     )
     suggested_improvements: str = Field(
         description="Specific, actionable suggestions for the next iteration. Include concrete changes to the formula or approach, not generic advice."
+    )
+
+
+class StrategyProposalOutput(BaseModel):
+    """Structured output for strategy proposal generation."""
+
+    template_name: str = Field(description="Name of the selected strategy template.")
+    strategy_mode: Literal["cross_sectional", "time_series"] = Field(
+        description="Whether the strategy uses cross-sectional selection or time-series timing."
+    )
+    direction: Literal["long_only", "long_short", "long_flat"] = Field(
+        description="The directionality of the strategy."
+    )
+    selection_rule: Literal["top_n", "bottom_n", "top_bottom_n", "threshold"] = Field(
+        description="How signals are converted into positions."
+    )
+    rebalance_freq: Literal["daily", "weekly", "monthly"] = Field(
+        description="How often the portfolio rebalances."
+    )
+    thresholds: Dict[str, float] = Field(
+        default_factory=dict,
+        description="Threshold-style parameters such as long/short/exit thresholds.",
+    )
+    counts: Dict[str, int] = Field(
+        default_factory=dict,
+        description="Selection counts such as top_n and bottom_n.",
+    )
+    holding_constraints: Dict[str, float | int] = Field(
+        default_factory=dict,
+        description="Constraints such as max positions, max weight, and minimum holding days.",
+    )
+    cost_model: Dict[str, float] = Field(
+        default_factory=dict,
+        description="Trading cost assumptions in basis points.",
+    )
+    rationale: str = Field(
+        description="Why this strategy structure is appropriate for the proposed factor."
     )

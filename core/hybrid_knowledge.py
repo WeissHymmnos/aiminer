@@ -14,6 +14,7 @@ class HybridKnowledge:
         use_gpu: bool = False,
         llm_provider: str = None,
         llm_model: str = None,
+        llm_base_url: str = None,
     ):
         self.rag = RAGModule(
             rebuild=rebuild_rag, embedding_provider=embedding_provider, use_gpu=use_gpu
@@ -22,13 +23,18 @@ class HybridKnowledge:
         self.templates = TemplateRenderer()
         self.llm_provider = llm_provider
         self.llm_model = llm_model
+        self.llm_base_url = llm_base_url
 
     def bootstrap_wiki(self, force: bool = False):
         """Manually trigger the Wiki-ification process from RAG docs."""
         from core.wiki_bootstrapper import WikiBootstrapper
 
         bootstrapper = WikiBootstrapper(
-            self.wiki, self.rag, provider=self.llm_provider, model=self.llm_model
+            self.wiki,
+            self.rag,
+            provider=self.llm_provider,
+            model=self.llm_model,
+            base_url=self.llm_base_url,
         )
         bootstrapper.run(force=force)
 
@@ -77,7 +83,7 @@ class HybridKnowledge:
     def update_wiki_after_eval(self, state: Dict[str, Any]):
         """Auto-update the LLM Wiki after a factor eval.
 
-        Writes a `factor_card` page linked back to the `strategy_families_base`
+        Writes an `experiment_card` page linked back to the concept graph
         baseline (so factor cards are not orphans) and tagged with the
         evaluation mode and the sub-agent's role so lint/index/backlink
         audits can group related cards later.
@@ -127,7 +133,14 @@ class HybridKnowledge:
 
             # Link back to the bootstrapped baseline pages so factor cards
             # are not orphans. `_backlink_audit` will reciprocate.
-            related = ["strategy_families_base", "market_regime_base"]
+            related = [
+                "strategy_families_base",
+                "market_regime_base",
+                "information_coefficient_metric",
+                "rank_ic_metric",
+                "price_volume_data_source",
+                "cross_sectional_long_short_execution",
+            ]
 
             content = (
                 f"**Hypothesis**: {hypothesis_desc}\n\n"
@@ -145,10 +158,19 @@ class HybridKnowledge:
                 title=title,
                 content=content,
                 metadata={
-                    "type": "factor_card",
-                    "status": "proven" if is_effective else "failed",
+                    "type": "experiment_card",
+                    "node_type": "factor_experiment",
+                    "status": "active" if is_effective else "failed",
+                    "evidence_level": "simulated" if is_simulated else ("validated" if is_effective else "theory"),
                     "summary": summary,
                     "tags": tags,
+                    "parents": ["stat_arb_family"],
+                    "depends_on": [
+                        "price_volume_data_source",
+                        "cross_sectional_long_short_execution",
+                    ],
+                    "risk_flags": ["simulation_only_risk"] if is_simulated else [],
+                    "metrics_ref": ["information_coefficient_metric", "rank_ic_metric"],
                     "related": related,
                     "ic": ic,
                     "rank_ic": rank_ic,

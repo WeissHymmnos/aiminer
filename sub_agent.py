@@ -1,6 +1,8 @@
 import pandas as pd
 from loguru import logger
 from workflow.graph import build_workflow
+from core.runtime import log_context
+from core.settings import AiminerSettings, build_settings
 
 
 class AlphaResearcher:
@@ -14,18 +16,51 @@ class AlphaResearcher:
         market_end: str = None,
         llm_provider: str = None,
         llm_model: str = None,
+        llm_base_url: str = None,
         embedding_provider: str = None,
         use_gpu: bool = False,
         rebuild_rag: bool = False,
         wiki_bootstrap: bool = False,
+        data_backend: str = None,
+        market_mode: str = "single",
+        market_profile: str = "cn_stock",
+        market_profiles=None,
+        local_data_path: str = None,
+        local_data_layout: str = "auto",
         log_queue=None,
+        run_id: str = None,
+        agent_id: str = None,
     ):
+        self.settings = build_settings(
+            {
+                "max_iterations": max_iterations,
+                "evaluation_mode": evaluation_mode,
+                "evaluation_engine": evaluation_engine,
+                "market_start": market_start,
+                "market_end": market_end,
+                "llm_provider": llm_provider,
+                "llm_model": llm_model,
+                "llm_base_url": llm_base_url,
+                "embedding_provider": embedding_provider,
+                "use_gpu": use_gpu,
+                "rebuild_rag": rebuild_rag,
+                "wiki_bootstrap": wiki_bootstrap,
+                "data_backend": data_backend,
+                "market_mode": market_mode,
+                "market_profile": market_profile,
+                "market_profiles": market_profiles,
+                "local_data_path": local_data_path,
+                "local_data_layout": local_data_layout,
+            }
+        )
         self.role_prompt = role_prompt
-        self.max_iterations = max_iterations
-        self.evaluation_mode = evaluation_mode
-        self.evaluation_engine = evaluation_engine
-        self.market_start = market_start
-        self.market_end = market_end
+        self.max_iterations = self.settings.max_iterations
+        self.evaluation_mode = self.settings.evaluation_mode
+        self.evaluation_engine = self.settings.evaluation_engine
+        self.market_start = self.settings.market_start
+        self.market_end = self.settings.market_end
+        self.run_id = run_id
+        self.agent_id = agent_id
 
         # If a log_queue is provided, add a sink to forward logs to the main process
         if log_queue:
@@ -34,7 +69,10 @@ class AlphaResearcher:
                 log_data = {
                     "level": record["level"].name,
                     "message": record["message"],
-                    "role": self.role_prompt[:20] # Truncate for clarity
+                    "role": self.role_prompt[:20],
+                    "run_id": record["extra"].get("run_id"),
+                    "agent_id": record["extra"].get("agent_id"),
+                    "iteration": record["extra"].get("iteration"),
                 }
                 log_queue.put(log_data)
             logger.add(q_sink, level="INFO", format="{message}")
@@ -42,22 +80,27 @@ class AlphaResearcher:
         logger.info(f"[Sub-Agent] Initializing Role: {self.role_prompt}")
 
         # Initialize an isolated LangGraph application
-        self.app = build_workflow(
-            rebuild_rag=rebuild_rag,
-            llm_provider=llm_provider,
-            llm_model=llm_model,
-            embedding_provider=embedding_provider,
-            use_gpu=use_gpu,
-        )
+        self.app = build_workflow(settings=self.settings)
 
     def run(self) -> dict:
         """Execute the LangGraph workflow for this researcher."""
         initial_state = {
+            "run_id": self.run_id,
+            "agent_id": self.agent_id,
+            "llm_provider": self.settings.llm_provider,
+            "llm_model": self.settings.llm_model,
+            "llm_base_url": self.settings.llm_base_url,
             "iteration": 1,
             "max_iterations": self.max_iterations,
             "role_prompt": self.role_prompt,
             "evaluation_mode": self.evaluation_mode,
             "evaluation_engine": self.evaluation_engine,
+            "data_backend": self.settings.data_backend,
+            "market_mode": self.settings.market_mode,
+            "market_profile": self.settings.market_profile,
+            "market_profiles": self.settings.market_profiles,
+            "local_data_path": self.settings.local_data_path,
+            "local_data_layout": self.settings.local_data_layout,
             "market_analysis_start_date": self.market_start,
             "market_analysis_end_date": self.market_end,
             "best_ic": -999.0,
@@ -69,16 +112,19 @@ class AlphaResearcher:
         logger.info(f"[Sub-Agent] Starting run with role '{self.role_prompt}'")
 
         try:
-            for output in self.app.stream(initial_state):
-                for node_name, state_update in output.items():
-                    logger.debug(
-                        f"[Sub-Agent: {self.role_prompt}] Completed node: {node_name}"
-                    )
-                    final_state.update(state_update)
-                    if "error" in state_update and state_update["error"]:
-                        logger.error(
-                            f"[Sub-Agent] Error in node {node_name}: {state_update['error']}"
+            with logger.contextualize(
+                **log_context(run_id=self.run_id, agent_id=self.agent_id)
+            ):
+                for output in self.app.stream(initial_state):
+                    for node_name, state_update in output.items():
+                        logger.debug(
+                            f"[Sub-Agent: {self.role_prompt}] Completed node: {node_name}"
                         )
+                        final_state.update(state_update)
+                        if "error" in state_update and state_update["error"]:
+                            logger.error(
+                                f"[Sub-Agent] Error in node {node_name}: {state_update['error']}"
+                            )
         except Exception as e:
             logger.error(f"[Sub-Agent] Workflow execution failed: {e}")
             final_state["error"] = f"Workflow exception: {e}"
@@ -110,6 +156,18 @@ class AlphaResearcher:
             returns_series = returns_series.sort_index()
 
         return {
+            "run_id": self.run_id,
+            "agent_id": self.agent_id,
+            "iteration": final_state.get("iteration", self.max_iterations),
+            "evaluation_mode": self.evaluation_mode,
+            "evaluation_engine": self.evaluation_engine,
+            "llm_provider": self.settings.llm_provider,
+            "llm_model": self.settings.llm_model,
+            "llm_base_url": self.settings.llm_base_url,
+            "data_backend": self.settings.data_backend,
+            "market_mode": self.settings.market_mode,
+            "market_profile": self.settings.market_profile,
+            "market_profiles": self.settings.market_profiles,
             "role": self.role_prompt,
             "hypothesis": final_state.get("hypothesis_name"),
             "code": final_state.get("code_expression"),
@@ -117,5 +175,6 @@ class AlphaResearcher:
             "perf_metric": perf_metric,
             "returns": returns_series,
             "is_effective": final_state.get("is_effective", False),
+            "is_simulated": final_state.get("is_simulated", False),
             "error": final_state.get("error"),
         }

@@ -11,11 +11,21 @@ class WikiBootstrapper:
     """Responsible for converting raw RAG documents into structured Wiki pages at startup."""
 
     def __init__(
-        self, wiki: LLMWiki, rag: RAGModule, provider: str = None, model: str = None
+        self,
+        wiki: LLMWiki,
+        rag: RAGModule,
+        provider: str = None,
+        model: str = None,
+        base_url: str = None,
     ):
         self.wiki = wiki
         self.rag = rag
-        self.llm = get_llm(temperature=0.3, provider=provider, model_name=model)
+        self.llm = get_llm(
+            temperature=0.3,
+            provider=provider,
+            model_name=model,
+            base_url=base_url,
+        )
 
     def run(self, force: bool = False):
         if self.wiki.wiki_col.count() > 0 and not force:
@@ -110,4 +120,3 @@ class WikiBootstrapper:
             )
         except Exception as e:
             logger.error(f"Failed to synthesize Wiki page {title}: {e}")
-

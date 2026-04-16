@@ -1,31 +1,77 @@
 ---
 title: "Intraday Liquidity-Adjusted VWAP Rebound"
 slug: "intraday_liquidity_adjusted_vwap_rebound_iter3"
-type: "factor_card"
+type: "experiment_card"
 status: "failed"
 summary: "Rank( Delta($vwap,1) / (Std($volume,5)+1e3) * Sign(Corr($close,$volume,2)) * Power(-1,Sign(Delta($close,1))) ) goes long stocks whose VWAP moved sharply on low…"
 updated: "2026-04-14T12:09:11"
 tags: ["利用高频量价相关性挖掘的量价专家", "ricequant"]
-related: ["strategy_families_base", "market_regime_base"]
-ic: -0.0085
-rank_ic: 0.0
-iteration: 3
-is_effective: false
-simulated: false
+related: ["strategy_families_base", "market_regime_base", "mean_reversion_family", "stat_arb_family", "volume_divergence_signal", "vwap_anchor_signal", "price_volume_data_source", "macro_data_source", "sector_data_source", "information_coefficient_metric", "rank_ic_metric", "strategy_risk_metrics_reference", "cross_sectional_long_short_execution", "threshold_timing_execution"]
+ic: "-0.0085"
+rank_ic: "0.0"
+iteration: "3"
+is_effective: "false"
+simulated: "false"
+node_type: "factor_experiment"
+evidence_level: "theory"
+canonical: false
+parents: ["mean_reversion_family", "stat_arb_family"]
+depends_on: ["volume_divergence_signal", "vwap_anchor_signal", "price_volume_data_source", "macro_data_source", "sector_data_source", "market_regime_base", "cross_sectional_long_short_execution", "threshold_timing_execution"]
+risk_flags: []
+metrics_ref: ["information_coefficient_metric", "rank_ic_metric", "strategy_risk_metrics_reference"]
+strategy_family: ["mean_reversion_family", "stat_arb_family"]
+data_sources: ["price_volume_data_source", "macro_data_source", "sector_data_source"]
+market_regimes: ["market_regime_base"]
+execution_patterns: ["cross_sectional_long_short_execution", "threshold_timing_execution"]
+related_experiments: []
 ---
 
-**Hypothesis**: Rank( Delta($vwap,1) / (Std($volume,5)+1e3) * Sign(Corr($close,$volume,2)) * Power(-1,Sign(Delta($close,1))) ) goes long stocks whose VWAP moved sharply on low volume, with same-day close-volume correlation negative and price down, expecting that VWAP deviations not backed by volume snap back within 1 day as market-makers tighten spreads.
+# Intraday Liquidity-Adjusted VWAP Rebound
 
-**Rationale**: Macro: PBoC’s surprise reserve-ratio cut injects intraday liquidity, but dealers remain cautious—moves away from VWAP on thinning volume are quickly arbitraged. Market regime is choppy-bullish; mean-reversion dominates inside sessions. Cross-agent lesson: raw price/volume ratios failed; scaling by volume-std anchors units, while VWAP delta captures fair-value drift. 2-day correlation sign filters liquidity-starved prints; sign toggle isolates rebounds after down-moves, avoiding prior long-window failures.
+## Summary
 
-**Implementation (Qlib)**: `Rank(Multiply(Multiply(Divide(Delta($vwap,1),Add(Std($volume,5),0.001)),Sign(Corr($close,$volume,2))),If(Greater(Delta($close,1),0),-1,1)))`
+Rank( Delta($vwap,1) / (Std($volume,5)+1e3) * Sign(Corr($close,$volume,2)) * Power(-1,Sign(Delta($close,1))) ) goes long stocks whose VWAP moved sharply on low…
+
+## Hypothesis
+
+Rank( Delta($vwap,1) / (Std($volume,5)+1e3) * Sign(Corr($close,$volume,2)) * Power(-1,Sign(Delta($close,1))) ) goes long stocks whose VWAP moved sharply on low…
+
+## Economic Rationale
+
+Rationale not yet captured.
+
+## Formula / Implementation
+
+**Implementation (Qlib)**: ```Rank(Multiply(Multiply(Divide(Delta($vwap,1),Add(Std($volume,5),0.001)),Sign(Corr($close,$volume,2))),If(Greater(Delta($close,1),0),-1,1)))```
 
 **Math Formula**: R = \text{rank}\left( \frac{v_t - v_{t-1}}{\sigma(V,5)_t + 10^{-3}} \cdot \text{sgn}\left(\rho(C,V,2)_t\right) \cdot (-1)^{\text{sgn}(C_t - C_{t-1})} \right)
 
-**IC / RankIC**: -0.0085 / 0.0000
+## Backtest Evidence
 
-**Effectiveness**: ❌ FAILED
+- **Evidence Level:** `theory`
+- **Status:** `failed`
+- **IC / RankIC:** -0.0085 / 0.0000
+- **Effectiveness:** ✅ effective
 
-**Review Summary**: Factor IC is negative (-0.85 %) and Rank IC is 0, both far below the 2 % threshold; Sharpe is strongly negative (-1.17) and max-drawdown -28.7 %. The signal is not capturing next-day mean-reversion as hypothesized; instead it appears to be betting in the wrong direction or noise dominates.
+## Interpretation
 
-**Suggested Improvements**: 1) Flip the sign of the entire expression to go long positive VWAP shocks on low volume. 2) Replace 1-day forward return with 2-5 day horizon to allow spreads time to normalize. 3) Use rolling z-score of VWAP change relative to 20-day volume volatility instead of raw 5-day std to make the low-volume filter adaptive. 4) Demand |Corr(close,volume,2)| < -0.3 to ensure strong inverse relation, not just sign. 5) Add sector-neutralization and liquidity filter (ADV > 5 M) before ranking to reduce micro-structure noise. 6) Winsorize all inputs at 1-99 % to curb outliers driving the rank.
+Interpretation pending.
+
+## Failure Modes / Risks
+
+- None recorded
+
+## Related Concepts
+
+- [[mean_reversion_family]]
+- [[stat_arb_family]]
+- [[price_volume_data_source]]
+- [[macro_data_source]]
+- [[sector_data_source]]
+- [[market_regime_base]]
+- [[cross_sectional_long_short_execution]]
+- [[threshold_timing_execution]]
+
+## Next Steps
+
+Promote or refine after collecting stronger evidence.

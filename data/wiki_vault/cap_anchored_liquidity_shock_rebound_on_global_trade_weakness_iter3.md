@@ -1,31 +1,76 @@
 ---
 title: "Cap-Anchored Liquidity Shock Rebound on Global Trade Weakness"
 slug: "cap_anchored_liquidity_shock_rebound_on_global_trade_weakness_iter3"
-type: "factor_card"
+type: "experiment_card"
 status: "failed"
 summary: "Go long (short) stocks that have underperformed (outperformed) their sector by >3% over the last 10 days while simultaneously experiencing a 20-day low in doll…"
 updated: "2026-04-14T12:09:25"
 tags: ["基于宏观周期切换的行业中性专家", "ricequant"]
-related: ["strategy_families_base", "market_regime_base"]
-ic: 0.0
-rank_ic: 0.0
-iteration: 3
-is_effective: false
-simulated: false
+related: ["strategy_families_base", "market_regime_base", "stat_arb_family", "volume_divergence_signal", "price_volume_data_source", "macro_data_source", "sector_data_source", "turnover_explosion_risk", "information_coefficient_metric", "rank_ic_metric", "strategy_risk_metrics_reference", "cross_sectional_long_short_execution", "threshold_timing_execution"]
+ic: "0.0"
+rank_ic: "0.0"
+iteration: "3"
+is_effective: "false"
+simulated: "false"
+node_type: "factor_experiment"
+evidence_level: "theory"
+canonical: false
+parents: ["stat_arb_family"]
+depends_on: ["volume_divergence_signal", "price_volume_data_source", "macro_data_source", "sector_data_source", "market_regime_base", "cross_sectional_long_short_execution", "threshold_timing_execution"]
+risk_flags: ["turnover_explosion_risk"]
+metrics_ref: ["information_coefficient_metric", "rank_ic_metric", "strategy_risk_metrics_reference"]
+strategy_family: ["stat_arb_family"]
+data_sources: ["price_volume_data_source", "macro_data_source", "sector_data_source"]
+market_regimes: ["market_regime_base"]
+execution_patterns: ["cross_sectional_long_short_execution", "threshold_timing_execution"]
+related_experiments: []
 ---
 
-**Hypothesis**: Go long (short) stocks that have underperformed (outperformed) their sector by >3% over the last 10 days while simultaneously experiencing a 20-day low in dollar-volume but only among the top-tercile market-cap names; sign flipped so positive weights to beaten-down large caps with drying liquidity.
+# Cap-Anchored Liquidity Shock Rebound on Global Trade Weakness
 
-**Rationale**: May-13 trade data showed both China exports & US retail sales miss, reinforcing a synchronized global slowdown. Mega-caps with the deepest liquidity pools were used as funding sources during the risk-off, leaving them oversold on thin volume. When macro gloom is fully baked in, the first buyers return to the most liquid, hardest-hit large names; micro/small caps remain orphaned. Sector-neutral cross-sectional rank keeps beta flat, while the 20-day volume low filter isolates liquidity shock rather than chronic decline.
+## Summary
 
-**Implementation (Qlib)**: `If(And(CSRank($close*$volume)>=0.6667,$volume==Ref($volume,19-Ts_ArgMin($volume,19))),Sign(-(Sum($close/Ref($close,10)-1,10)/Sum($close/Ref($close,10)-1,10)-1)-0.03),0)`
+Go long (short) stocks that have underperformed (outperformed) their sector by >3% over the last 10 days while simultaneously experiencing a 20-day low in doll…
+
+## Hypothesis
+
+Go long (short) stocks that have underperformed (outperformed) their sector by >3% over the last 10 days while simultaneously experiencing a 20-day low in doll…
+
+## Economic Rationale
+
+Rationale not yet captured.
+
+## Formula / Implementation
+
+**Implementation (Qlib)**: ```If(And(CSRank($close*$volume)>=0.6667,$volume==Ref($volume,19-Ts_ArgMin($volume,19))),Sign(-(Sum($close/Ref($close,10)-1,10)/Sum($close/Ref($close,10)-1,10)-1)-0.03),0)```
 
 **Math Formula**: w_{i,t}=\mathbb{1}_{\text{top-tercile}(\text{Mcap}_{i,t})}\cdot\text{sign}\left(-\left(\frac{r_{i,t-10:t}}{r_{\text{sector}(i),t-10:t}}-1\right)-0.03\right)\cdot\mathbb{1}_{\left\{DVol_{i,t}=\min_{\tau\in[t-19,t]}DVol_{i,\tau}\right\}}
 
-**IC / RankIC**: 0.0000 / 0.0000
+## Backtest Evidence
 
-**Effectiveness**: ❌ FAILED
+- **Evidence Level:** `theory`
+- **Status:** `failed`
+- **IC / RankIC:** 0.0000 / 0.0000
+- **Effectiveness:** ✅ effective
 
-**Review Summary**: Factor shows zero IC, Rank IC, RRE and Sharpe, indicating no predictive power; the 20-day low dollar-volume filter is too restrictive, collapsing the universe to a handful of stocks and producing flat weights; the sector-relative return z-score construction is circular and always zero, nullifying the intended signal; top-tercile market-cap condition is redundant after liquidity filter; sign flip is applied to a constant zero series.
+## Interpretation
 
-**Suggested Improvements**: Replace the circular z-score with plain 10-day sector-relative return; relax 20-day low volume to 20-day bottom-quintile or 5-day average < 20-day average; add minimum daily dollar-volume threshold instead of exact low; test 5,10,15-day lookbacks for liquidity trough; verify sector neutrality by ranking within sectors then z-score across; try inverse liquidity percentile rather than binary flag to preserve breadth; add turnover penalty and liquidity smoothing to reduce transaction costs.
+Interpretation pending.
+
+## Failure Modes / Risks
+
+- [[turnover_explosion_risk]]
+
+## Related Concepts
+
+- [[stat_arb_family]]
+- [[price_volume_data_source]]
+- [[macro_data_source]]
+- [[sector_data_source]]
+- [[market_regime_base]]
+- [[cross_sectional_long_short_execution]]
+- [[threshold_timing_execution]]
+
+## Next Steps
+
+Promote or refine after collecting stronger evidence.

@@ -110,7 +110,8 @@ class RiceQuantEval:
         daily_normalize: bool = True,
         engine: str = "pandas",
         noise_level: float = 0.0,
-        output_dir: str = "results/reports"
+        output_dir: str = "results/reports",
+        skip_auth: bool = False,
     ):
         self.factor_expressions = factor_expressions
         self.weights = weights if weights else [1.0] * len(factor_expressions)
@@ -133,7 +134,8 @@ class RiceQuantEval:
         self.plot_paths = {}
 
         self._configure_matplotlib()
-        init_rq_auth()
+        if not skip_auth:
+            init_rq_auth()
 
     def _configure_matplotlib(self):
         preferred_fonts = ["Microsoft YaHei", "SimHei", "Arial Unicode MS"]

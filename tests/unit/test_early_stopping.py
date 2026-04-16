@@ -39,12 +39,12 @@ class TestEarlyStopping(unittest.TestCase):
         )
 
     def test_patience_exhausted_early_stop(self):
-        # 测试耐心耗尽早停 (patience >= 3)
+        # 测试耐心耗尽早停 (patience >= 4)
         state: AlphaMinerState = {
             "iteration": 5,
             "max_iterations": 10,
             "backtest_metrics": {"information_coefficient": 0.01},
-            "patience_counter": 3,
+            "patience_counter": 4,
         }
         next_node = route_after_wiki(state)
         self.assertEqual(

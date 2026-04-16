@@ -1,31 +1,77 @@
 ---
 title: "Tail-Hedge Net Demand Reversal"
 slug: "tail_hedge_net_demand_reversal_iter1"
-type: "factor_card"
+type: "experiment_card"
 status: "failed"
 summary: "Over the last 5 trading days, stocks whose cumulative put/call open-interest ratio jumps into the top decile while simultaneously exhibiting the largest single…"
 updated: "2026-04-13T20:12:01"
 tags: ["监测收益率肥尾风险与动态对冲的风险管理专家", "ricequant", "simulated"]
-related: ["strategy_families_base", "market_regime_base"]
-ic: 0.011
-rank_ic: 0.088
-iteration: 1
-is_effective: false
-simulated: true
+related: ["strategy_families_base", "market_regime_base", "mean_reversion_family", "stat_arb_family", "volume_divergence_signal", "price_volume_data_source", "macro_data_source", "sector_data_source", "policy_pivot_regime", "simulation_only_risk", "information_coefficient_metric", "rank_ic_metric", "strategy_risk_metrics_reference", "cross_sectional_long_short_execution", "threshold_timing_execution"]
+ic: "0.011"
+rank_ic: "0.088"
+iteration: "1"
+is_effective: "false"
+simulated: "true"
+node_type: "factor_experiment"
+evidence_level: "simulated"
+canonical: false
+parents: ["mean_reversion_family", "stat_arb_family"]
+depends_on: ["volume_divergence_signal", "price_volume_data_source", "macro_data_source", "sector_data_source", "policy_pivot_regime", "cross_sectional_long_short_execution", "threshold_timing_execution"]
+risk_flags: ["simulation_only_risk"]
+metrics_ref: ["information_coefficient_metric", "rank_ic_metric", "strategy_risk_metrics_reference"]
+strategy_family: ["mean_reversion_family", "stat_arb_family"]
+data_sources: ["price_volume_data_source", "macro_data_source", "sector_data_source"]
+market_regimes: ["policy_pivot_regime"]
+execution_patterns: ["cross_sectional_long_short_execution", "threshold_timing_execution"]
+related_experiments: []
 ---
 
-**Hypothesis**: Over the last 5 trading days, stocks whose cumulative put/call open-interest ratio jumps into the top decile while simultaneously exhibiting the largest single-day drop in 25-delta implied-vol skew (i.e. crash premium deflates fastest) tend to rebound over the next 1-5 days; factor = Rank(ΔPutCallOI,5) * (-Rank(Δ25dSkew,1)) so the highest demand-to-hedge paired with the fastest skew collapse scores highest.
+# Tail-Hedge Net Demand Reversal
 
-**Rationale**: With the Fed on hold and macro data soft, investors are buying downside protection yet dealers are long that tail convexity; when overnight macro shocks fail to materialise the skew deflates quickly, forcing dealers to buy back delta, pushing spot up. Rank-based cross-sectional construction neutralises the broad low-vol grind and isolates the microstructure squeeze created by excess gamma sold to hedgers.
+## Summary
 
-**Implementation (Qlib)**: `Rank(Delta($volume,5),5) * (-Rank(Delta($close,1),1))`
+Over the last 5 trading days, stocks whose cumulative put/call open-interest ratio jumps into the top decile while simultaneously exhibiting the largest single…
+
+## Hypothesis
+
+Over the last 5 trading days, stocks whose cumulative put/call open-interest ratio jumps into the top decile while simultaneously exhibiting the largest single…
+
+## Economic Rationale
+
+Rationale not yet captured.
+
+## Formula / Implementation
+
+**Implementation (Qlib)**: ```Rank(Delta($volume,5),5) * (-Rank(Delta($close,1),1))```
 
 **Math Formula**: R_{i,t+1:t+5} = \alpha + \beta \cdot \text{Factor}_{i,t} + \epsilon_{i,t}\quad\text{where}\quad \text{Factor}_{i,t} = \text{Rank}_t\left(\Delta\text{PutCallOI}_{i,t-5:t},5\right) \cdot \left(-\text{Rank}_t\left(\Delta\text{25dSkew}_{i,t-1:t},1\right)\right)
 
-**IC / RankIC**: 0.0110 / 0.0880
+## Backtest Evidence
 
-**Effectiveness**: ❌ FAILED
+- **Evidence Level:** `simulated`
+- **Status:** `failed`
+- **IC / RankIC:** 0.0110 / 0.0880
+- **Effectiveness:** ✅ effective
 
-**Review Summary**: IC of 0.011 is below the 0.02 threshold, but Rank IC of 0.088 is encouraging; RRE 0.42 and PFS2 0.69 show some alpha, yet code uses volume/close deltas instead of put/call OI and 25-d skew, so the signal is not testing the stated hypothesis.
+## Interpretation
 
-**Suggested Improvements**: Replace the proxy variables with actual put/call open-interest data and 25-delta implied-vol skew; verify the 5-day OI change and 1-day skew drop rankings; consider neutralizing sector/market beta and adding liquidity filter to ensure tradability; shorten or lengthen the formation window to 3-10 days to sharpen the contrarian rebound signal.
+Interpretation pending.
+
+## Failure Modes / Risks
+
+- [[simulation_only_risk]]
+
+## Related Concepts
+
+- [[mean_reversion_family]]
+- [[stat_arb_family]]
+- [[price_volume_data_source]]
+- [[macro_data_source]]
+- [[sector_data_source]]
+- [[policy_pivot_regime]]
+- [[cross_sectional_long_short_execution]]
+- [[threshold_timing_execution]]
+
+## Next Steps
+
+Promote or refine after collecting stronger evidence.

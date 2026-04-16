@@ -1,22 +1,75 @@
 ---
 title: "Liquidity-Adjusted Intraday Momentum Reversal"
 slug: "liquidity_adjusted_intraday_momentum_reversal_iter1"
-type: "factor_card"
+type: "experiment_card"
 status: "failed"
 summary: "Hypothesis: Stocks whose intraday closing strength (Close-Low)/(High-Low) is high but accompanied by declining liquidity rank over the last…"
 updated: "2026-04-13T13:52:06.400729"
 tags: []
-related: ["strategy_families_base"]
+related: ["strategy_families_base", "mean_reversion_family", "momentum_family", "stat_arb_family", "volume_divergence_signal", "price_volume_data_source", "sector_data_source", "market_regime_base", "information_coefficient_metric", "rank_ic_metric", "strategy_risk_metrics_reference", "cross_sectional_long_short_execution", "threshold_timing_execution"]
+node_type: "factor_experiment"
+evidence_level: "theory"
+canonical: false
+parents: ["mean_reversion_family", "momentum_family", "stat_arb_family"]
+depends_on: ["volume_divergence_signal", "price_volume_data_source", "sector_data_source", "market_regime_base", "cross_sectional_long_short_execution", "threshold_timing_execution"]
+risk_flags: []
+metrics_ref: ["information_coefficient_metric", "rank_ic_metric", "strategy_risk_metrics_reference"]
+strategy_family: ["mean_reversion_family", "momentum_family", "stat_arb_family"]
+data_sources: ["price_volume_data_source", "sector_data_source"]
+market_regimes: ["market_regime_base"]
+execution_patterns: ["cross_sectional_long_short_execution", "threshold_timing_execution"]
+related_experiments: []
 ---
 
-**Hypothesis**: Stocks whose intraday closing strength (Close-Low)/(High-Low) is high but accompanied by declining liquidity rank over the last 3 days tend to reverse next-day; factor = Rank(CloseStrength) * (-Rank(Delta(Volume,3))) where negative delta means volume shrinkage.
-**Rationale**: Central-bank caution keeps rates steady, curbing broad risk appetite; in this low-vol grind, crowded intraday winners with waning volume are prone to profit-taking. GTJA shows (Close-Low)/(High-Low) captures buying climax, while Gu-Kelly proves liquidity contraction predicts reversals. Cross-sectional ranking neutralizes market drift, letting the factor isolate microstructure exhaustion.
-**Implementation (Qlib)**: `Rank(($close - $low) / ($high - $low)) * (-Rank($volume - Ref($volume, 3)))`
+# Liquidity-Adjusted Intraday Momentum Reversal
+
+## Summary
+
+Hypothesis: Stocks whose intraday closing strength (Close-Low)/(High-Low) is high but accompanied by declining liquidity rank over the last…
+
+## Hypothesis
+
+Hypothesis: Stocks whose intraday closing strength (Close-Low)/(High-Low) is high but accompanied by declining liquidity rank over the last…
+
+## Economic Rationale
+
+Rationale not yet captured.
+
+## Formula / Implementation
+
+**Implementation (Qlib)**: ```Rank(($close - $low) / ($high - $low)) * (-Rank($volume - Ref($volume, 3)))```
+
 **Math Formula**: \text{Factor}_{i,t}=\text{Rank}_{\text{cross}}
 \left(\frac{C_{i,t}-L_{i,t}}{H_{i,t}-L_{i,t}}\right)
 \times
 \left(-\text{Rank}_{\text{cross}}\left(V_{i,t}-V_{i,t-3}\right)\right)
-**IC / RankIC**: 0.0024 / 0.0263
-**Effectiveness**: ❌ FAILED
-**Review Summary**: IC (0.0024) far below 0.02 threshold; negative Sharpe (-0.86) and deep drawdown (-49%) confirm reversal signal is not captured. Factor construction double-ranks same-direction variables, muting the intended contrarian liquidity interaction. Zero PFS/Diversity indicates no portfolio utility.
-**Suggested Improvements**: Replace double-rank with z-score standardization; use signed volume change (ΔVol/Vol) instead of raw delta; add sector-neutralization and 20-day liquidity percentile filter; test holding periods 2-5 days; consider intraday version using 5-min close strength to reduce noise.
+
+## Backtest Evidence
+
+- **Evidence Level:** `theory`
+- **Status:** `failed`
+- **IC / RankIC:** 0.0000 / 0.0000
+- **Effectiveness:** ❌ not validated
+
+## Interpretation
+
+Interpretation pending.
+
+## Failure Modes / Risks
+
+- None recorded
+
+## Related Concepts
+
+- [[mean_reversion_family]]
+- [[momentum_family]]
+- [[stat_arb_family]]
+- [[price_volume_data_source]]
+- [[sector_data_source]]
+- [[market_regime_base]]
+- [[cross_sectional_long_short_execution]]
+- [[threshold_timing_execution]]
+
+## Next Steps
+
+Promote or refine after collecting stronger evidence.

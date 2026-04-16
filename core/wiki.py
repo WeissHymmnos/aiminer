@@ -76,6 +76,162 @@ def _dump_frontmatter(meta: Dict[str, Any]) -> str:
 
 _WIKILINK_RE = re.compile(r"\[\[([A-Za-z0-9_\-]+)\]\]")
 
+GRAPH_NODE_TYPES = {
+    "strategy_family",
+    "signal_primitive",
+    "market_regime",
+    "data_source",
+    "risk_pattern",
+    "evaluation_metric",
+    "execution_pattern",
+    "experiment_card",
+}
+
+LEGACY_TYPE_MAP = {
+    "factor_card": "experiment_card",
+    "market_profile": "market_regime",
+    "technical_ref": "signal_primitive",
+}
+
+EVIDENCE_LEVELS = {"baseline", "theory", "simulated", "validated", "production"}
+TAXONOMY_SLUGS = {
+    "strategy_family": "taxonomy_strategy_families",
+    "signal_primitive": "taxonomy_signal_primitives",
+    "market_regime": "taxonomy_market_regimes",
+    "data_source": "taxonomy_data_sources",
+    "risk_pattern": "taxonomy_risk_patterns",
+    "evaluation_metric": "taxonomy_evaluation_metrics",
+    "execution_pattern": "taxonomy_execution_patterns",
+    "experiment_card": "taxonomy_experiment_cards",
+}
+
+CONCEPT_LIBRARY = {
+    "strategy_family": {
+        "mean_reversion_family": {
+            "title": "Mean Reversion Family",
+            "summary": "Signals that exploit temporary dislocations and convergence back toward equilibrium or fair anchors.",
+            "body": "## Definition\n\nMean reversion strategies buy temporary dislocations that are expected to normalize.\n\n## Typical Inputs\n\n- Short-horizon returns\n- VWAP deviation\n- Liquidity imbalance\n- Residual spreads\n\n## Common Failure Modes\n\n- Structural breaks\n- Fundamental repricing\n- Liquidity vacuum persistence\n",
+        },
+        "momentum_family": {
+            "title": "Momentum Family",
+            "summary": "Signals that extrapolate persistent trends or cross-sectional relative strength over a holding horizon.",
+            "body": "## Definition\n\nMomentum strategies assume return persistence across time or across assets.\n\n## Typical Inputs\n\n- Multi-horizon returns\n- Volume confirmation\n- Trend filters\n- Regime persistence\n\n## Common Failure Modes\n\n- Violent reversal regimes\n- Crowding\n- Over-extended trend exhaustion\n",
+        },
+        "stat_arb_family": {
+            "title": "Statistical Arbitrage Family",
+            "summary": "Signals that exploit residual mispricing, cross-sectional dispersion, or co-movement breakdowns.",
+            "body": "## Definition\n\nStat-arb strategies lean on relative value, residual convergence, and diversification across many small opportunities.\n\n## Typical Inputs\n\n- Cross-sectional ranks\n- Residual spreads\n- Sector-neutral returns\n- Correlation and covariance structure\n\n## Common Failure Modes\n\n- Correlation regime break\n- Cost drag from turnover\n- Hidden factor crowding\n",
+        },
+    },
+    "signal_primitive": {
+        "volume_divergence_signal": {
+            "title": "Volume Divergence Signal Primitive",
+            "summary": "Captures disagreement between price move magnitude and the quality or direction of accompanying volume.",
+            "body": "## Definition\n\nVolume divergence signals look for price moves that are poorly confirmed by trading activity.\n\n## Typical Expressions\n\n- Price change scaled by rolling volume\n- Correlation between ranked price and ranked volume\n- Volume shock without confirming trend persistence\n",
+        },
+        "vwap_anchor_signal": {
+            "title": "VWAP Anchor Signal Primitive",
+            "summary": "Uses VWAP as an intraday or short-horizon fair-value anchor for reversals and continuation filters.",
+            "body": "## Definition\n\nVWAP-anchor signals treat VWAP as a reference for execution pressure and mean reversion.\n\n## Typical Expressions\n\n- Close-to-VWAP deviation\n- VWAP slope or basis\n- Return strength conditional on VWAP distance\n",
+        },
+        "hurst_filter_signal": {
+            "title": "Hurst Filter Signal Primitive",
+            "summary": "Uses Hurst or persistence proxies to gate whether a signal should be interpreted as trend or reversion.",
+            "body": "## Definition\n\nHurst-based filters classify when local price dynamics are persistent versus mean-reverting.\n\n## Typical Expressions\n\n- (1 - Hurst) reversion gates\n- Hurst-scaled return shocks\n- Hurst-conditioned liquidity signals\n",
+        },
+        "qlib_operator_guide": {
+            "title": "Qlib Operator & Formula Reference",
+            "summary": "Reference page for formula syntax and operator semantics used by the expression engine.",
+            "body": "## Purpose\n\nCanonical operator semantics for expression generation, validation, and debugging.\n",
+        },
+    },
+    "market_regime": {
+        "market_regime_base": {
+            "title": "Market Regime & Universe Baseline",
+            "summary": "Baseline page for universe selection and regime labelling assumptions.",
+            "body": "## Role\n\nDefines universe and regime state before modelling begins.\n",
+        },
+        "high_volatility_regime": {
+            "title": "High Volatility Regime",
+            "summary": "Periods where realized or implied volatility is elevated and liquidity thins materially.",
+            "body": "## Definition\n\nHigh-volatility regimes often amplify reversal, liquidity and execution effects while degrading naive trend extrapolation.\n",
+        },
+        "policy_pivot_regime": {
+            "title": "Policy Pivot Regime",
+            "summary": "Regime where central bank stance shifts or is perceived to shift, causing cross-asset repricing.",
+            "body": "## Definition\n\nPolicy pivot regimes matter for sector rotation, inflation-beta reversal and macro-sensitive signals.\n",
+        },
+    },
+    "data_source": {
+        "price_volume_data_source": {
+            "title": "Price and Volume Data Source",
+            "summary": "Daily OHLCV and derived intraday anchors such as VWAP form the base layer for most experiments.",
+            "body": "## Included Fields\n\n- $open\n- $high\n- $low\n- $close\n- $volume\n- $vwap\n",
+        },
+        "macro_data_source": {
+            "title": "Macro Data Source",
+            "summary": "Macro indicators and rate/inflation proxies used to contextualize or modulate factor signals.",
+            "body": "## Examples\n\n- inflation expectations\n- yield moves\n- policy surprises\n- trade and growth indicators\n",
+        },
+        "sector_data_source": {
+            "title": "Sector and Cross-Sectional Aggregate Data Source",
+            "summary": "Sector-level returns, realized volatility, and peer aggregates used for neutralization and cross-sectional context.",
+            "body": "## Examples\n\n- sector return\n- sector realized volatility\n- sector-relative ranking\n",
+        },
+    },
+    "risk_pattern": {
+        "simulation_only_risk": {
+            "title": "Simulation-Only Evidence Risk",
+            "summary": "Results that appear promising but only exist on simulated or fallback metrics.",
+            "body": "## Definition\n\nSimulated evidence should not be mixed with validated empirical evidence when prioritizing signals.\n",
+        },
+        "implementation_drift_risk": {
+            "title": "Implementation Drift Risk",
+            "summary": "The implemented expression deviates materially from the economic hypothesis or math formula.",
+            "body": "## Definition\n\nImplementation drift is present when the code uses different fields, windows or operators than the stated hypothesis.\n",
+        },
+        "turnover_explosion_risk": {
+            "title": "Turnover Explosion Risk",
+            "summary": "A strategy's gross alpha is overwhelmed by trading costs due to unstable or excessively reactive signals.",
+            "body": "## Definition\n\nTurnover explosion typically arises from threshold jitter, unstable ranks, or unbounded execution frequency.\n",
+        },
+    },
+    "evaluation_metric": {
+        "information_coefficient_metric": {
+            "title": "Information Coefficient Reference",
+            "summary": "Defines IC and its interpretation in factor research.",
+            "body": "## Definition\n\nIC measures cross-sectional correlation between factor values and next-period returns.\n",
+        },
+        "rank_ic_metric": {
+            "title": "Rank IC Reference",
+            "summary": "Defines Rank IC and when it is preferable to raw IC.",
+            "body": "## Definition\n\nRank IC focuses on ordinal monotonicity rather than linear magnitude.\n",
+        },
+        "strategy_risk_metrics_reference": {
+            "title": "Strategy Risk Metrics Reference",
+            "summary": "Reference for Sharpe, max drawdown, turnover and cost drag used in strategy evaluation.",
+            "body": "## Included Metrics\n\n- Sharpe\n- Max Drawdown\n- Turnover\n- Cost Drag\n- Annualized Return\n",
+        },
+    },
+    "execution_pattern": {
+        "cross_sectional_long_short_execution": {
+            "title": "Cross-Sectional Long-Short Execution Pattern",
+            "summary": "Portfolio construction pattern that ranks a universe and takes balanced long/short exposure.",
+            "body": "## Pattern\n\nRank the cross-section, buy the strongest signals, short the weakest, normalize exposure, and rebalance on a fixed schedule.\n",
+        },
+        "long_only_selection_execution": {
+            "title": "Long-Only Selection Execution Pattern",
+            "summary": "Pattern that holds only the highest conviction longs and leaves the rest uninvested.",
+            "body": "## Pattern\n\nSelect the top tail of the ranked universe and size positions under weight and count constraints.\n",
+        },
+        "threshold_timing_execution": {
+            "title": "Threshold Timing Execution Pattern",
+            "summary": "Pattern that opens and closes positions when a signal crosses defined thresholds.",
+            "body": "## Pattern\n\nUse long, short and exit thresholds to translate a continuous signal into trading states.\n",
+        },
+    },
+}
+
 
 class LLMWiki:
     def __init__(self, db_dir: str = "data/wiki_db", wiki_vault: str = "data/wiki_vault", embedding_provider: str = None):
@@ -157,6 +313,259 @@ class LLMWiki:
             "llm_wiki", embedding_function=self.embedding_fn
         )
 
+    def _canonical_type(self, page_type: str) -> str:
+        return LEGACY_TYPE_MAP.get(page_type, page_type)
+
+    def _scan_pages(self, include_system: bool = False) -> Dict[str, Dict[str, Any]]:
+        exclude = set() if include_system else {"index.md", "log.md"}
+        pages: Dict[str, Dict[str, Any]] = {}
+        for fn in sorted(os.listdir(self.wiki_vault)):
+            if not fn.endswith(".md") or fn in exclude:
+                continue
+            path = os.path.join(self.wiki_vault, fn)
+            if not os.path.isfile(path):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    raw = f.read()
+            except Exception:
+                continue
+            meta, body = _parse_frontmatter(raw)
+            slug = fn[:-3]
+            meta["type"] = self._canonical_type(meta.get("type", "experiment_card"))
+            pages[slug] = {"slug": slug, "path": path, "meta": meta, "body": body}
+        return pages
+
+    def _ensure_graph_pages(self):
+        for node_type, concepts in CONCEPT_LIBRARY.items():
+            for slug, spec in concepts.items():
+                path = os.path.join(self.wiki_vault, f"{slug}.md")
+                if os.path.exists(path):
+                    continue
+                self.add_or_update_page(
+                    slug=slug,
+                    title=spec["title"],
+                    content=spec["body"],
+                    metadata={
+                        "type": node_type,
+                        "node_type": node_type,
+                        "status": "active",
+                        "evidence_level": "baseline" if node_type != "experiment_card" else "theory",
+                        "summary": spec["summary"],
+                        "canonical": True,
+                        "parents": [],
+                        "depends_on": [],
+                        "risk_flags": [],
+                        "metrics_ref": [],
+                        "related": [],
+                    },
+                )
+
+    @staticmethod
+    def _slugify(value: str) -> str:
+        return re.sub(r"[^a-z0-9_]+", "_", value.lower()).strip("_")
+
+    def _extract_experiment_sections(self, body: str) -> Dict[str, str]:
+        labels = [
+            "Hypothesis",
+            "Rationale",
+            "Implementation (Qlib)",
+            "Math Formula",
+            "IC / RankIC",
+            "Effectiveness",
+            "Review Summary",
+            "Suggested Improvements",
+        ]
+        sections: Dict[str, str] = {}
+        for label in labels:
+            match = re.search(
+                rf"\*\*{re.escape(label)}\*\*:\s*(.*?)(?=\n\*\*|\n## |\Z)",
+                body,
+                re.DOTALL,
+            )
+            sections[label] = match.group(1).strip() if match else ""
+        return sections
+
+    def _infer_graph_metadata(
+        self, slug: str, meta: Dict[str, Any], body: str, sections: Dict[str, str]
+    ) -> Dict[str, Any]:
+        text = " ".join(
+            [
+                slug,
+                meta.get("title", ""),
+                meta.get("summary", ""),
+                body,
+                sections.get("Implementation (Qlib)", ""),
+                sections.get("Rationale", ""),
+                sections.get("Review Summary", ""),
+                sections.get("Suggested Improvements", ""),
+            ]
+        ).lower()
+
+        families = []
+        if any(k in text for k in ["reversion", "mean-reversion", "reversal"]):
+            families.append("mean_reversion_family")
+        if any(k in text for k in ["momentum", "trend"]):
+            families.append("momentum_family")
+        if any(k in text for k in ["cross-sectional", "stat-arb", "sector-neutral", "residual"]):
+            families.append("stat_arb_family")
+        if not families:
+            families.append("stat_arb_family")
+
+        primitives = []
+        if any(k in text for k in ["volume", "liquidity", "order-flow"]):
+            primitives.append("volume_divergence_signal")
+        if "vwap" in text:
+            primitives.append("vwap_anchor_signal")
+        if "hurst" in text:
+            primitives.append("hurst_filter_signal")
+
+        data_sources = ["price_volume_data_source"]
+        if any(k in text for k in ["inflation", "fed", "macro", "yield", "trade", "ppi"]):
+            data_sources.append("macro_data_source")
+        if any(k in text for k in ["sector", "industry", "cross-sectional"]):
+            data_sources.append("sector_data_source")
+
+        regimes = []
+        if any(k in text for k in ["high-vol", "high volatility", "bearish", "bear regime"]):
+            regimes.append("high_volatility_regime")
+        if any(k in text for k in ["pivot", "fed", "policy"]):
+            regimes.append("policy_pivot_regime")
+        if not regimes:
+            regimes.append("market_regime_base")
+
+        risk_flags = []
+        if str(meta.get("simulated", "")).lower() in {"true", "1", "yes"} or "simulated" in text:
+            risk_flags.append("simulation_only_risk")
+        if "deviates from hypothesis" in text or "mismatch" in text or "implementation drift" in text:
+            risk_flags.append("implementation_drift_risk")
+        if "turnover" in text or "cost" in text:
+            risk_flags.append("turnover_explosion_risk")
+
+        metrics_ref = ["information_coefficient_metric", "rank_ic_metric"]
+        if any(k in text for k in ["sharpe", "drawdown", "turnover", "cost drag"]):
+            metrics_ref.append("strategy_risk_metrics_reference")
+
+        execution_patterns = []
+        impl = sections.get("Implementation (Qlib)", "").lower()
+        if "rank(" in impl or "csrank" in impl:
+            execution_patterns.append("cross_sectional_long_short_execution")
+        if "threshold" in text:
+            execution_patterns.append("threshold_timing_execution")
+        if "long-only" in text or "long only" in text:
+            execution_patterns.append("long_only_selection_execution")
+        if not execution_patterns:
+            execution_patterns.append("cross_sectional_long_short_execution")
+
+        evidence_level = meta.get("evidence_level")
+        if not evidence_level:
+            if str(meta.get("simulated", "")).lower() in {"true", "1", "yes"}:
+                evidence_level = "simulated"
+            elif str(meta.get("is_effective", "")).lower() in {"true", "1", "yes"}:
+                evidence_level = "validated"
+            else:
+                evidence_level = "theory"
+
+        status = meta.get("status", "candidate")
+        if status == "proven":
+            status = "active"
+        elif status in {"failed", "deprecated", "baseline"}:
+            status = {"failed": "failed", "deprecated": "deprecated", "baseline": "active"}[status]
+        elif status == "draft":
+            status = "candidate"
+
+        return {
+            "type": "experiment_card",
+            "node_type": meta.get("node_type", "factor_experiment"),
+            "evidence_level": evidence_level,
+            "status": status,
+            "canonical": False,
+            "parents": list(dict.fromkeys(families)),
+            "depends_on": list(dict.fromkeys(primitives + data_sources + regimes + execution_patterns)),
+            "risk_flags": list(dict.fromkeys(risk_flags)),
+            "metrics_ref": list(dict.fromkeys(metrics_ref)),
+            "strategy_family": list(dict.fromkeys(families)),
+            "data_sources": list(dict.fromkeys(data_sources)),
+            "market_regimes": list(dict.fromkeys(regimes)),
+            "execution_patterns": list(dict.fromkeys(execution_patterns)),
+            "related_experiments": [],
+            "related": list(
+                dict.fromkeys(
+                    (meta.get("related") or [])
+                    + families
+                    + primitives
+                    + data_sources
+                    + regimes
+                    + risk_flags
+                    + metrics_ref
+                    + execution_patterns
+                )
+            ),
+        }
+
+    def _render_experiment_card(self, title: str, meta: Dict[str, Any], sections: Dict[str, str]) -> str:
+        summary = meta.get("summary") or sections.get("Hypothesis") or title
+        implementation = sections.get("Implementation (Qlib)") or "N/A"
+        metrics_line = sections.get("IC / RankIC") or (
+            f"{float(meta.get('ic') or 0.0):.4f} / {float(meta.get('rank_ic') or 0.0):.4f}"
+        )
+        related_concepts = []
+        for key in ("strategy_family", "data_sources", "market_regimes", "execution_patterns"):
+            for slug in meta.get(key, []) or []:
+                related_concepts.append(f"- [[{slug}]]")
+        if not related_concepts:
+            related_concepts.append("- [[strategy_families_base]]")
+
+        risk_lines = [f"- [[{slug}]]" for slug in meta.get("risk_flags", [])] or ["- None recorded"]
+        next_steps = sections.get("Suggested Improvements") or "Promote or refine after collecting stronger evidence."
+
+        return "\n".join(
+            [
+                f"# {title}",
+                "",
+                "## Summary",
+                "",
+                summary,
+                "",
+                "## Hypothesis",
+                "",
+                sections.get("Hypothesis") or summary,
+                "",
+                "## Economic Rationale",
+                "",
+                sections.get("Rationale") or "Rationale not yet captured.",
+                "",
+                "## Formula / Implementation",
+                "",
+                f"**Implementation (Qlib)**: `{implementation}`",
+                "",
+                sections.get("Math Formula") and f"**Math Formula**: {sections.get('Math Formula')}" or "",
+                "",
+                "## Backtest Evidence",
+                "",
+                f"- **Evidence Level:** `{meta.get('evidence_level', 'theory')}`",
+                f"- **Status:** `{meta.get('status', 'candidate')}`",
+                f"- **IC / RankIC:** {metrics_line}",
+                f"- **Effectiveness:** {sections.get('Effectiveness') or ('✅ effective' if meta.get('is_effective') else '❌ not validated')}",
+                "",
+                "## Interpretation",
+                "",
+                sections.get("Review Summary") or "Interpretation pending.",
+                "",
+                "## Failure Modes / Risks",
+                "",
+                *risk_lines,
+                "",
+                "## Related Concepts",
+                "",
+                *related_concepts,
+                "",
+                "## Next Steps",
+                "",
+                next_steps,
+            ]
+        ).replace("\n\n\n", "\n\n").strip() + "\n"
+
     def list_pages(self, type_filter: Optional[str] = None) -> List[Dict[str, Any]]:
         """List all pages in the wiki."""
         where = {"type": type_filter} if type_filter else None
@@ -232,11 +641,16 @@ class LLMWiki:
             "tags_str": ",".join(full_meta["tags"]),
             "related_str": ",".join(full_meta["related"]),
         }
-        self.wiki_col.upsert(
-            ids=[page_id],
-            documents=[f"# {title}\n\n{full_meta['summary']}\n\n{content}"],
-            metadatas=[chroma_meta],
-        )
+        try:
+            self.wiki_col.upsert(
+                ids=[page_id],
+                documents=[f"# {title}\n\n{full_meta['summary']}\n\n{content}"],
+                metadatas=[chroma_meta],
+            )
+        except Exception as e:
+            logger.warning(
+                f"[Wiki] Embedding upsert failed for '{slug}'; filesystem write succeeded but vector index is stale: {e}"
+            )
 
         # 3. Reciprocal backlink audit (Karpathy: LLMs don't mind touching
         #    15 files in one pass — but we can do it programmatically when
@@ -351,64 +765,147 @@ class LLMWiki:
     # ---------------------------------------------------------------
 
     def _recompile_index(self):
-        """Rebuild index.md as a content-oriented catalog — pages are
-        grouped by `type`, sorted by last_updated desc, and each entry
-        shows its one-line summary so agents can navigate without opening
-        every file."""
-        exclude = {"index.md", "log.md"}
+        pages = self._scan_pages()
         entries: List[Dict[str, Any]] = []
-        for fn in os.listdir(self.wiki_vault):
-            if not fn.endswith(".md") or fn in exclude:
-                continue
-            path = os.path.join(self.wiki_vault, fn)
-            if not os.path.isfile(path):
-                continue
-            meta = self._read_page_meta(path)
-            slug = fn[:-3]
-            entries.append({
-                "slug": slug,
-                "title": meta.get("title") or slug.replace("_", " "),
-                "type": meta.get("type") or "uncategorized",
-                "status": meta.get("status") or "",
-                "summary": meta.get("summary") or "",
-                "updated": meta.get("updated") or "",
-            })
+        for slug, page in pages.items():
+            meta = page["meta"]
+            entries.append(
+                {
+                    "slug": slug,
+                    "title": meta.get("title") or slug.replace("_", " "),
+                    "type": meta.get("type") or "uncategorized",
+                    "status": meta.get("status") or "",
+                    "summary": meta.get("summary") or "",
+                    "updated": meta.get("updated") or "",
+                    "evidence_level": meta.get("evidence_level") or "",
+                }
+            )
 
-        # Group by type
         by_type: Dict[str, List[Dict[str, Any]]] = {}
+        by_evidence: Dict[str, List[Dict[str, Any]]] = {}
         for e in entries:
             by_type.setdefault(e["type"], []).append(e)
-        for group in by_type.values():
+            by_evidence.setdefault(e["evidence_level"] or "unspecified", []).append(e)
+        for group in list(by_type.values()) + list(by_evidence.values()):
             group.sort(key=lambda x: x.get("updated") or "", reverse=True)
 
-        # Stable type ordering: baselines first, then factor cards, then rest
         type_order = [
-            "market_profile",
-            "technical_ref",
             "strategy_family",
-            "factor_card",
+            "signal_primitive",
+            "market_regime",
+            "data_source",
+            "risk_pattern",
+            "evaluation_metric",
+            "execution_pattern",
+            "experiment_card",
         ]
-        ordered_types = [t for t in type_order if t in by_type] + sorted(
-            [t for t in by_type if t not in type_order]
-        )
+        evidence_order = ["baseline", "theory", "simulated", "validated", "production", "unspecified"]
 
         lines: List[str] = []
         lines.append("# Wiki Index (Compiled)\n")
         lines.append(
             f"*Last compiled: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')} · "
-            f"{len(entries)} pages across {len(by_type)} categor"
-            f"{'y' if len(by_type) == 1 else 'ies'}*\n"
+            f"{len(entries)} pages across {len(by_type)} node categories*\n"
         )
-        for t in ordered_types:
-            pretty = t.replace("_", " ").title()
-            lines.append(f"\n## {pretty} ({len(by_type[t])})\n")
-            for e in by_type[t]:
-                status = f" · `{e['status']}`" if e["status"] else ""
-                summary = f" — {e['summary']}" if e["summary"] else ""
-                lines.append(f"- [[{e['slug']}]] **{e['title']}**{status}{summary}")
+        lines.append("\n## Browse by Concept\n")
+        for t in [t for t in type_order if t in by_type]:
+            lines.append(f"- [[{TAXONOMY_SLUGS[t]}]] {t.replace('_', ' ').title()} ({len(by_type[t])})")
+
+        lines.append("\n## Browse by Evidence Level\n")
+        for ev in [e for e in evidence_order if e in by_evidence]:
+            lines.append(f"- `{ev}` ({len(by_evidence[ev])})")
+            for item in by_evidence[ev][:8]:
+                lines.append(f"  - [[{item['slug']}]] **{item['title']}**")
+
+        lines.append("\n## Browse by Experiments\n")
+        for item in by_type.get("experiment_card", [])[:40]:
+            lines.append(
+                f"- [[{item['slug']}]] **{item['title']}** · `{item['evidence_level'] or 'unspecified'}` — {item['summary']}"
+            )
 
         with open(self.index_file, "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
+        self._recompile_taxonomy_pages(pages)
+
+    def _recompile_taxonomy_pages(self, pages: Dict[str, Dict[str, Any]]):
+        taxonomy_specs = [
+            ("graph_overview", "Graph Overview", "How the research wiki is organized into concept, evidence, and experiment layers."),
+            ("evidence_levels", "Evidence Levels", "How baseline, theory, simulated, validated, and production evidence should be interpreted."),
+        ]
+        for slug, title, summary in taxonomy_specs:
+            path = os.path.join(self.wiki_vault, f"{slug}.md")
+            content = (
+                "# " + title + "\n\n"
+                "## Role\n\n"
+                + summary
+                + "\n\n## Node Types\n\n- strategy_family\n- signal_primitive\n- market_regime\n- data_source\n- risk_pattern\n- evaluation_metric\n- execution_pattern\n- experiment_card\n"
+            )
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(
+                    _dump_frontmatter(
+                        {
+                            "title": title,
+                            "slug": slug,
+                            "type": "taxonomy",
+                            "status": "active",
+                            "summary": summary,
+                            "updated": datetime.utcnow().isoformat(timespec="seconds"),
+                            "evidence_level": "baseline",
+                            "canonical": True,
+                        }
+                    )
+                )
+                f.write(content)
+
+        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        for slug, page in pages.items():
+            meta = page["meta"]
+            if (meta.get("type") or "uncategorized") == "taxonomy":
+                continue
+            grouped.setdefault(meta.get("type") or "uncategorized", []).append(
+                {
+                    "slug": slug,
+                    "title": meta.get("title", slug),
+                    "summary": meta.get("summary", ""),
+                    "evidence_level": meta.get("evidence_level", ""),
+                    "status": meta.get("status", ""),
+                }
+            )
+
+        for node_type, items in grouped.items():
+            items.sort(key=lambda x: x["title"])
+            slug = TAXONOMY_SLUGS.get(node_type, f"taxonomy_{node_type}s")
+            title = f"Taxonomy: {node_type.replace('_', ' ').title()}"
+            body_lines = [
+                f"# {title}",
+                "",
+                "## Purpose",
+                "",
+                f"This page groups all `{node_type}` nodes and highlights how they relate to the research graph.",
+                "",
+                "## Nodes",
+                "",
+            ]
+            for item in items:
+                body_lines.append(
+                    f"- [[{item['slug']}]] **{item['title']}** · `{item['evidence_level'] or 'unspecified'}` / `{item['status'] or 'n/a'}` — {item['summary']}"
+                )
+            with open(os.path.join(self.wiki_vault, f"{slug}.md"), "w", encoding="utf-8") as f:
+                f.write(
+                    _dump_frontmatter(
+                        {
+                            "title": title,
+                            "slug": slug,
+                            "type": "taxonomy",
+                            "status": "active",
+                            "summary": f"Taxonomy page for {node_type}.",
+                            "updated": datetime.utcnow().isoformat(timespec="seconds"),
+                            "evidence_level": "baseline",
+                            "canonical": True,
+                        }
+                    )
+                )
+                f.write("\n".join(body_lines) + "\n")
 
     # ---------------------------------------------------------------
     # One-shot migration: upgrade legacy pages to the enriched schema
@@ -455,13 +952,13 @@ class LLMWiki:
                 skipped.append(slug)
                 continue
 
-            page_type = meta.get("type") or "factor_card"
+            page_type = self._canonical_type(meta.get("type") or "experiment_card")
             title = meta.get("title") or slug.replace("_", " ").title()
 
             # Infer status
             status = meta.get("status")
             if not status:
-                if page_type in {"market_profile", "technical_ref", "strategy_family"}:
+                if page_type in {"market_regime", "signal_primitive", "strategy_family"}:
                     status = "baseline"
                 elif "✅ EFFECTIVE" in body or "Effectiveness: ✅" in body:
                     status = "proven"
@@ -473,11 +970,11 @@ class LLMWiki:
             # Derive summary if missing
             summary = meta.get("summary") or self._derive_summary(body)
 
-            # Default related: factor cards link back to the strategy family
+            # Default related: experiment cards link back to the strategy family
             # baseline so they are not lint-flagged as orphans.
             related = meta.get("related")
             if not related:
-                related = ["strategy_families_base"] if page_type == "factor_card" else []
+                related = ["strategy_families_base"] if page_type == "experiment_card" else []
 
             tags = meta.get("tags") or []
             updated = meta.get("updated") or datetime.utcnow().isoformat(timespec="seconds")
@@ -532,6 +1029,59 @@ class LLMWiki:
             "skipped": skipped,
             "dry_run": dry_run,
         }
+
+    def upgrade_to_graph_schema(self, dry_run: bool = False) -> Dict[str, Any]:
+        self._ensure_graph_pages()
+        pages = self._scan_pages()
+        upgraded: List[str] = []
+        skipped: List[str] = []
+        for slug, page in pages.items():
+            if slug in {"index", "log"} or slug.startswith("taxonomy_") or slug in {"graph_overview", "evidence_levels"}:
+                skipped.append(slug)
+                continue
+            meta = page["meta"].copy()
+            body = page["body"]
+            page_type = self._canonical_type(meta.get("type", "experiment_card"))
+            title = meta.get("title") or slug.replace("_", " ").title()
+
+            if page_type in GRAPH_NODE_TYPES - {"experiment_card"}:
+                meta["type"] = page_type
+                meta.setdefault("node_type", page_type)
+                meta.setdefault("evidence_level", "baseline")
+                meta.setdefault("status", "active")
+                meta.setdefault("canonical", True)
+                meta.setdefault("parents", [])
+                meta.setdefault("depends_on", [])
+                meta.setdefault("risk_flags", [])
+                meta.setdefault("metrics_ref", [])
+                new_body = body.strip() + ("\n" if body.strip() else "")
+            else:
+                sections = self._extract_experiment_sections(body)
+                inferred = self._infer_graph_metadata(slug, meta, body, sections)
+                meta.update(inferred)
+                meta["title"] = title
+                meta["slug"] = slug
+                meta["summary"] = meta.get("summary") or self._derive_summary(body)
+                meta["updated"] = meta.get("updated") or datetime.utcnow().isoformat(timespec="seconds")
+                new_body = self._render_experiment_card(title, meta, sections)
+
+            if dry_run:
+                upgraded.append(slug)
+                continue
+            with open(page["path"], "w", encoding="utf-8") as f:
+                f.write(_dump_frontmatter(meta))
+                f.write(new_body)
+            upgraded.append(slug)
+
+        if not dry_run:
+            refreshed = self._scan_pages()
+            for slug, page in refreshed.items():
+                related = page["meta"].get("related") or []
+                self._backlink_audit(slug, page["meta"].get("title", slug), related)
+            self._recompile_index()
+            self._log_event("GRAPH_UPGRADE", "wiki_graph", "Wiki Graph Upgrade", extra=f"{len(upgraded)} pages")
+
+        return {"upgraded": upgraded, "skipped": skipped, "dry_run": dry_run}
 
     # ---------------------------------------------------------------
     # Lint / health-check (Karpathy: find orphan pages, stale claims,
@@ -592,18 +1142,27 @@ class LLMWiki:
                         f"`{slug}` contains a broken wikilink `[[{target}]]` — target does not exist."
                     )
 
-            # ERROR: factor card marked as proven but is_effective=false
+            page_type = self._canonical_type(str(meta.get("type", "")))
+
+            # ERROR: experiment card marked as validated but is_effective=false
             status = str(meta.get("status", "")).lower()
+            evidence_level = str(meta.get("evidence_level", "")).lower()
             ie_raw = str(meta.get("is_effective", "")).lower()
-            if meta.get("type") == "factor_card":
-                if status == "proven" and ie_raw in {"false", "0", "no"}:
+            if page_type == "experiment_card":
+                if evidence_level in {"validated", "production"} and ie_raw in {"false", "0", "no"}:
                     errors.append(
-                        f"`{slug}` has status=proven but is_effective=false — contradiction."
+                        f"`{slug}` has evidence_level={evidence_level} but is_effective=false — contradiction."
                     )
                 if status == "failed" and ie_raw in {"true", "1", "yes"}:
                     errors.append(
                         f"`{slug}` has status=failed but is_effective=true — contradiction."
                     )
+
+            if page_type not in GRAPH_NODE_TYPES and page_type != "taxonomy":
+                warnings.append(f"`{slug}` has non-graph type `{page_type}`.")
+
+            if evidence_level and evidence_level not in EVIDENCE_LEVELS:
+                warnings.append(f"`{slug}` has unknown evidence_level `{evidence_level}`.")
 
             # WARNING: missing summary
             if not meta.get("summary"):
@@ -621,16 +1180,17 @@ class LLMWiki:
                 except ValueError:
                     warnings.append(f"`{slug}` has unparseable `updated` field: {updated}")
 
-            # WARNING: factor card with no parent strategy family
-            if meta.get("type") == "factor_card":
-                related = meta.get("related") or []
+            # WARNING: experiment card with no parent strategy family
+            if page_type == "experiment_card":
+                related = set(meta.get("related") or [])
+                related.update(meta.get("parents") or [])
                 has_family = any(
-                    pages.get(r, {}).get("meta", {}).get("type") == "strategy_family"
+                    self._canonical_type(pages.get(r, {}).get("meta", {}).get("type", "")) == "strategy_family"
                     for r in related
                 )
                 if not has_family:
                     warnings.append(
-                        f"`{slug}` is a factor_card with no parent strategy_family in `related`."
+                        f"`{slug}` is an experiment_card with no parent strategy_family in `related`/`parents`."
                     )
 
             # INFO: orphan page (no inbound links AND no outbound wikilinks)

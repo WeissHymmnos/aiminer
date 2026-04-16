@@ -1,31 +1,78 @@
 ---
 title: "VWAP Liquidity Gradient Reversal"
 slug: "vwap_liquidity_gradient_reversal_iter3"
-type: "factor_card"
-status: "proven"
+type: "experiment_card"
+status: "active"
 summary: "Rank( Delta($close,1) / (Ts_Mean($volume,3) + 1e-6) * (1 - Abs(Rank(($close - $vwap)/$vwap))) )"
 updated: "2026-04-14T12:26:09"
 tags: ["利用高频量价相关性挖掘的量价专家", "ricequant", "simulated"]
-related: ["strategy_families_base", "market_regime_base"]
-ic: -0.047
-rank_ic: 0.045
-iteration: 3
-is_effective: true
-simulated: true
+related: ["strategy_families_base", "market_regime_base", "mean_reversion_family", "stat_arb_family", "volume_divergence_signal", "vwap_anchor_signal", "price_volume_data_source", "macro_data_source", "sector_data_source", "high_volatility_regime", "policy_pivot_regime", "simulation_only_risk", "implementation_drift_risk", "information_coefficient_metric", "rank_ic_metric", "cross_sectional_long_short_execution"]
+ic: "-0.047"
+rank_ic: "0.045"
+iteration: "3"
+is_effective: "true"
+simulated: "true"
+node_type: "factor_experiment"
+evidence_level: "simulated"
+canonical: false
+parents: ["mean_reversion_family", "stat_arb_family"]
+depends_on: ["volume_divergence_signal", "vwap_anchor_signal", "price_volume_data_source", "macro_data_source", "sector_data_source", "high_volatility_regime", "policy_pivot_regime", "cross_sectional_long_short_execution"]
+risk_flags: ["simulation_only_risk", "implementation_drift_risk"]
+metrics_ref: ["information_coefficient_metric", "rank_ic_metric"]
+strategy_family: ["mean_reversion_family", "stat_arb_family"]
+data_sources: ["price_volume_data_source", "macro_data_source", "sector_data_source"]
+market_regimes: ["high_volatility_regime", "policy_pivot_regime"]
+execution_patterns: ["cross_sectional_long_short_execution"]
+related_experiments: []
 ---
 
-**Hypothesis**: Rank( Delta($close,1) / (Ts_Mean($volume,3) + 1e-6) * (1 - Abs(Rank(($close - $vwap)/$vwap))) )
+# VWAP Liquidity Gradient Reversal
 
-**Rationale**: Macro: With the Fed on hold and inflation sticky, dealers shrink depth; moves that close far from VWAP on thin 3-day volume are likely arbitraged back. Market regime is high-vol/bearish, so liquidity discounts appear intraday. Cross-sectional rank of distance-to-VWAP compresses signal to [0,1], keeping it continuous; scaling price change by slow volume avoids raw-volume noise while still punishing liquidity-starved prints. The factor goes long (short) stocks that jumped on low volume yet remain close to VWAP, expecting a gentle snap-back as liquidity providers peg quotes to VWAP and widen spreads when volume is light, pushing price toward the fair anchor within 1 day.
+## Summary
 
-**Implementation (Qlib)**: `Rank(Div(Delta($close, 1), Add(Mean($volume, 3), 1e-6)))`
+Rank( Delta($close,1) / (Ts_Mean($volume,3) + 1e-6) * (1 - Abs(Rank(($close - $vwap)/$vwap))) )
+
+## Hypothesis
+
+Rank( Delta($close,1) / (Ts_Mean($volume,3) + 1e-6) * (1 - Abs(Rank(($close - $vwap)/$vwap))) )
+
+## Economic Rationale
+
+Rationale not yet captured.
+
+## Formula / Implementation
+
+**Implementation (Qlib)**: ```Rank(Div(Delta($close, 1), Add(Mean($volume, 3), 1e-6)))```
 
 **Math Formula**: R_{i,t}=\text{rank}_i\left(\frac{\Delta P_{i,t}}{\bar{V}_{i,t-1:t-3}+10^{-6}}\cdot\left(1-\left|\text{rank}_i\left(\frac{P_{i,t}-\text{VWAP}_{i,t}}{\text{VWAP}_{i,t}}\right)\right|\right)\right)
 
-**IC / RankIC**: -0.0470 / 0.0450
+## Backtest Evidence
 
-**Effectiveness**: ✅ EFFECTIVE
+- **Evidence Level:** `simulated`
+- **Status:** `active`
+- **IC / RankIC:** -0.0470 / 0.0450
+- **Effectiveness:** ✅ effective
 
-**Review Summary**: Factor shows strong negative IC (-0.047) but positive Rank IC (0.045), indicating non-linear predictive power. High RRE (0.8) and PFS (~0.79) suggest good stability. The hypothesis includes a damping term (1 - |rank((close-vwap)/vwap)|) that was dropped in the code, causing mismatch. The factor is moderately effective but needs refinement to align code with hypothesis and improve IC magnitude.
+## Interpretation
 
-**Suggested Improvements**: 1) Restore the missing damping term (1 - Abs(Rank(($close - $vwap)/$vwap))) to match hypothesis. 2) Consider using Ts_Mean($volume,5) instead of 3-day to reduce noise. 3) Apply sector/neutralization to improve IC. 4) Test Winsorizing at 1-2% to handle outliers. 5) Consider using signed volume (volume * sign(return)) instead of raw volume.
+Interpretation pending.
+
+## Failure Modes / Risks
+
+- [[simulation_only_risk]]
+- [[implementation_drift_risk]]
+
+## Related Concepts
+
+- [[mean_reversion_family]]
+- [[stat_arb_family]]
+- [[price_volume_data_source]]
+- [[macro_data_source]]
+- [[sector_data_source]]
+- [[high_volatility_regime]]
+- [[policy_pivot_regime]]
+- [[cross_sectional_long_short_execution]]
+
+## Next Steps
+
+Promote or refine after collecting stronger evidence.

@@ -1,31 +1,77 @@
 ---
 title: "VWAP-Slipage Liquidity Vacuum Reversion"
 slug: "vwap_slipage_liquidity_vacuum_reversion_iter2"
-type: "factor_card"
+type: "experiment_card"
 status: "failed"
 summary: "Rank( Delta($close,1) / (Std($volume,5)*Abs($close-$vwap)+1e-6) * Sign(Corr($volume,$close-$vwap,3)) ) goes long stocks whose 1-day price change is large relat…"
 updated: "2026-04-14T12:08:47"
 tags: ["利用高频量价相关性挖掘的量价专家", "ricequant"]
-related: ["strategy_families_base", "market_regime_base"]
-ic: 0.0055
-rank_ic: 0.0
-iteration: 2
-is_effective: false
-simulated: false
+related: ["strategy_families_base", "market_regime_base", "mean_reversion_family", "stat_arb_family", "volume_divergence_signal", "vwap_anchor_signal", "price_volume_data_source", "macro_data_source", "sector_data_source", "turnover_explosion_risk", "information_coefficient_metric", "rank_ic_metric", "strategy_risk_metrics_reference", "cross_sectional_long_short_execution", "threshold_timing_execution"]
+ic: "0.0055"
+rank_ic: "0.0"
+iteration: "2"
+is_effective: "false"
+simulated: "false"
+node_type: "factor_experiment"
+evidence_level: "theory"
+canonical: false
+parents: ["mean_reversion_family", "stat_arb_family"]
+depends_on: ["volume_divergence_signal", "vwap_anchor_signal", "price_volume_data_source", "macro_data_source", "sector_data_source", "market_regime_base", "cross_sectional_long_short_execution", "threshold_timing_execution"]
+risk_flags: ["turnover_explosion_risk"]
+metrics_ref: ["information_coefficient_metric", "rank_ic_metric", "strategy_risk_metrics_reference"]
+strategy_family: ["mean_reversion_family", "stat_arb_family"]
+data_sources: ["price_volume_data_source", "macro_data_source", "sector_data_source"]
+market_regimes: ["market_regime_base"]
+execution_patterns: ["cross_sectional_long_short_execution", "threshold_timing_execution"]
+related_experiments: []
 ---
 
-**Hypothesis**: Rank( Delta($close,1) / (Std($volume,5)*Abs($close-$vwap)+1e-6) * Sign(Corr($volume,$close-$vwap,3)) ) goes long stocks whose 1-day price change is large relative to the volume volatility–weighted distance from VWAP and whose 3-day volume is positively correlated with intraday slippage, expecting that liquidity-starved moves away from fair value quickly snap back when volume returns.
+# VWAP-Slipage Liquidity Vacuum Reversion
 
-**Rationale**: Macro: PBoC’s surprise repo cut injects short-term liquidity but global PMI contraction keeps risk-off; intraday moves driven by algorithmic slippage dominate. Market regime is choppy/whiplash—mean-reversion windows shrink to 1 day. Std(volume) scales denominator by liquidity uncertainty; multiplying by |close-vwap| penalizes moves that drift from fair price. Sign(Corr(volume, slippage)) filters for situations where rising volume accompanies widening vwap gap—classic liquidity vacuum. Rank neutralizes beta and avoids prior failures that used raw volume deltas. Hybrid structure exploits microstructure friction before macro re-pricing resumes.
+## Summary
 
-**Implementation (Qlib)**: `Rank(Delta($close,1) / (Std($volume,5) * Abs($close - $vwap) + 1e-6) * Sign(Corr($volume,Abs($close - $vwap),3)))`
+Rank( Delta($close,1) / (Std($volume,5)*Abs($close-$vwap)+1e-6) * Sign(Corr($volume,$close-$vwap,3)) ) goes long stocks whose 1-day price change is large relat…
+
+## Hypothesis
+
+Rank( Delta($close,1) / (Std($volume,5)*Abs($close-$vwap)+1e-6) * Sign(Corr($volume,$close-$vwap,3)) ) goes long stocks whose 1-day price change is large relat…
+
+## Economic Rationale
+
+Rationale not yet captured.
+
+## Formula / Implementation
+
+**Implementation (Qlib)**: ```Rank(Delta($close,1) / (Std($volume,5) * Abs($close - $vwap) + 1e-6) * Sign(Corr($volume,Abs($close - $vwap),3)))```
 
 **Math Formula**: R_{t}=\text{Rank}\left(\frac{\Delta P_{t,1}}{\left(\sigma_{V,t,5}\cdot|P_{t}-VWAP_{t}|+10^{-6}\right)}\cdot\text{Sign}\left(\rho_{t,3}\left(V,|P-VWAP|\right)\right)\right)
 
-**IC / RankIC**: 0.0055 / 0.0000
+## Backtest Evidence
 
-**Effectiveness**: ❌ FAILED
+- **Evidence Level:** `theory`
+- **Status:** `failed`
+- **IC / RankIC:** 0.0055 / 0.0000
+- **Effectiveness:** ✅ effective
 
-**Review Summary**: IC 0.0055 far below 0.02 threshold and Rank IC 0.0 indicate no monotonic predictive power; RRE=1.0 shows perfect over-fitting; Sharpe 0.72 is driven by high turnover rather than signal strength.  The factor is essentially noise.
+## Interpretation
 
-**Suggested Improvements**: Replace 1-day delta with 3-5 day return to reduce noise; winsorize all inputs at 1-99 % to curb outliers; use log(volume) and dollar-volume instead of raw volume; switch 3-day corr to 5-day and demand |corr|>0.3 before applying Sign; add sector-neutral Rank within each GICS group; finally scale final alpha by inverse 20-day volatility to dampen high-turnover names.
+Interpretation pending.
+
+## Failure Modes / Risks
+
+- [[turnover_explosion_risk]]
+
+## Related Concepts
+
+- [[mean_reversion_family]]
+- [[stat_arb_family]]
+- [[price_volume_data_source]]
+- [[macro_data_source]]
+- [[sector_data_source]]
+- [[market_regime_base]]
+- [[cross_sectional_long_short_execution]]
+- [[threshold_timing_execution]]
+
+## Next Steps
+
+Promote or refine after collecting stronger evidence.

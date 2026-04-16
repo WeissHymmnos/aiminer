@@ -13,10 +13,19 @@ from schemas.messages import ReflexiveReviewOutput
 
 class EvalAgent:
     def __init__(
-        self, knowledge: HybridKnowledge, provider: str = None, model: str = None
+        self,
+        knowledge: HybridKnowledge,
+        provider: str = None,
+        model: str = None,
+        base_url: str = None,
     ):
         self.knowledge = knowledge
-        self.llm = get_llm(temperature=0.4, provider=provider, model_name=model)
+        self.llm = get_llm(
+            temperature=0.4,
+            provider=provider,
+            model_name=model,
+            base_url=base_url,
+        )
 
     @staticmethod
     def _strip_markdown_json(text: str) -> str:
@@ -46,23 +55,27 @@ class EvalAgent:
         )
 
         try:
-            if mode.lower() == "qlib":
-                from core.alphaeval.modeltester import AlphaEval
+            from core.evaluator_factory import build_evaluator, evaluation_config_from_mapping
 
-                evaluator = AlphaEval(
-                    factor_expressions=[code],
-                    test_start_date=test_start_date,
-                    test_end_date=test_end_date,
-                )
-            else:
-                from core.alphaeval.rq_eval import RiceQuantEval
-
-                evaluator = RiceQuantEval(
-                    factor_expressions=[code],
-                    test_start_date=test_start_date,
-                    test_end_date=test_end_date,
-                    engine=engine,
-                )
+            evaluator = build_evaluator(
+                factor_expressions=[code],
+                config=evaluation_config_from_mapping(
+                    {
+                        "data_backend": self._state_data_backend,
+                        "evaluation_mode": mode,
+                        "evaluation_engine": engine,
+                        "market_mode": self._state_market_mode,
+                        "market_profile": self._state_market_profile,
+                        "market_profiles": self._state_market_profiles,
+                        "local_data_path": self._state_local_data_path,
+                        "local_data_layout": self._state_local_data_layout,
+                        "market_start": test_start_date,
+                        "market_end": test_end_date,
+                    }
+                ),
+                test_start_date=test_start_date,
+                test_end_date=test_end_date,
+            )
 
             evaluator.run()
             evaluator.run_robustness_test()
@@ -121,6 +134,12 @@ class EvalAgent:
         engine = state.get("evaluation_engine", "pandas")
         test_start = state.get("market_analysis_start_date", "2018-01-01")
         test_end = state.get("market_analysis_end_date", "2025-12-31")
+        self._state_data_backend = state.get("data_backend", mode)
+        self._state_market_mode = state.get("market_mode", "single")
+        self._state_market_profile = state.get("market_profile", "cn_stock")
+        self._state_market_profiles = state.get("market_profiles") or [self._state_market_profile]
+        self._state_local_data_path = state.get("local_data_path")
+        self._state_local_data_layout = state.get("local_data_layout", "auto")
 
         logger.info("[EvalAgent] Starting evaluation and reflexive review")
 
