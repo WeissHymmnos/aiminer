@@ -15,7 +15,7 @@ This project supports containerized execution via Docker, ensuring a consistent 
    ```bash
    docker-compose up --build -d
    ```
-   This will build the image (compiling the Rust Polars plugins) and start the researcher app container.
+   This will build the image (compiling the Rust Polars plugins) and start both the researcher app and the API.
 
 3. **Run a Task**:
    To run a manual mining iteration:
@@ -23,11 +23,8 @@ This project supports containerized execution via Docker, ensuring a consistent 
    docker exec -it aiminer_app python main.py --iterations 3
    ```
 
-4. **Open the TUI**:
-   Launch the interactive workstation inside the container:
-   ```bash
-   docker exec -it aiminer_app python tui.py
-   ```
+4. **Access the API**:
+   The API will be available at `http://localhost:8000`.
 
 ## Building and Running Manually (without Compose)
 

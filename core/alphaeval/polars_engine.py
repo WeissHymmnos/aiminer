@@ -278,15 +278,14 @@ def Ts_ArgMin(x, n):
 
 
 # Aliases for compiler mapping (in case compiler generates function calls instead of operators)
-# All use _ensure_expr so that constant numeric arguments work correctly.
-def Add(a, b):   return _ensure_expr(a) + _ensure_expr(b)
-def Sub(a, b):   return _ensure_expr(a) - _ensure_expr(b)
-def Mul(a, b):   return _ensure_expr(a) * _ensure_expr(b)
-def Div(a, b):   return _ensure_expr(a) / _ensure_expr(b)
-def Mult(a, b):  return _ensure_expr(a) * _ensure_expr(b)
-def Divi(a, b):  return _ensure_expr(a) / _ensure_expr(b)
-def Plus(a, b):  return _ensure_expr(a) + _ensure_expr(b)
-def Minus(a, b): return _ensure_expr(a) - _ensure_expr(b)
+Add = lambda a, b: a + b
+Sub = lambda a, b: a - b
+Mul = lambda a, b: a * b
+Div = lambda a, b: a / b
+Mult = lambda a, b: a * b
+Divi = lambda a, b: a / b
+Plus = lambda a, b: a + b
+Minus = lambda a, b: a - b
 
 
 def EMA(x, n):
@@ -327,41 +326,17 @@ def Ts_Percentile(x, n, p=50):
 
 
 # Math aliases
-def Pow(a, b):
-    return _ensure_expr(a) ** b
-
-
-def Neg(a):
-    return -_ensure_expr(a)
-
-
-def Inv(a):
-    return pl.lit(1.0) / _ensure_expr(a)
-
-
-def Max(a, b):
-    return pl.max_horizontal(_ensure_expr(a), _ensure_expr(b))
-
-
-def Min(a, b):
-    return pl.min_horizontal(_ensure_expr(a), _ensure_expr(b))
-
+Pow = lambda a, b: a**b
+Neg = lambda a: -a
+Inv = lambda a: 1.0 / a
+Max = lambda a, b: pl.max_horizontal(a, b)
+Min = lambda a, b: pl.min_horizontal(a, b)
 
 # Extended aliases for LLM-generated expressions
-def Divide(a, b):
-    return _ensure_expr(a) / _ensure_expr(b)
-
-
-def Multiply(a, b):
-    return _ensure_expr(a) * _ensure_expr(b)
-
-
-def Subtract(a, b):
-    return _ensure_expr(a) - _ensure_expr(b)
-
-
-def Negate(a):
-    return -_ensure_expr(a)
+Divide = lambda a, b: a / b
+Multiply = lambda a, b: a * b
+Subtract = lambda a, b: a - b
+Negate = lambda a: -a
 
 
 class _ColFallback(dict):

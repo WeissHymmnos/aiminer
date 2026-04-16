@@ -1,75 +1,31 @@
 ---
 title: "Hurst-Filtered Liquidity Contrarian"
 slug: "hurst_filtered_liquidity_contrarian_iter1"
-type: "experiment_card"
+type: "factor_card"
 status: "failed"
 summary: "Go long stocks whose 5-day Hurst exponent < 0.4 (mean-reverting regime) AND whose latest daily volume ranks in the top-quintile but intraday closing strength (…"
 updated: "2026-04-13T20:11:39"
 tags: ["专注Hurst指数与分形维度的动量专家", "ricequant"]
-related: ["strategy_families_base", "market_regime_base", "mean_reversion_family", "volume_divergence_signal", "hurst_filter_signal", "price_volume_data_source", "macro_data_source", "sector_data_source", "information_coefficient_metric", "rank_ic_metric", "strategy_risk_metrics_reference", "cross_sectional_long_short_execution"]
-ic: "-0.0067"
-rank_ic: "0.0173"
-iteration: "1"
-is_effective: "false"
-simulated: "false"
-node_type: "factor_experiment"
-evidence_level: "theory"
-canonical: false
-parents: ["mean_reversion_family"]
-depends_on: ["volume_divergence_signal", "hurst_filter_signal", "price_volume_data_source", "macro_data_source", "sector_data_source", "market_regime_base", "cross_sectional_long_short_execution"]
-risk_flags: []
-metrics_ref: ["information_coefficient_metric", "rank_ic_metric", "strategy_risk_metrics_reference"]
-strategy_family: ["mean_reversion_family"]
-data_sources: ["price_volume_data_source", "macro_data_source", "sector_data_source"]
-market_regimes: ["market_regime_base"]
-execution_patterns: ["cross_sectional_long_short_execution"]
-related_experiments: []
+related: ["strategy_families_base", "market_regime_base"]
+ic: -0.0067
+rank_ic: 0.0173
+iteration: 1
+is_effective: false
+simulated: false
 ---
 
-# Hurst-Filtered Liquidity Contrarian
+**Hypothesis**: Go long stocks whose 5-day Hurst exponent < 0.4 (mean-reverting regime) AND whose latest daily volume ranks in the top-quintile but intraday closing strength (Close-Low)/(High-Low) ranks in the bottom-quintile; factor = Rank(Hurst5<0.4) * (-Rank(CloseStrength)) * Rank(Volume).
 
-## Summary
+**Rationale**: With the central bank on hold and macro uncertainty elevated, the market is stuck in a low-vol, range-bound state; within this backdrop only micro-time-frame mean-reverting names offer reliable alpha. Gu-Kelly shows liquidity spikes in already mean-reverting stocks precipitate sharp reversals as impatient buyers exhaust. GTJA’s closing-strength proxy identifies intraday selling pressure, while a sub-0.4 Hurst filter ensures we trade genuine anti-persistent motion, avoiding the failed double-rank interaction of the prior factor and instead using Hurst as a regime gate to concentrate bets where reversals are statistically expected.
 
-Go long stocks whose 5-day Hurst exponent < 0.4 (mean-reverting regime) AND whose latest daily volume ranks in the top-quintile but intraday closing strength (…
-
-## Hypothesis
-
-Go long stocks whose 5-day Hurst exponent < 0.4 (mean-reverting regime) AND whose latest daily volume ranks in the top-quintile but intraday closing strength (…
-
-## Economic Rationale
-
-Rationale not yet captured.
-
-## Formula / Implementation
-
-**Implementation (Qlib)**: ```If(Less(Ts_Rank($close,5),0.4),CSRank(($close-$low)/($high-$low))*CSRank($volume),0)```
+**Implementation (Qlib)**: `If(Less(Ts_Rank($close,5),0.4),CSRank(($close-$low)/($high-$low))*CSRank($volume),0)`
 
 **Math Formula**: \text{Signal}_i = \mathbb{1}_{H_{i,5}<0.4} \cdot \left(-Q_{CloseStrength,i}\right) \cdot Q_{Volume,i}
 
-## Backtest Evidence
+**IC / RankIC**: -0.0067 / 0.0173
 
-- **Evidence Level:** `theory`
-- **Status:** `failed`
-- **IC / RankIC:** -0.0067 / 0.0173
-- **Effectiveness:** ✅ effective
+**Effectiveness**: ❌ FAILED
 
-## Interpretation
+**Review Summary**: Factor is ineffective: IC is negative and below 0.02, Rank IC is only 0.0173, Sharpe is strongly negative (-1.69), max drawdown exceeds -63%, and all robustness metrics (RRE, PFS, Diversity, LLM) are zero. The triple-rank construction collapses signal-to-noise and the Hurst filter appears mis-specified (Ts_Rank vs exponent estimate).
 
-Interpretation pending.
-
-## Failure Modes / Risks
-
-- None recorded
-
-## Related Concepts
-
-- [[mean_reversion_family]]
-- [[price_volume_data_source]]
-- [[macro_data_source]]
-- [[sector_data_source]]
-- [[market_regime_base]]
-- [[cross_sectional_long_short_execution]]
-
-## Next Steps
-
-Promote or refine after collecting stronger evidence.
+**Suggested Improvements**: 1) Replace Ts_Rank($close,5) with a true 5-day Hurst exponent estimate (e.g., rescaled range or DMA). 2) Use z-scores or percentile ranks instead of nested CRanks to preserve monotonicity. 3) Test separate layers: first validate Hurst<0.4 universe actually mean-reverts (IC>0.02), then add volume & close-strength filters; consider interaction terms or ML non-linear combo. 4) Shrink extreme weights and impose sector/neutral caps to raise Diversity above 0.5. 5) Extend look-back to 20-60 days to raise signal stability and re-check IC decay; target IC>0.02 and Sharpe>1 before live use.

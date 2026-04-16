@@ -1,77 +1,31 @@
 ---
 title: "VWAP-Slippage Liquidity Stress Reversal"
 slug: "vwap_slippage_liquidity_stress_reversal_iter2"
-type: "experiment_card"
+type: "factor_card"
 status: "failed"
 summary: "Rank( Delta($close,1) / (Abs($close-$vwap)+0.001) * Exp(-Decay(0.1, $volume/Mean($volume,20))) ) goes long stocks whose 1-day price jump is large relative to t…"
 updated: "2026-04-14T12:15:26"
 tags: ["利用高频量价相关性挖掘的量价专家", "ricequant"]
-related: ["strategy_families_base", "market_regime_base", "mean_reversion_family", "stat_arb_family", "volume_divergence_signal", "vwap_anchor_signal", "price_volume_data_source", "macro_data_source", "sector_data_source", "high_volatility_regime", "information_coefficient_metric", "rank_ic_metric", "strategy_risk_metrics_reference", "cross_sectional_long_short_execution", "threshold_timing_execution"]
-ic: "0.0046"
-rank_ic: "0.0"
-iteration: "2"
-is_effective: "false"
-simulated: "false"
-node_type: "factor_experiment"
-evidence_level: "theory"
-canonical: false
-parents: ["mean_reversion_family", "stat_arb_family"]
-depends_on: ["volume_divergence_signal", "vwap_anchor_signal", "price_volume_data_source", "macro_data_source", "sector_data_source", "high_volatility_regime", "cross_sectional_long_short_execution", "threshold_timing_execution"]
-risk_flags: []
-metrics_ref: ["information_coefficient_metric", "rank_ic_metric", "strategy_risk_metrics_reference"]
-strategy_family: ["mean_reversion_family", "stat_arb_family"]
-data_sources: ["price_volume_data_source", "macro_data_source", "sector_data_source"]
-market_regimes: ["high_volatility_regime"]
-execution_patterns: ["cross_sectional_long_short_execution", "threshold_timing_execution"]
-related_experiments: []
+related: ["strategy_families_base", "market_regime_base"]
+ic: 0.0046
+rank_ic: 0.0
+iteration: 2
+is_effective: false
+simulated: false
 ---
 
-# VWAP-Slippage Liquidity Stress Reversal
+**Hypothesis**: Rank( Delta($close,1) / (Abs($close-$vwap)+0.001) * Exp(-Decay(0.1, $volume/Mean($volume,20))) ) goes long stocks whose 1-day price jump is large relative to the intraday slippage from VWAP yet occurs on below-average volume, expecting that liquidity-starved moves away from fair value quickly revert.
 
-## Summary
+**Rationale**: Macro: PBoC’s stealth taper and soft export data show RMB liquidity is tightening; micro-price moves that drift far from VWAP without proportional volume lack backing from active liquidity providers. Market regime is high-vol/bearish with elevated intraday ranges, so VWAP acts as a magnet; stocks that overshoot on thin volume are punished by algos mean-reverting. Using absolute slippage instead of raw volume in the denominator keeps the signal continuous and cross-sectional; exponential decay on normalized volume suppresses outliers while preserving ranking granularity. Cross-agent lesson: previous factors that divided by raw Delta(volume) crashed on zero-volume days; slippage denominator plus epsilon guarantees smoothness and monotonic rank across the entire universe.
 
-Rank( Delta($close,1) / (Abs($close-$vwap)+0.001) * Exp(-Decay(0.1, $volume/Mean($volume,20))) ) goes long stocks whose 1-day price jump is large relative to t…
-
-## Hypothesis
-
-Rank( Delta($close,1) / (Abs($close-$vwap)+0.001) * Exp(-Decay(0.1, $volume/Mean($volume,20))) ) goes long stocks whose 1-day price jump is large relative to t…
-
-## Economic Rationale
-
-Rationale not yet captured.
-
-## Formula / Implementation
-
-**Implementation (Qlib)**: ```Rank(Delta($close,1) / (Abs($close - $volume) + 0.001) * Exp(-0.1 * $volume / Mean($volume,20)))```
+**Implementation (Qlib)**: `Rank(Delta($close,1) / (Abs($close - $volume) + 0.001) * Exp(-0.1 * $volume / Mean($volume,20)))`
 
 **Math Formula**: R = \text{Rank}\left( \frac{\Delta C_{t,1}}{|C_t - V_t| + 0.001} \cdot \exp\left(-\lambda \cdot \frac{V_t}{\bar{V}_{t,20}}\right) \right)
 
-## Backtest Evidence
+**IC / RankIC**: 0.0046 / 0.0000
 
-- **Evidence Level:** `theory`
-- **Status:** `failed`
-- **IC / RankIC:** 0.0046 / 0.0000
-- **Effectiveness:** ✅ effective
+**Effectiveness**: ❌ FAILED
 
-## Interpretation
+**Review Summary**: IC 0.0046 is below the 0.02 threshold and Rank IC is 0, indicating negligible linear or rank predictive power; however, the realized Sharpe 1.28 and modest max drawdown -0.096 suggest the signal still captures some exploitable return pattern, likely through non-linear or extreme-quintile effects rather than monotonic ranking. The code mistakenly uses Abs($close - $volume) instead of Abs($close - $volume) which is dimensionally invalid; the intended slippage proxy Abs($close - $vwap) was replaced with a price-to-volume difference, erasing economic meaning and probably hurting IC.
 
-Interpretation pending.
-
-## Failure Modes / Risks
-
-- None recorded
-
-## Related Concepts
-
-- [[mean_reversion_family]]
-- [[stat_arb_family]]
-- [[price_volume_data_source]]
-- [[macro_data_source]]
-- [[sector_data_source]]
-- [[high_volatility_regime]]
-- [[cross_sectional_long_short_execution]]
-- [[threshold_timing_execution]]
-
-## Next Steps
-
-Promote or refine after collecting stronger evidence.
+**Suggested Improvements**: Fix the typo: replace Abs($close - $volume) with Abs($close - $vwap) so the denominator reflects intraday slippage; consider capping the ratio at ±3σ to reduce outliers, and apply sector/neutral Rank within industry to raise IC. Test a slower decay (e.g., 0.05) to lengthen the volume look-back and form equal-weight or top-decile portfolios to verify whether extreme tails drive the Sharpe; if quintile spreads are monotonic, the corrected factor should exceed IC 0.02.

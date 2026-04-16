@@ -1,19 +1,12 @@
 ---
 title: "Market Regime & Universe Baseline"
 slug: "market_regime_base"
-type: "market_regime"
+type: "market_profile"
 status: "baseline"
 summary: "Market Regime & Universe Baseline"
 updated: "2026-04-13T03:58:46.451037"
 tags: []
 related: []
-node_type: "market_regime"
-evidence_level: "baseline"
-canonical: "true"
-parents: []
-depends_on: []
-risk_flags: []
-metrics_ref: []
 ---
 
 # Market Regime & Universe Baseline  
@@ -200,22 +193,3 @@ regime_Yield: string   # Rising / Falling
 - [[intraday_liquidity_weighted_return_dispersion_iter3]] — Intraday Liquidity-Weighted Return Dispersion
 - [[cross_sectional_hurst_term_structure_volatility_reversal_iter3]] — Cross-Sectional Hurst-Term Structure Volatility Reversal
 - [[cross_sectional_term_structure_slope_reversal_with_liquidity_filter_iter3]] — Cross-Sectional Term-Structure Slope Reversal with Liquidity Filter
-- [[centralbankslopemacd_iter1]] — CentralBankSlopeMACD
-- [[cross_sectional_residual_reversal_after_cb_hawkish_shock_iter1]] — Cross-Sectional Residual Reversal After CB Hawkish Shock
-- [[disinflation_divergence_momentum_iter1]] — Disinflation-Divergence Momentum
-- [[high_fattail_reversion_pressure_iter1]] — High-FatTail-Reversion-Pressure
-- [[hmm_state_filtered_liquidity_surge_momentum_iter1]] — HMM-State-Filtered Liquidity Surge Momentum
-- [[hurst_filtered_short_covering_rally_iter1]] — Hurst-Filtered Short-Covering Rally
-- [[hurst_oil_momentum_reversal_iter2]] — Hurst_Oil_Momentum_Reversal
-- [[liquidity_adjusted_intraday_momentum_reversal_iter1]] — Liquidity-Adjusted Intraday Momentum Reversal
-- [[liquidity_adjusted_overnight_gap_reversal_with_asymmetric_volume_confirmation_iter2]] — Liquidity-Adjusted Overnight Gap Reversal with Asymmetric Volume Confirmation
-- [[liquidity_divergent_overnight_gap_reversal_with_sector_neutral_z_score_iter1]] — Liquidity-Divergent Overnight Gap Reversal with Sector-Neutral Z-Score
-- [[liquidity_divergent_pairs_spillover_reversal_iter2]] — Liquidity-Divergent Pairs Spillover Reversal
-- [[liquidity_shock_reversal_iter1]] — Liquidity Shock Reversal
-- [[over_night_gamma_hedge_reversal_in_high_skew_names_iter3]] — Over-night Gamma-hedge Reversal in High-Skew Names
-- [[overnight_reversal_on_trade_war_headlines_iter1]] — Overnight-Reversal-On-Trade-War-Headlines
-- [[post_gap_liquidity_vacuum_reversal_iter2]] — Post-Gap Liquidity Vacuum Reversal
-- [[shrinking_volume_reversal_iter1]] — Shrinking-Volume Reversal
-- [[liquidity_weighted_inflation_regime_reversal_iter1]] — Liquidity-Weighted Inflation-Regime Reversal
-- [[hurst_scaled_liquidity_noise_reversal_continuum_iter1]] — Hurst-Scaled Liquidity-Noise Reversal Continuum
-- [[intraday_liquidity_adjusted_order_imbalance_reversal_iter1]] — Intraday Liquidity-Adjusted Order-Imbalance Reversal

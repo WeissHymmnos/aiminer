@@ -1,48 +1,24 @@
 ---
 title: "Disinflation-Divergence Momentum"
 slug: "disinflation_divergence_momentum_iter1"
-type: "experiment_card"
+type: "factor_card"
 status: "failed"
 summary: "Go long the equal-weight quintile of CSI-300 stocks whose 21-day EMA is above the 63-day EMA, MACD-line > signal-line, and whose latest CPI-sector beta (estima…"
 updated: "2026-04-13T19:11:14"
 tags: ["You are an expert in momentum and trend-", "ricequant", "simulated"]
-related: ["strategy_families_base", "market_regime_base", "momentum_family", "price_volume_data_source", "macro_data_source", "sector_data_source", "simulation_only_risk", "implementation_drift_risk", "turnover_explosion_risk", "information_coefficient_metric", "rank_ic_metric", "strategy_risk_metrics_reference", "cross_sectional_long_short_execution", "volume_divergence_signal"]
-ic: "-0.04"
-rank_ic: "0.031"
-iteration: "1"
-is_effective: "false"
-simulated: "true"
-node_type: "factor_experiment"
-evidence_level: "simulated"
-canonical: false
-parents: ["momentum_family"]
-depends_on: ["volume_divergence_signal", "price_volume_data_source", "macro_data_source", "sector_data_source", "market_regime_base", "cross_sectional_long_short_execution"]
-risk_flags: ["simulation_only_risk", "implementation_drift_risk", "turnover_explosion_risk"]
-metrics_ref: ["information_coefficient_metric", "rank_ic_metric", "strategy_risk_metrics_reference"]
-strategy_family: ["momentum_family"]
-data_sources: ["price_volume_data_source", "macro_data_source", "sector_data_source"]
-market_regimes: ["market_regime_base"]
-execution_patterns: ["cross_sectional_long_short_execution"]
-related_experiments: []
+related: ["strategy_families_base", "market_regime_base"]
+ic: -0.04
+rank_ic: 0.031
+iteration: 1
+is_effective: false
+simulated: true
 ---
 
-# Disinflation-Divergence Momentum
+**Hypothesis**: Go long the equal-weight quintile of CSI-300 stocks whose 21-day EMA is above the 63-day EMA, MACD-line > signal-line, and whose latest CPI-sector beta (estimated vs urban CPI) has fallen the most YoY; hedge by shorting the inverse quintile. Rebalance weekly.
 
-## Summary
+**Rationale**: Soft-landing pricing power: as headline CPI keeps easing (PBOC easing bias intact) investors reward firms whose inflation-sensitivity is dropping fastest, interpreting the beta compression as margin resilience. Trend filters (EMA & MACD) ensure we only ride names already in technical uptrends, avoiding value traps in a still-uncertain macro backdrop.
 
-Go long the equal-weight quintile of CSI-300 stocks whose 21-day EMA is above the 63-day EMA, MACD-line > signal-line, and whose latest CPI-sector beta (estima…
-
-## Hypothesis
-
-Go long the equal-weight quintile of CSI-300 stocks whose 21-day EMA is above the 63-day EMA, MACD-line > signal-line, and whose latest CPI-sector beta (estima…
-
-## Economic Rationale
-
-Rationale not yet captured.
-
-## Formula / Implementation
-
-**Implementation (Qlib)**: ```If(And(Greater(EMA($close,21),EMA($close,63)),Greater(Delta(EMA($close,12),EMA($close,26)),EMA(Delta(EMA($close,12),EMA($close,26)),9))),If(Less(CSRank(Delta(CSRank($close),252)),0.2),$close,0),0) - If(And(Greater(EMA($close,21),EMA($close,63)),Greater(Delta(EMA($close,12),EMA($close,26)),EMA(Delta(EMA($close,12),EMA($close,26)),9))),If(Greater(CSRank(Delta(CSRank($close),252)),0.8),$close,0),0)```
+**Implementation (Qlib)**: `If(And(Greater(EMA($close,21),EMA($close,63)),Greater(Delta(EMA($close,12),EMA($close,26)),EMA(Delta(EMA($close,12),EMA($close,26)),9))),If(Less(CSRank(Delta(CSRank($close),252)),0.2),$close,0),0) - If(And(Greater(EMA($close,21),EMA($close,63)),Greater(Delta(EMA($close,12),EMA($close,26)),EMA(Delta(EMA($close,12),EMA($close,26)),9))),If(Greater(CSRank(Delta(CSRank($close),252)),0.8),$close,0),0)`
 
 **Math Formula**: R_t = \frac{1}{|L_t|}\sum_{i\in L_t}r_{i,t} - \frac{1}{|S_t|}\sum_{j\in S_t}r_{j,t}
 \quad\text{with}\quad
@@ -56,32 +32,10 @@ Q_{5,t}^{\beta} = \arg\max_{\mathcal{Q}\subset\text{CSI300},|\mathcal{Q}|=60}\De
 \quad\text{and}\quad
 \Delta\beta_{i,t}^{\text{CPI}} = \beta_{i,t}^{\text{CPI}} - \beta_{i,t-252}^{\text{CPI}}
 
-## Backtest Evidence
+**IC / RankIC**: -0.0400 / 0.0310
 
-- **Evidence Level:** `simulated`
-- **Status:** `failed`
-- **IC / RankIC:** -0.0400 / 0.0310
-- **Effectiveness:** ✅ effective
+**Effectiveness**: ❌ FAILED
 
-## Interpretation
+**Review Summary**: Factor shows weak predictive power: IC=-0.04 (<0.02) is negative, while Rank IC=0.031 is barely positive; RRE=0.42 indicates moderate robustness, but PFS1=0.94/PFS2=0.09 show unstable hit-rate; Diversity=0.44 is acceptable; LLM score 64.3 suggests code-structure issues. The CPI-beta condition is mis-implemented—code uses 252-day price delta rank instead of CPI-sector beta YoY change—so the intended macro-deflation signal is absent, explaining poor IC.
 
-Interpretation pending.
-
-## Failure Modes / Risks
-
-- [[simulation_only_risk]]
-- [[implementation_drift_risk]]
-- [[turnover_explosion_risk]]
-
-## Related Concepts
-
-- [[momentum_family]]
-- [[price_volume_data_source]]
-- [[macro_data_source]]
-- [[sector_data_source]]
-- [[market_regime_base]]
-- [[cross_sectional_long_short_execution]]
-
-## Next Steps
-
-Promote or refine after collecting stronger evidence.
+**Suggested Improvements**: Replace CSRANK(Delta(CSRANK($close),252)) with actual YoY % change of stock-level CPI-sector beta vs urban CPI; confirm sector beta is re-estimated weekly. Lower EMA lookback mismatch: use 21/55 or 25/60 to reduce lag. Add turnover penalty (e.g., signal smoothing with 5-day MA) to cut 0.94 PFS1 instability. Test short-side without EMA/MACD filter to isolate CPI-beta alpha. Require |CPI-beta YoY change| > 1σ before quintile assignment to enhance signal-to-noise.

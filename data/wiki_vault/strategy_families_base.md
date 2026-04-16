@@ -7,13 +7,6 @@ summary: "Alpha Strategy Families Baseline"
 updated: "2026-04-11T20:44:26.781374"
 tags: []
 related: []
-node_type: "strategy_family"
-evidence_level: "baseline"
-canonical: "true"
-parents: []
-depends_on: []
-risk_flags: []
-metrics_ref: []
 ---
 
 # Alpha Strategy Families Baseline  
@@ -250,16 +243,3 @@ Use this page as the first stop when onboarding a new model, comparing signal mi
 - [[intraday_liquidity_weighted_return_dispersion_iter3]] — Intraday Liquidity-Weighted Return Dispersion
 - [[cross_sectional_hurst_term_structure_volatility_reversal_iter3]] — Cross-Sectional Hurst-Term Structure Volatility Reversal
 - [[cross_sectional_term_structure_slope_reversal_with_liquidity_filter_iter3]] — Cross-Sectional Term-Structure Slope Reversal with Liquidity Filter
-- [[centralbankslopemacd_iter1]] — CentralBankSlopeMACD
-- [[disinflation_divergence_momentum_iter1]] — Disinflation-Divergence Momentum
-- [[hmm_state_filtered_liquidity_surge_momentum_iter1]] — HMM-State-Filtered Liquidity Surge Momentum
-- [[hurst_filtered_short_covering_rally_iter1]] — Hurst-Filtered Short-Covering Rally
-- [[liquidity_adjusted_overnight_gap_reversal_with_asymmetric_volume_confirmation_iter2]] — Liquidity-Adjusted Overnight Gap Reversal with Asymmetric Volume Confirmation
-- [[liquidity_divergent_overnight_gap_reversal_with_sector_neutral_z_score_iter1]] — Liquidity-Divergent Overnight Gap Reversal with Sector-Neutral Z-Score
-- [[liquidity_divergent_pairs_spillover_reversal_iter2]] — Liquidity-Divergent Pairs Spillover Reversal
-- [[liquidity_shock_reversal_iter1]] — Liquidity Shock Reversal
-- [[overnight_reversal_on_trade_war_headlines_iter1]] — Overnight-Reversal-On-Trade-War-Headlines
-- [[post_gap_liquidity_vacuum_reversal_iter2]] — Post-Gap Liquidity Vacuum Reversal
-- [[liquidity_weighted_inflation_regime_reversal_iter1]] — Liquidity-Weighted Inflation-Regime Reversal
-- [[hurst_scaled_liquidity_noise_reversal_continuum_iter1]] — Hurst-Scaled Liquidity-Noise Reversal Continuum
-- [[intraday_liquidity_adjusted_order_imbalance_reversal_iter1]] — Intraday Liquidity-Adjusted Order-Imbalance Reversal
