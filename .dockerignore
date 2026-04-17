@@ -33,3 +33,10 @@ logs/
 repomix-output.xml
 project_bundle.md
 647e6a71-7510-49bc-9021-7af9d1bfae32/
+
+# Frontend build artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts

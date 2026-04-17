@@ -437,12 +437,28 @@ def ensure_strategy_table(db_path: str | Path) -> None:
                 chart_paths_json TEXT,
                 market TEXT,
                 engine TEXT,
-                ran_at TEXT
+                ran_at TEXT,
+                run_id TEXT,
+                source_factor_id TEXT
             )
             """
         )
+        for column, ddl in [
+            ("run_id", "ALTER TABLE strategy_backtests ADD COLUMN run_id TEXT"),
+            (
+                "source_factor_id",
+                "ALTER TABLE strategy_backtests ADD COLUMN source_factor_id TEXT",
+            ),
+        ]:
+            try:
+                conn.execute(ddl)
+            except sqlite3.OperationalError:
+                pass
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_strategy_backtests_ran_at ON strategy_backtests(ran_at)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_strategy_backtests_run_id ON strategy_backtests(run_id)"
         )
         conn.commit()
 
@@ -456,8 +472,8 @@ def persist_strategy_result(db_path: str | Path, payload: Dict[str, Any]) -> Non
                 strategy_id, label, run_type, strategy_mode, signal_source,
                 expression_json, strategy_config_json, metrics_json, daily_returns_json,
                 positions_json, trade_stats_json, chart_paths_json,
-                market, engine, ran_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                market, engine, ran_at, run_id, source_factor_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 payload.get("strategy_id"),
@@ -475,6 +491,8 @@ def persist_strategy_result(db_path: str | Path, payload: Dict[str, Any]) -> Non
                 payload.get("market"),
                 payload.get("engine"),
                 payload.get("ran_at"),
+                payload.get("run_id"),
+                payload.get("source_factor_id"),
             ),
         )
         conn.commit()

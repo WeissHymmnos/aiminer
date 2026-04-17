@@ -128,6 +128,9 @@ class PortfolioManager:
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_alpha_timestamp ON alpha_pool(timestamp)"
             )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_alpha_run_id ON alpha_pool(run_id)"
+            )
             # Idempotent migration for pre-existing databases created before
             # the extended schema landed.
             for col, ddl in [
@@ -307,7 +310,7 @@ class PortfolioManager:
         self.alpha_pool = final_pool
         return self.alpha_pool
 
-    def run_swarm(self, parallel=False):
+    def run_swarm(self, parallel=False, log_queue=None):
         with logger.contextualize(**log_context(run_id=self.run_id)):
             # 1. Extract global RiceQuant Auth
             if self.kwargs.get("data_backend", self.kwargs.get("evaluation_mode", "ricequant")) == "ricequant":
@@ -332,7 +335,7 @@ class PortfolioManager:
                 )
                 knowledge.bootstrap_wiki(force=False)
 
-            self.dispatch_tasks()
+            self.dispatch_tasks(log_queue=log_queue)
 
             all_results = []
             if parallel:
@@ -569,6 +572,7 @@ class PortfolioManager:
                         f"[Strategy Eval] {template_name} failed for factor '{factor.get('hypothesis', '?')}': {exc}"
                     )
                     continue
+                result["run_id"] = self.run_id
                 result["source_factor_id"] = factor.get("id")
                 strategy_results.append(result)
         self.strategy_pool = strategy_results

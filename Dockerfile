@@ -1,4 +1,15 @@
-# --- Stage 1: Build Stage ---
+# --- Stage 1: Frontend Build ---
+FROM node:20-slim AS frontend-builder
+
+WORKDIR /frontend
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend/ ./
+RUN npm run build
+
+# --- Stage 2: Python Build Stage ---
 FROM python:3.11-slim-bullseye AS builder
 
 # Prevent Python from writing .pyc files and enable unbuffered logging
@@ -34,7 +45,7 @@ WORKDIR /build/polars_plugins
 RUN maturin build --release --strip && \
     pip install --no-cache-dir --prefix=/install target/wheels/*.whl
 
-# --- Stage 2: Runtime Stage ---
+# --- Stage 3: Runtime Stage ---
 FROM python:3.11-slim-bullseye
 
 WORKDIR /app
@@ -50,6 +61,7 @@ RUN apt-get update && apt-get install -y \
 
 # Copy the application source code
 COPY . .
+COPY --from=frontend-builder /frontend/dist ./frontend_dist
 
 # Create necessary directories for mounting
 RUN mkdir -p data/chroma_db data/wiki_db results logs

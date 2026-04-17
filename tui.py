@@ -66,7 +66,7 @@ def run_manager_process(kwargs, log_queue, parallel):
         
         manager = PortfolioManager(**kwargs)
         manager.dispatch_tasks(log_queue=log_queue)
-        manager.run_swarm(parallel=parallel)
+        manager.run_swarm(parallel=parallel, log_queue=log_queue)
         
         log_queue.put({"level": "SUCCESS", "message": "Swarm execution completed!", "role": "System"})
     except Exception as e:

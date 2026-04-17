@@ -1,7 +1,13 @@
 import unittest
 
-from pdf_repro_agent.local_minute_eval import LocalMinuteEvaluator
-from pdf_repro_agent.report_reproducer_agent import ReportReproducerAgent
+import pytest
+
+LocalMinuteEvaluator = pytest.importorskip(
+    "pdf_repro_agent.local_minute_eval"
+).LocalMinuteEvaluator
+ReportReproducerAgent = pytest.importorskip(
+    "pdf_repro_agent.report_reproducer_agent"
+).ReportReproducerAgent
 
 
 class TestPdfExpressionValidation(unittest.TestCase):

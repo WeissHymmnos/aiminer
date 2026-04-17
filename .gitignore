@@ -21,3 +21,10 @@ project_bundle.md
 # IDEs
 .vscode/
 .idea/
+
+# Frontend artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
