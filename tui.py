@@ -88,7 +88,7 @@ class TUIApp(App):
         ("l", "vim_right", "Right"),
     ]
 
-    def __init__(self, manager_ctx=None):
+    def __init__(self):
         super().__init__()
         self.db_path = "results/alpha_miner.db"
         self.current_expression = "Rank(Delta($close, 5))"
@@ -100,7 +100,6 @@ class TUIApp(App):
         )
         self.swarm_running = False
         self.swarm_process = None
-        self.manager_ctx = manager_ctx or multiprocessing.Manager()
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -824,7 +823,7 @@ RRE: {(metrics.get('rre') or 0.0):.4f}
             "market_end": end,
         }
 
-        log_queue = self.manager_ctx.Queue()
+        log_queue = multiprocessing.Queue()
 
         def log_listener():
             while True:
@@ -912,6 +911,5 @@ RRE: {(metrics.get('rre') or 0.0):.4f}
 
 if __name__ == "__main__":
     multiprocessing.set_start_method("spawn", force=True)
-    manager_ctx = multiprocessing.Manager()
-    app = TUIApp(manager_ctx=manager_ctx)
+    app = TUIApp()
     app.run()
