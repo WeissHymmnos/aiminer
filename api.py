@@ -31,7 +31,10 @@ SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
 WIKILINK_RE = re.compile(r"\[\[([A-Za-z0-9_\-]+)\]\]")
 DB_PATH = Path("results/alpha_miner.db")
 SWARM_RUN_DIR = Path("results/swarm_runs")
-FRONTEND_DIST_DIR = Path("frontend_dist")
+FRONTEND_DIST_CANDIDATES = (
+    Path("frontend_dist"),
+    Path("frontend/dist"),
+)
 MAX_CONCURRENT_SWARMS = int(os.getenv("AIMINER_MAX_CONCURRENT_SWARMS", "2"))
 LOG_PAGE_LIMIT_DEFAULT = 100
 LOG_PAGE_LIMIT_MAX = 500
@@ -131,14 +134,37 @@ def _load_json(path: Path) -> Dict[str, Any]:
         return {}
 
 
-def _load_jsonl_slice(path: Path, offset: int = 0, limit: int = LOG_PAGE_LIMIT_DEFAULT) -> Dict[str, Any]:
+def _resolve_frontend_dist_dir() -> Optional[Path]:
+    for candidate in FRONTEND_DIST_CANDIDATES:
+        if (candidate / "index.html").exists():
+            return candidate
+    for candidate in FRONTEND_DIST_CANDIDATES:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _frontend_index_path() -> Optional[Path]:
+    frontend_dir = _resolve_frontend_dist_dir()
+    if not frontend_dir:
+        return None
+    index_path = frontend_dir / "index.html"
+    return index_path if index_path.exists() else None
+
+
+def _load_jsonl_slice(
+    path: Path,
+    offset: int = 0,
+    limit: int = LOG_PAGE_LIMIT_DEFAULT,
+    tail: bool = False,
+) -> Dict[str, Any]:
     if not path.exists():
         return {"items": [], "total": 0, "offset": offset, "next_offset": offset}
     limit = _list_limit(limit, LOG_PAGE_LIMIT_MAX)
     items: List[Dict[str, Any]] = []
     all_lines = path.read_text(encoding="utf-8").splitlines()
     total = len(all_lines)
-    start = max(0, offset)
+    start = max(0, total - limit) if tail else max(0, offset)
     end = min(total, start + limit)
     for line in all_lines[start:end]:
         line = line.strip()
@@ -744,8 +770,8 @@ async def startup_event() -> None:
 
 @app.get("/", response_model=None)
 def read_index():
-    index_path = FRONTEND_DIST_DIR / "index.html"
-    if index_path.exists():
+    index_path = _frontend_index_path()
+    if index_path:
         return HTMLResponse(index_path.read_text(encoding="utf-8"))
     return PlainTextResponse(
         "AIMiner API server.\nFrontend assets are not built.\n",
@@ -1305,13 +1331,14 @@ def get_swarm_run_logs(
     run_id: str,
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=LOG_PAGE_LIMIT_DEFAULT, ge=1),
+    tail: bool = Query(default=False),
     actor: Actor = Depends(_require_actor),
 ) -> Dict[str, Any]:
     run_id = _safe_segment(run_id)
-    _audit(actor, "swarm.logs", run_id, {"offset": offset, "limit": limit})
+    _audit(actor, "swarm.logs", run_id, {"offset": offset, "limit": limit, "tail": tail})
     if not _manifest_path(run_id).exists():
         raise HTTPException(404, "run not found")
-    return _load_jsonl_slice(_log_path(run_id), offset=offset, limit=limit)
+    return _load_jsonl_slice(_log_path(run_id), offset=offset, limit=limit, tail=tail)
 
 
 @app.post("/api/swarm/runs/{run_id}/stop")
@@ -1382,7 +1409,9 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             pass
 
 
-if FRONTEND_DIST_DIR.exists():
+FRONTEND_DIST_DIR = _resolve_frontend_dist_dir()
+
+if FRONTEND_DIST_DIR:
     assets_dir = FRONTEND_DIST_DIR / "assets"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
@@ -1392,8 +1421,8 @@ if FRONTEND_DIST_DIR.exists():
 def frontend_fallback(full_path: str):
     if full_path.startswith("api") or full_path.startswith("ws"):
         raise HTTPException(404, "not found")
-    index_path = FRONTEND_DIST_DIR / "index.html"
-    if index_path.exists():
+    index_path = _frontend_index_path()
+    if index_path:
         return HTMLResponse(index_path.read_text(encoding="utf-8"))
     return PlainTextResponse("frontend not built", status_code=404)
 

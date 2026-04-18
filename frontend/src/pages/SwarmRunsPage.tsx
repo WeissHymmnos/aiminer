@@ -34,7 +34,7 @@ export function SwarmRunsPage() {
   const queryClient = useQueryClient();
   const runs = useQuery({
     queryKey: ["runs"],
-    queryFn: api.listRuns,
+    queryFn: api.listAllRuns,
     refetchInterval: 5000,
   });
   const swarmStatus = useQuery({
@@ -148,7 +148,7 @@ export function SwarmRunsPage() {
 
       <SectionCard title="Swarm Runs">
         <div className="list">
-          {(runs.data?.items ?? []).map((run: SwarmRunSummary) => (
+          {(runs.data ?? []).map((run: SwarmRunSummary) => (
             <Link key={run.run_id} className="list-row" to={`/runs/${run.run_id}`}>
               <div>
                 <strong>{run.run_id}</strong>
@@ -160,7 +160,7 @@ export function SwarmRunsPage() {
               </div>
             </Link>
           ))}
-          {!runs.data?.items?.length ? <p className="muted">No runs yet.</p> : null}
+          {!runs.data?.length ? <p className="muted">No runs yet.</p> : null}
         </div>
       </SectionCard>
     </div>

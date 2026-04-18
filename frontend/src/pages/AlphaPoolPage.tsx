@@ -11,7 +11,7 @@ export function AlphaPoolPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const factors = useQuery({
     queryKey: ["factors"],
-    queryFn: () => api.listFactors(),
+    queryFn: () => api.listAllFactors(),
     refetchInterval: 10000,
   });
   const factorDetail = useQuery({
@@ -24,7 +24,7 @@ export function AlphaPoolPage() {
     <div className="page-grid two-col">
       <SectionCard title="Alpha Pool">
         <div className="list">
-          {(factors.data?.items ?? []).map((factor: FactorSummary) => (
+          {(factors.data ?? []).map((factor: FactorSummary) => (
             <button
               type="button"
               key={factor.id}

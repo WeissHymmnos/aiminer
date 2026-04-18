@@ -19,19 +19,19 @@ export function SwarmRunDetailPage() {
   });
   const logs = useQuery({
     queryKey: ["run-logs", runId],
-    queryFn: () => api.getRunLogs(runId, 0, 200),
+    queryFn: () => api.getRunLogs(runId, 0, 200, true),
     enabled: Boolean(runId),
     refetchInterval: 5000,
   });
   const factors = useQuery({
     queryKey: ["run-factors", runId],
-    queryFn: () => api.listFactors(runId),
+    queryFn: () => api.listAllFactors(runId),
     enabled: Boolean(runId),
     refetchInterval: 8000,
   });
   const strategies = useQuery({
     queryKey: ["run-strategies", runId],
-    queryFn: () => api.getStrategies(runId),
+    queryFn: () => api.listAllStrategies(runId),
     enabled: Boolean(runId),
     refetchInterval: 8000,
   });
@@ -99,7 +99,7 @@ export function SwarmRunDetailPage() {
             <div>
               <h3>Factors</h3>
               <div className="list compact">
-                {(factors.data?.items ?? []).map((factor) => (
+                {(factors.data ?? []).map((factor) => (
                   <div key={factor.id} className="list-row">
                     <div>
                       <strong>{factor.id}</strong>
@@ -113,7 +113,7 @@ export function SwarmRunDetailPage() {
             <div>
               <h3>Strategies</h3>
               <div className="list compact">
-                {(strategies.data?.items ?? []).map((strategy) => (
+                {(strategies.data ?? []).map((strategy) => (
                   <div key={strategy.strategy_id} className="list-row">
                     <div>
                       <strong>{strategy.label ?? strategy.strategy_id}</strong>

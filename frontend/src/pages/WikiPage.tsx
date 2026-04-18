@@ -20,13 +20,13 @@ export function WikiPage() {
   const [mode, setMode] = useState<Mode>("global");
   const index = useQuery({
     queryKey: ["wiki-index"],
-    queryFn: api.wikiIndex,
+    queryFn: api.wikiIndexAll,
   });
   const graph = useQuery({
     queryKey: ["wiki-graph"],
     queryFn: api.wikiGraph,
   });
-  const initialSlug = (index.data?.items?.[0]?.slug as string | undefined) ?? null;
+  const initialSlug = (index.data?.[0]?.slug as string | undefined) ?? null;
   const slug = selectedSlug ?? initialSlug;
   const page = useQuery({
     queryKey: ["wiki-page", slug],
@@ -55,7 +55,7 @@ export function WikiPage() {
     <div className="wiki-layout">
       <SectionCard title="Wiki Index" className="wiki-index">
         <div className="list">
-          {(index.data?.items ?? []).map((item) => {
+          {(index.data ?? []).map((item) => {
             const itemSlug = String(item.slug ?? "");
             return (
               <button

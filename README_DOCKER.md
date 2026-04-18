@@ -26,6 +26,22 @@ This project supports containerized execution via Docker, ensuring a consistent 
 4. **Access the API**:
    The API will be available at `http://localhost:8000`.
 
+## Standalone Frontend Container
+
+If you want the React frontend as a separate container instead of letting FastAPI serve the built assets:
+
+```bash
+docker build -t aiminer-web:latest -f frontend/Dockerfile frontend
+docker run --rm -p 8080:80 \
+  -e AIMINER_API_UPSTREAM=http://host.docker.internal:8000 \
+  aiminer-web:latest
+```
+
+Notes:
+- The Nginx image now proxies both `/api` and `/ws` to `AIMINER_API_UPSTREAM`.
+- The default upstream is `http://api:8000`, which matches a Docker network where the backend service is named `api`.
+- If you need the frontend bundle to call a fixed remote backend directly, build with `--build-arg VITE_API_BASE_URL=...` and optionally `--build-arg VITE_WS_BASE_URL=...`.
+
 ## Building and Running Manually (without Compose)
 
 1. **Build the image**:

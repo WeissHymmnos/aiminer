@@ -3,6 +3,31 @@ import { getStoredToken } from "./api";
 
 export type SocketEvent = Record<string, unknown>;
 
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, "");
+}
+
+function getSocketOrigin() {
+  const configuredWsBase = import.meta.env.VITE_WS_BASE_URL?.trim();
+  if (configuredWsBase) {
+    return trimTrailingSlash(configuredWsBase);
+  }
+
+  const configuredApiBase = import.meta.env.VITE_API_BASE_URL?.trim();
+  if (configuredApiBase) {
+    try {
+      const apiUrl = new URL(configuredApiBase);
+      apiUrl.protocol = apiUrl.protocol === "https:" ? "wss:" : "ws:";
+      return apiUrl.origin;
+    } catch {
+      // Relative API bases should continue to use the current origin.
+    }
+  }
+
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  return `${protocol}://${window.location.host}`;
+}
+
 export function useSocketFeed() {
   const [events, setEvents] = useState<SocketEvent[]>([]);
 
@@ -14,10 +39,9 @@ export function useSocketFeed() {
     let reconnectTimer = 0;
 
     function connect() {
-      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
       const token = getStoredToken();
       const query = token ? `?token=${encodeURIComponent(token)}` : "";
-      socket = new WebSocket(`${protocol}://${window.location.host}/ws${query}`);
+      socket = new WebSocket(`${getSocketOrigin()}/ws${query}`);
       socket.onmessage = (event) => {
         try {
           const payload = JSON.parse(event.data) as SocketEvent;
