@@ -7,6 +7,8 @@
 # Data and Results
 data/chroma_db/
 data/rag_docs/macro_news/
+data/local_futures/
+data/test_db/
 results/
 logs/
 target/
