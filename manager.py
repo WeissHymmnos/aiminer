@@ -14,6 +14,8 @@ import uuid
 
 from sub_agent import AlphaResearcher
 from agents.summary_agent import SummaryAgent
+from agents.portfolio_agent import PortfolioAgent
+from core.portfolio import construct_portfolio
 from core.alphaeval.rq_eval import init_rq_auth
 from core.runtime import log_context, new_agent_id, new_run_id
 from core.settings import build_settings
@@ -162,6 +164,20 @@ class PortfolioManager:
                     cursor.execute(ddl)
                 except sqlite3.OperationalError:
                     pass  # column already exists
+                    
+            # Portfolio table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS portfolio_pool (
+                    id TEXT PRIMARY KEY,
+                    run_id TEXT,
+                    method TEXT,
+                    rationale TEXT,
+                    weights_json TEXT,
+                    returns_json TEXT,
+                    diversification_ratio REAL,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             conn.commit()
         ensure_strategy_table(self.db_path)
         self._backfill_from_json()
@@ -547,6 +563,52 @@ class PortfolioManager:
                         logger.warning(
                             f"[Strategy DB] Failed to persist strategy '{payload.get('strategy_id', '?')}': {exc}"
                         )
+
+            # --- Portfolio Construction ---
+            if len(self.alpha_pool) >= 2:
+                logger.info("=== Synthesizing Factor Portfolio ===")
+                try:
+                    portfolio_agent = PortfolioAgent(
+                        provider=self.kwargs.get("llm_provider"),
+                        model=self.kwargs.get("llm_model"),
+                        base_url=self.kwargs.get("llm_base_url")
+                    )
+                    returns_dict = {}
+                    factors_for_portfolio = []
+                    for factor in self.alpha_pool:
+                        fid = factor.get("id")
+                        ret = factor.get("returns")
+                        if fid and ret is not None and not (hasattr(ret, "empty") and ret.empty):
+                            returns_dict[fid] = pd.Series(ret)
+                            factors_for_portfolio.append(factor)
+                            
+                    if len(returns_dict) >= 2:
+                        returns_df = pd.DataFrame(returns_dict)
+                        # Ensure numeric index for correlation if needed, or date parsing
+                        decision = portfolio_agent.select_method(factors_for_portfolio, returns_df)
+                        portfolio_result = construct_portfolio(returns_dict, method=decision.method)
+                        logger.success(f"Portfolio constructed using {decision.method} | Diversification Ratio: {portfolio_result['diversification_ratio']:.4f}")
+                        
+                        # Persist to database
+                        with sqlite3.connect(self.db_path) as conn:
+                            cursor = conn.cursor()
+                            pid = f"portfolio_{uuid.uuid4().hex[:8]}"
+                            cursor.execute("""
+                                INSERT INTO portfolio_pool (id, run_id, method, rationale, weights_json, returns_json, diversification_ratio)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """, (
+                                pid,
+                                self.run_id,
+                                decision.method,
+                                decision.rationale,
+                                json.dumps(portfolio_result["weights"], ensure_ascii=False),
+                                json.dumps(_serialize_returns(portfolio_result["portfolio_returns"]), ensure_ascii=False),
+                                float(portfolio_result["diversification_ratio"])
+                            ))
+                            conn.commit()
+                except Exception as e:
+                    logger.error(f"Portfolio construction failed: {e}")
+            # ------------------------------
 
             logger.info(
                 f"Swarm execution completed. {len(self.alpha_pool)} orthogonal factors found; {len(self.strategy_pool)} strategies evaluated."
