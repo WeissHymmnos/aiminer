@@ -79,6 +79,34 @@ def _json_dumps(payload: Dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
+_ALPHA_POOL_OPTIONAL_COLUMNS: Dict[str, str] = {
+    "selection_score": "REAL",
+    "best_strategy_id": "TEXT",
+    "best_strategy_metrics_json": "TEXT",
+    "execution_style": "TEXT",
+}
+
+
+def _ensure_alpha_pool_schema(conn: sqlite3.Connection) -> None:
+    """Idempotent ALTER TABLE so reads can rely on the extended columns."""
+    try:
+        existing = {
+            row[1] for row in conn.execute("PRAGMA table_info(alpha_pool)").fetchall()
+        }
+    except sqlite3.OperationalError:
+        return  # table not created yet
+    if not existing:
+        return
+    for column, sql_type in _ALPHA_POOL_OPTIONAL_COLUMNS.items():
+        if column in existing:
+            continue
+        try:
+            conn.execute(f"ALTER TABLE alpha_pool ADD COLUMN {column} {sql_type}")
+        except sqlite3.OperationalError:
+            pass
+    conn.commit()
+
+
 def _db_connect() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.execute("PRAGMA journal_mode=WAL")
@@ -532,9 +560,13 @@ def _paginate_rows(rows: list[sqlite3.Row], offset: int, limit: int) -> Dict[str
 
 def _row_to_factor_detail(row: sqlite3.Row) -> Dict[str, Any]:
     payload = dict(row)
-    for column in ("metrics_json", "returns_json"):
+    for column in ("metrics_json", "returns_json", "best_strategy_metrics_json"):
         raw = payload.pop(column, None)
-        target = "metrics" if column == "metrics_json" else "returns"
+        target = {
+            "metrics_json": "metrics",
+            "returns_json": "returns",
+            "best_strategy_metrics_json": "best_strategy_metrics",
+        }[column]
         if not raw:
             payload[target] = {}
             continue
@@ -704,6 +736,9 @@ class StrategyRunRequest(BaseModel):
 @app.on_event("startup")
 async def startup_event() -> None:
     _ensure_runtime_dirs()
+    if DB_PATH.exists():
+        with _db_connect() as conn:
+            _ensure_alpha_pool_schema(conn)
     state.loop = asyncio.get_running_loop()
 
 
@@ -737,26 +772,20 @@ def get_results(
         run_id = _safe_segment(run_id)
     if not DB_PATH.exists():
         return {"items": [], "total": 0, "offset": offset, "next_offset": offset}
+    select_cols = (
+        "id, role, hypothesis, code, ic, rank_ic, is_effective, "
+        "perf_metric, selection_score, best_strategy_id, report_path, timestamp, run_id"
+    )
     with _db_connect() as conn:
+        _ensure_alpha_pool_schema(conn)
         if run_id:
             rows = conn.execute(
-                """
-                SELECT id, role, hypothesis, code, ic, rank_ic, is_effective,
-                       perf_metric, report_path, timestamp, run_id
-                FROM alpha_pool
-                WHERE run_id=?
-                ORDER BY timestamp DESC
-                """,
+                f"SELECT {select_cols} FROM alpha_pool WHERE run_id=? ORDER BY timestamp DESC",
                 (run_id,),
             ).fetchall()
         else:
             rows = conn.execute(
-                """
-                SELECT id, role, hypothesis, code, ic, rank_ic, is_effective,
-                       perf_metric, report_path, timestamp, run_id
-                FROM alpha_pool
-                ORDER BY timestamp DESC
-                """
+                f"SELECT {select_cols} FROM alpha_pool ORDER BY timestamp DESC"
             ).fetchall()
     return _paginate_rows(list(rows), offset, limit)
 
@@ -768,9 +797,21 @@ def get_factor_detail(factor_id: str) -> Dict[str, Any]:
         raise HTTPException(404, "db missing")
     with _db_connect() as conn:
         row = conn.execute("SELECT * FROM alpha_pool WHERE id=?", (factor_id,)).fetchone()
+        strategy_row = None
+        if row and "best_strategy_id" in row.keys() and row["best_strategy_id"]:
+            try:
+                strategy_row = conn.execute(
+                    "SELECT * FROM strategy_backtests WHERE strategy_id=?",
+                    (row["best_strategy_id"],),
+                ).fetchone()
+            except sqlite3.OperationalError:
+                strategy_row = None
     if not row:
         raise HTTPException(404, "factor not found")
-    return _row_to_factor_detail(row)
+    payload = _row_to_factor_detail(row)
+    if strategy_row:
+        payload["best_strategy"] = _row_to_strategy_detail(strategy_row)
+    return payload
 
 
 @app.get("/api/charts/{factor_id}")
@@ -838,6 +879,56 @@ def wiki_page(slug: str) -> PlainTextResponse:
 @app.get("/api/wiki/graph")
 def wiki_graph() -> Dict[str, Any]:
     return _build_wiki_graph()
+
+
+class ResetRequest(BaseModel):
+    scopes: List[str] = Field(
+        default_factory=lambda: ["pool"],
+        description="One or more of: pool, memory, rag, runs, all.",
+    )
+    confirm: bool = Field(
+        default=False,
+        description="When false, returns the dry-run plan without moving anything.",
+    )
+    reset_token: Optional[str] = Field(
+        default=None,
+        description=(
+            "Required when confirm=true: must equal AIMINER_RESET_TOKEN env var. "
+            "Defends against accidental destructive POSTs by reusing-API-token clients."
+        ),
+    )
+
+
+@app.post("/api/admin/reset")
+def admin_reset(
+    req: ResetRequest,
+    actor: Actor = Depends(_require_actor),
+) -> Dict[str, Any]:
+    """Wipe mining artifacts. Always reversible (moves into results/.trash/<ts>/)."""
+    from scripts.reset_workspace import build_plan, execute_plan, render_plan
+
+    if req.confirm:
+        expected = os.getenv("AIMINER_RESET_TOKEN")
+        if not expected:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="AIMINER_RESET_TOKEN is not configured on the server",
+            )
+        if not req.reset_token or req.reset_token != expected:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="reset_token mismatch",
+            )
+
+    try:
+        plan = build_plan(req.scopes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    _audit(actor, "admin.reset", ",".join(plan.scopes), {"confirm": req.confirm})
+    summary = execute_plan(plan, confirm=req.confirm)
+    summary["plan_text"] = render_plan(plan)
+    return summary
 
 
 @app.post("/api/wiki/lint")
@@ -1007,26 +1098,48 @@ def get_strategies(
     if not DB_PATH.exists():
         return {"items": [], "total": 0, "offset": offset, "next_offset": offset}
     with _db_connect() as conn:
-        if run_id:
-            rows = conn.execute(
-                """
-                SELECT strategy_id, label, strategy_mode, metrics_json, market, engine,
-                       ran_at, run_id, source_factor_id
-                FROM strategy_backtests
-                WHERE run_id=?
-                ORDER BY ran_at DESC
-                """,
-                (run_id,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """
-                SELECT strategy_id, label, strategy_mode, metrics_json, market, engine,
-                       ran_at, run_id, source_factor_id
-                FROM strategy_backtests
-                ORDER BY ran_at DESC
-                """
-            ).fetchall()
+        try:
+            if run_id:
+                rows = conn.execute(
+                    """
+                    SELECT strategy_id, label, strategy_mode, metrics_json, market, engine,
+                           ran_at, run_id, source_factor_id, candidate_rank, selection_score, is_primary
+                    FROM strategy_backtests
+                    WHERE run_id=?
+                    ORDER BY ran_at DESC
+                    """,
+                    (run_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT strategy_id, label, strategy_mode, metrics_json, market, engine,
+                           ran_at, run_id, source_factor_id, candidate_rank, selection_score, is_primary
+                    FROM strategy_backtests
+                    ORDER BY ran_at DESC
+                    """
+                ).fetchall()
+        except sqlite3.OperationalError:
+            if run_id:
+                rows = conn.execute(
+                    """
+                    SELECT strategy_id, label, strategy_mode, metrics_json, market, engine,
+                           ran_at, run_id, source_factor_id, NULL AS candidate_rank, NULL AS selection_score, NULL AS is_primary
+                    FROM strategy_backtests
+                    WHERE run_id=?
+                    ORDER BY ran_at DESC
+                    """,
+                    (run_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT strategy_id, label, strategy_mode, metrics_json, market, engine,
+                           ran_at, run_id, source_factor_id, NULL AS candidate_rank, NULL AS selection_score, NULL AS is_primary
+                    FROM strategy_backtests
+                    ORDER BY ran_at DESC
+                    """
+                ).fetchall()
     paged = _paginate_rows(list(rows), offset, limit)
     items: List[Dict[str, Any]] = []
     for row in paged["items"]:

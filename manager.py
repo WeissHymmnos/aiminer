@@ -112,6 +112,10 @@ class PortfolioManager:
                     returns_json TEXT,
                     is_effective INTEGER,
                     perf_metric REAL,
+                    selection_score REAL,
+                    best_strategy_id TEXT,
+                    best_strategy_metrics_json TEXT,
+                    execution_style TEXT,
                     run_id TEXT,
                     agent_id TEXT,
                     iteration INTEGER,
@@ -138,6 +142,10 @@ class PortfolioManager:
                 ("returns_json", "ALTER TABLE alpha_pool ADD COLUMN returns_json TEXT"),
                 ("is_effective", "ALTER TABLE alpha_pool ADD COLUMN is_effective INTEGER"),
                 ("perf_metric",  "ALTER TABLE alpha_pool ADD COLUMN perf_metric REAL"),
+                ("selection_score", "ALTER TABLE alpha_pool ADD COLUMN selection_score REAL"),
+                ("best_strategy_id", "ALTER TABLE alpha_pool ADD COLUMN best_strategy_id TEXT"),
+                ("best_strategy_metrics_json", "ALTER TABLE alpha_pool ADD COLUMN best_strategy_metrics_json TEXT"),
+                ("execution_style", "ALTER TABLE alpha_pool ADD COLUMN execution_style TEXT"),
                 ("run_id", "ALTER TABLE alpha_pool ADD COLUMN run_id TEXT"),
                 ("agent_id", "ALTER TABLE alpha_pool ADD COLUMN agent_id TEXT"),
                 ("iteration", "ALTER TABLE alpha_pool ADD COLUMN iteration INTEGER"),
@@ -266,6 +274,11 @@ class PortfolioManager:
         for new_factor in valid_factors:
             is_redundant = False
             new_returns = new_factor.get("returns", pd.Series(dtype=float))
+            strategy_returns = new_factor.get("strategy_daily_returns") or {}
+            if strategy_returns:
+                new_returns = pd.Series(strategy_returns)
+                new_returns.index = pd.to_datetime(new_returns.index, errors="coerce")
+                new_returns = new_returns[new_returns.index.notna()].sort_index()
 
             if new_returns.empty:
                 logger.warning(
@@ -275,6 +288,11 @@ class PortfolioManager:
 
             for existing_factor in final_pool:
                 existing_returns = existing_factor.get("returns")
+                existing_strategy_returns = existing_factor.get("strategy_daily_returns") or {}
+                if existing_strategy_returns:
+                    existing_returns = pd.Series(existing_strategy_returns)
+                    existing_returns.index = pd.to_datetime(existing_returns.index, errors="coerce")
+                    existing_returns = existing_returns[existing_returns.index.notna()].sort_index()
                 if existing_returns is None or (
                     hasattr(existing_returns, "empty") and existing_returns.empty
                 ):
@@ -307,7 +325,14 @@ class PortfolioManager:
                     f"[Accepted] {new_factor['role'][:30]}... (IC: {new_factor['perf_metric']:.4f}) added to Alpha Pool."
                 )
 
-        self.alpha_pool = final_pool
+        self.alpha_pool = sorted(
+            final_pool,
+            key=lambda item: (
+                float(item.get("selection_score", float("-inf")) or float("-inf")),
+                float(item.get("perf_metric", 0.0) or 0.0),
+            ),
+            reverse=True,
+        )
         return self.alpha_pool
 
     def run_swarm(self, parallel=False, log_queue=None):
@@ -456,10 +481,11 @@ class PortfolioManager:
                                 INSERT OR REPLACE INTO alpha_pool
                                     (id, role, hypothesis, code, ic, rank_ic, report_path,
                                      metrics_json, returns_json, is_effective, perf_metric,
+                                     selection_score, best_strategy_id, best_strategy_metrics_json, execution_style,
                                      run_id, agent_id, iteration, evaluation_mode,
                                      evaluation_engine, data_backend, market_mode, market_profile,
                                      llm_provider, llm_model, is_simulated)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """,
                                 (
                                     factor.get("id"),
@@ -475,6 +501,10 @@ class PortfolioManager:
                                     if isinstance(is_effective, bool)
                                     else is_effective,
                                     factor.get("perf_metric"),
+                                    factor.get("selection_score"),
+                                    factor.get("best_strategy_id"),
+                                    json.dumps(factor.get("best_strategy_metrics") or {}, ensure_ascii=False),
+                                    factor.get("execution_style"),
                                     factor.get("run_id", self.run_id),
                                     factor.get("agent_id"),
                                     factor.get("iteration"),
@@ -543,6 +573,28 @@ class PortfolioManager:
         ]
         strategy_results = []
         for factor in self.alpha_pool:
+            existing_results = factor.get("strategy_results") or []
+            if existing_results:
+                for idx, result in enumerate(existing_results, start=1):
+                    result.setdefault("run_type", "strategy_backtest")
+                    result.setdefault("status", "ok")
+                    result.setdefault("chart_paths", {})
+                    result.setdefault("ran_at", time.strftime("%Y-%m-%dT%H:%M:%S"))
+                    result.setdefault("label", (result.get("strategy_config") or {}).get("label"))
+                    result.setdefault("market", (result.get("strategy_config") or {}).get("market"))
+                    result.setdefault("engine", (result.get("strategy_config") or {}).get("engine"))
+                    result["run_id"] = self.run_id
+                    result["source_factor_id"] = factor.get("id")
+                    result["agent_id"] = factor.get("agent_id")
+                    result["candidate_rank"] = result.get("candidate_rank", idx)
+                    result["is_primary"] = bool(result.get("is_primary", idx == 1))
+                    result["selection_score"] = float(
+                        result.get("selection_score", factor.get("selection_score", factor.get("perf_metric", 0.0))) or 0.0
+                    )
+                    result["market_profile"] = factor.get("market_profile", self.settings.market_profile)
+                    result["data_backend"] = factor.get("data_backend", self.settings.data_backend)
+                    strategy_results.append(result)
+                continue
             expression = factor.get("code")
             if not expression:
                 continue
@@ -574,6 +626,14 @@ class PortfolioManager:
                     continue
                 result["run_id"] = self.run_id
                 result["source_factor_id"] = factor.get("id")
+                result["agent_id"] = factor.get("agent_id")
+                result["candidate_rank"] = len(strategy_results) + 1
+                result["is_primary"] = template_name == selected_templates[0]
+                result["selection_score"] = float(
+                    factor.get("selection_score", factor.get("perf_metric", 0.0)) or 0.0
+                )
+                result["market_profile"] = factor.get("market_profile", self.settings.market_profile)
+                result["data_backend"] = factor.get("data_backend", self.settings.data_backend)
                 strategy_results.append(result)
         self.strategy_pool = strategy_results
         return self.strategy_pool
@@ -666,7 +726,27 @@ if __name__ == "__main__":
         "--use-gpu", action="store_true", help="Use GPU for local RAG embedding"
     )
     parser.add_argument("--rebuild-rag", action="store_true", help="Force rebuild RAG")
+    parser.add_argument(
+        "--reset",
+        action="append",
+        choices=("pool", "memory", "rag", "runs", "all"),
+        help=(
+            "Wipe mining artifacts before starting the swarm. Repeatable. "
+            "Always runs as a confirmed move into results/.trash/<ts>/. "
+            "Run scripts/reset_workspace.py for dry-run inspection."
+        ),
+    )
     args = parser.parse_args()
+
+    if args.reset:
+        from scripts.reset_workspace import build_plan, execute_plan, render_plan, render_result
+
+        plan = build_plan(args.reset)
+        print(render_plan(plan))
+        summary = execute_plan(plan, confirm=True)
+        print()
+        print(render_result(summary))
+        print()
 
     manager = PortfolioManager(
         roles=args.roles,
