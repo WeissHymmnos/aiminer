@@ -179,6 +179,40 @@ class HybridKnowledge:
                     "simulated": is_simulated,
                 },
             )
+            best_strategy = state.get("best_strategy_result") or {}
+            if best_strategy and best_strategy.get("strategy_id") and (best_strategy.get("metrics") or best_strategy.get("strategy_config")):
+                strategy_slug = f"{slug}_strategy"
+                strategy_metrics = best_strategy.get("metrics") or {}
+                strategy_summary = (
+                    f"{best_strategy.get('label') or best_strategy.get('template_name') or 'strategy'} "
+                    f"(Sharpe {float(strategy_metrics.get('sharpe', 0.0) or 0.0):.4f}, "
+                    f"AR {float(strategy_metrics.get('annualized_return', 0.0) or 0.0):.4f})"
+                )
+                strategy_content = (
+                    f"**Source Factor**: [[{slug}]]\n\n"
+                    f"**Execution Style**: {state.get('execution_style', '')}\n\n"
+                    f"**Strategy Config**: {best_strategy.get('strategy_config', {})}\n\n"
+                    f"**Metrics**: {strategy_metrics}\n\n"
+                    f"**Trade Stats**: {best_strategy.get('trade_stats', {})}\n\n"
+                    f"**Rationale**: {best_strategy.get('rationale', '')}\n"
+                )
+                self.wiki.add_or_update_page(
+                    slug=strategy_slug,
+                    title=f"{title} Strategy",
+                    content=strategy_content,
+                    metadata={
+                        "type": "strategy_experiment",
+                        "node_type": "execution_strategy",
+                        "status": "active" if is_effective else "failed",
+                        "summary": strategy_summary,
+                        "tags": [*tags, "strategy"],
+                        "parents": [slug],
+                        "related": [slug, *related],
+                        "market_profile": state.get("market_profile"),
+                        "data_backend": state.get("data_backend"),
+                        "selection_score": state.get("selection_score", 0.0),
+                    },
+                )
             return {}  # Side effect only
         except Exception as e:
             logger.error(f"Failed to update Wiki: {e}")

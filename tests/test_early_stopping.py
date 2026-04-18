@@ -8,14 +8,24 @@ class TestEarlyStopping(unittest.TestCase):
     # Early stopping logic lives in route_after_wiki.
 
     def test_route_after_eval_goes_to_wiki(self):
-        # Normal path: eval routes to wiki_update
+        # Low-IC path skips strategy stage and goes straight to wiki_update
         state: AlphaMinerState = {
             "iteration": 1,
             "max_iterations": 10,
-            "backtest_metrics": {"information_coefficient": 0.02},
+            "backtest_metrics": {"information_coefficient": 0.002},
             "patience_counter": 0,
         }
         self.assertEqual(route_after_eval(state), "wiki_update")
+
+    def test_route_after_eval_goes_to_strategy_when_factor_passes_gate(self):
+        state: AlphaMinerState = {
+            "iteration": 1,
+            "max_iterations": 10,
+            "code_expression": "Rank(Delta($close, 5))",
+            "backtest_metrics": {"information_coefficient": 0.02},
+            "patience_counter": 0,
+        }
+        self.assertEqual(route_after_eval(state), "strategy_agent")
 
     def test_route_after_eval_error_goes_to_end(self):
         state: AlphaMinerState = {
@@ -39,12 +49,12 @@ class TestEarlyStopping(unittest.TestCase):
         )
 
     def test_patience_exhausted_early_stop(self):
-        # 测试耐心耗尽早停 (patience >= 3)
+        # 测试耐心耗尽早停 (patience >= 4)
         state: AlphaMinerState = {
             "iteration": 5,
             "max_iterations": 10,
             "backtest_metrics": {"information_coefficient": 0.01},
-            "patience_counter": 3,
+            "patience_counter": 4,
         }
         next_node = route_after_wiki(state)
         self.assertEqual(

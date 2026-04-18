@@ -15,6 +15,8 @@ def test_results_endpoint_returns_paginated_shape():
     mod = _module()
     payload = mod.get_results(run_id=None, offset=0, limit=10)
     assert {"items", "total", "offset", "next_offset"} <= set(payload.keys())
+    if payload["items"]:
+        assert {"selection_score", "best_strategy_id"} <= set(payload["items"][0].keys())
 
 
 def test_wiki_index_returns_paginated_shape():

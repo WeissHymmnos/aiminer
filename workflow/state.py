@@ -32,11 +32,30 @@ class AlphaMinerState(TypedDict, total=False):
 
     # EvalAgent
     backtest_metrics: Dict[str, float]
+    factor_metrics: Dict[str, float]
     daily_returns: Dict[str, float]
     review_summary: str
     is_effective: bool
+    factor_is_effective: bool
     suggested_improvements: str
     is_simulated: bool  # True when backtest used fallback/simulated metrics
+
+    # Strategy stage
+    strategy_candidates: List[Dict[str, object]]
+    strategy_results: List[Dict[str, object]]
+    best_strategy_config: Dict[str, object]
+    best_strategy_metrics: Dict[str, float]
+    best_strategy_id: Optional[str]
+    best_strategy_result: Dict[str, object]
+    strategy_daily_returns: Dict[str, float]
+    execution_style: Optional[str]
+    strategy_failure_reason: Optional[str]
+    selection_score: float
+
+    # Strategy reflexion (critic) stage
+    strategy_refinement_round: int
+    max_strategy_refinement_rounds: int
+    strategy_refinement_history: List[Dict[str, object]]
 
     best_ic: float
     best_code_expression: Optional[str]

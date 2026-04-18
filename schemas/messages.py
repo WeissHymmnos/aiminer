@@ -50,3 +50,46 @@ class ReflexiveReviewOutput(BaseModel):
     suggested_improvements: str = Field(
         description="Specific, actionable suggestions for the next iteration. Include concrete changes to the formula or approach, not generic advice."
     )
+
+
+class StrategyCandidateOutput(BaseModel):
+    """Structured output for a single strategy proposal."""
+
+    template_name: str = Field(description="Closest built-in template name or generated strategy family label.")
+    strategy_mode: str = Field(description="cross_sectional or time_series")
+    direction: str = Field(description="long_only, long_short, or long_flat")
+    selection_rule: str = Field(description="top_n, bottom_n, top_bottom_n, or threshold")
+    rebalance_freq: str = Field(description="daily, weekly, or monthly")
+    thresholds: Dict[str, float] = Field(default_factory=dict)
+    counts: Dict[str, int] = Field(default_factory=dict)
+    holding_constraints: Dict[str, float | int] = Field(default_factory=dict)
+    cost_model: Dict[str, float] = Field(default_factory=dict)
+    rationale: str = Field(description="Why this execution style matches the factor.")
+
+
+class StrategyProposalBatchOutput(BaseModel):
+    """Structured output for strategy candidate generation."""
+
+    execution_style: str = Field(description="Short execution summary, e.g. cs_long_short or ts_trend.")
+    candidates: list[StrategyCandidateOutput] = Field(default_factory=list)
+
+
+class RefinementProposalOutput(BaseModel):
+    """Structured output for the StrategyCritic reflexion step."""
+
+    failure_modes: list[str] = Field(
+        default_factory=list,
+        description="Concise tags for the dominant problems observed in the current best strategy "
+        "(e.g. 'high_turnover', 'deep_drawdown_2020Q1', 'negative_sharpe_in_bear_2022').",
+    )
+    proposals: list[StrategyCandidateOutput] = Field(
+        default_factory=list,
+        description="Up to 2 refined strategy candidates that target the failure modes. "
+        "Only the strategy_config-relevant fields should change (do NOT alter the factor expression).",
+    )
+    should_continue: bool = Field(
+        description="False when the critic believes further refinement is unlikely to help.",
+    )
+    rationale: str = Field(
+        description="One-paragraph explanation of why these proposals address the failure modes."
+    )

@@ -245,10 +245,12 @@ class EvalAgent:
 
             return {
                 "backtest_metrics": metrics,
+                "factor_metrics": metrics,
                 "daily_returns": daily_returns,
                 "plot_paths": plot_paths,
                 "review_summary": review_result.review_summary,
                 "is_effective": review_result.is_effective,
+                "factor_is_effective": review_result.is_effective,
                 "is_simulated": is_simulated,
                 "suggested_improvements": review_result.suggested_improvements,
                 "best_ic": new_best_ic,

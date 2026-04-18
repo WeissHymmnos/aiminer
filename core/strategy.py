@@ -181,6 +181,149 @@ class StrategyBacktestResult:
         }
 
 
+def selection_score(
+    metrics: Dict[str, Any],
+    factor_ic: float = 0.0,
+    walk_forward: Dict[str, Any] | None = None,
+) -> float:
+    """Composite score used to rank strategy candidates.
+
+    Shared by graph.strategy_eval and StrategyCritic so both stages compare
+    candidates on identical math. Weights bias toward risk-adjusted return.
+
+    When a ``walk_forward`` aggregate is provided (with at least 2 windows),
+    half the sharpe weight shifts to the OOS minimum-window sharpe and
+    consistency, so a strategy that only worked in one lucky window gets
+    penalized.
+    """
+    annualized = float(metrics.get("annualized_return", 0.0) or 0.0)
+    sharpe = float(metrics.get("sharpe", 0.0) or 0.0)
+    max_dd = abs(float(metrics.get("max_drawdown", 0.0) or 0.0))
+    turnover = float(metrics.get("turnover", 0.0) or 0.0)
+    cost_drag = float(metrics.get("cost_drag", 0.0) or 0.0)
+
+    base = (
+        0.35 * annualized
+        + 0.35 * sharpe
+        + 0.15 * factor_ic
+        - 0.08 * max_dd
+        - 0.04 * turnover
+        - 0.03 * cost_drag
+    )
+
+    if walk_forward and int(walk_forward.get("n_windows", 0) or 0) >= 2:
+        min_sharpe = float(walk_forward.get("min_sharpe", 0.0) or 0.0)
+        consistency = float(walk_forward.get("consistency", 0.0) or 0.0)
+        sharpe_std = float(walk_forward.get("sharpe_std", 0.0) or 0.0)
+        # Shift weight: half of the in-sample sharpe weight goes to OOS robustness.
+        base -= 0.175 * sharpe
+        base += 0.125 * min_sharpe + 0.05 * consistency - 0.02 * sharpe_std
+    return base
+
+
+def compute_period_metrics(net_returns: pd.Series) -> Dict[str, Dict[str, float]]:
+    """Slice the daily net-return series by year and quarter so the critic
+    can cite concrete failure windows. Empty inputs return an empty dict."""
+    if net_returns is None or net_returns.empty:
+        return {}
+    series = net_returns.copy()
+    series.index = pd.to_datetime(series.index, errors="coerce")
+    series = series[series.index.notna()].sort_index()
+    if series.empty:
+        return {}
+
+    def _stats(window: pd.Series) -> Dict[str, float]:
+        if window.empty:
+            return {"return": 0.0, "sharpe": 0.0, "max_drawdown": 0.0, "win_rate": 0.0, "n_days": 0}
+        cum = (1.0 + window.fillna(0.0)).cumprod()
+        sharpe = (
+            float(window.mean() / window.std() * np.sqrt(252))
+            if float(window.std()) > 1e-12 else 0.0
+        )
+        max_dd = float((cum / cum.cummax() - 1.0).min()) if not cum.empty else 0.0
+        return {
+            "return": float(cum.iloc[-1] - 1.0),
+            "sharpe": sharpe,
+            "max_drawdown": max_dd,
+            "win_rate": float((window > 0).mean()),
+            "n_days": int(window.shape[0]),
+        }
+
+    yearly = {
+        f"{period.year}": _stats(group)
+        for period, group in series.groupby(series.index.to_period("Y"))
+    }
+    quarterly = {
+        f"{period.year}Q{period.quarter}": _stats(group)
+        for period, group in series.groupby(series.index.to_period("Q"))
+    }
+    # Worst 3 months (where loss is largest) — a quick handle for "where it broke"
+    monthly_returns = series.groupby(series.index.to_period("M")).apply(
+        lambda g: float((1.0 + g.fillna(0.0)).prod() - 1.0)
+    )
+    worst_months = (
+        monthly_returns.nsmallest(3).to_dict() if not monthly_returns.empty else {}
+    )
+    return {
+        "yearly": yearly,
+        "quarterly": quarterly,
+        "worst_months": {str(k): float(v) for k, v in worst_months.items()},
+    }
+
+
+def _split_walk_forward_windows(
+    index: pd.DatetimeIndex,
+    n_windows: int,
+    min_window_days: int,
+) -> list[tuple[pd.Timestamp, pd.Timestamp]]:
+    """Split a sorted DatetimeIndex into ``n_windows`` non-overlapping ranges.
+
+    Falls back to fewer windows when the index is too short to satisfy
+    ``min_window_days`` per slice. Returns an empty list when the index has
+    fewer than ``min_window_days`` rows.
+    """
+    if index is None or len(index) == 0:
+        return []
+    sorted_idx = pd.DatetimeIndex(index).sort_values().unique()
+    if len(sorted_idx) < min_window_days:
+        return []
+    feasible_windows = max(1, min(n_windows, len(sorted_idx) // min_window_days))
+    edges = np.linspace(0, len(sorted_idx), feasible_windows + 1, dtype=int)
+    windows: list[tuple[pd.Timestamp, pd.Timestamp]] = []
+    for i in range(feasible_windows):
+        lo, hi = edges[i], edges[i + 1] - 1
+        if hi <= lo:
+            continue
+        windows.append((sorted_idx[lo], sorted_idx[hi]))
+    return windows
+
+
+def aggregate_walk_forward(window_metrics: list[Dict[str, Any]]) -> Dict[str, Any]:
+    """Summarize a list of per-window metric dicts into stability indicators
+    used by selection_score and the StrategyCritic prompt."""
+    if not window_metrics:
+        return {
+            "mean_sharpe": 0.0,
+            "min_sharpe": 0.0,
+            "mean_return": 0.0,
+            "sharpe_std": 0.0,
+            "consistency": 0.0,
+            "n_windows": 0,
+        }
+    sharpes = [float(w.get("sharpe", 0.0) or 0.0) for w in window_metrics]
+    returns = [float(w.get("annualized_return", 0.0) or 0.0) for w in window_metrics]
+    n = len(window_metrics)
+    consistency = sum(1 for s in sharpes if s > 0) / n if n else 0.0
+    return {
+        "mean_sharpe": float(np.mean(sharpes)),
+        "min_sharpe": float(np.min(sharpes)),
+        "mean_return": float(np.mean(returns)),
+        "sharpe_std": float(np.std(sharpes)) if n > 1 else 0.0,
+        "consistency": float(consistency),
+        "n_windows": n,
+    }
+
+
 def _normalize_positions(row: pd.Series, max_weight: float) -> pd.Series:
     row = row.fillna(0.0)
     if row.empty:
@@ -277,6 +420,7 @@ class StrategyBacktester:
                 str(k.date() if hasattr(k, "date") else k): float(v)
                 for k, v in net_returns.fillna(0.0).items()
             },
+            "period_metrics": compute_period_metrics(net_returns),
             "positions": positions_dict,
             "trade_stats": {
                 **trade_stats,
@@ -287,6 +431,46 @@ class StrategyBacktester:
             "raw_positions": positions,
             "raw_returns": net_returns,
         }
+
+    def run_walk_forward(
+        self,
+        signal_df: pd.DataFrame,
+        label_df: pd.DataFrame,
+        *,
+        n_windows: int = 4,
+        min_window_days: int = 63,
+    ) -> Dict[str, Any]:
+        """Evaluate the strategy across non-overlapping rolling windows.
+
+        Returns the same shape as ``run()`` for the *full-sample* fit (so the
+        caller can keep treating it as a single result), plus a
+        ``walk_forward`` block with per-window metrics and aggregated stability
+        indicators. When the panel is too short to slice meaningfully, the
+        ``walk_forward`` block carries ``n_windows=0`` and the caller can
+        gracefully fall back to in-sample logic.
+        """
+        full = self.run(signal_df, label_df)
+        sorted_index = pd.DatetimeIndex(signal_df.index).sort_values().unique()
+        windows = _split_walk_forward_windows(sorted_index, n_windows, min_window_days)
+        per_window: list[Dict[str, Any]] = []
+        for start, end in windows:
+            sig_slice = signal_df.loc[start:end]
+            lbl_slice = label_df.loc[start:end]
+            if sig_slice.empty:
+                continue
+            sub = self.run(sig_slice, lbl_slice)
+            per_window.append(
+                {
+                    "start": str(pd.Timestamp(start).date()),
+                    "end": str(pd.Timestamp(end).date()),
+                    **sub["metrics"],
+                }
+            )
+        full["walk_forward"] = {
+            "windows": per_window,
+            "aggregate": aggregate_walk_forward(per_window),
+        }
+        return full
 
     def _build_cross_sectional_positions(self, signal_df: pd.DataFrame) -> pd.DataFrame:
         cfg = self.config
@@ -439,7 +623,13 @@ def ensure_strategy_table(db_path: str | Path) -> None:
                 engine TEXT,
                 ran_at TEXT,
                 run_id TEXT,
-                source_factor_id TEXT
+                source_factor_id TEXT,
+                agent_id TEXT,
+                candidate_rank INTEGER,
+                selection_score REAL,
+                is_primary INTEGER,
+                market_profile TEXT,
+                data_backend TEXT
             )
             """
         )
@@ -449,6 +639,12 @@ def ensure_strategy_table(db_path: str | Path) -> None:
                 "source_factor_id",
                 "ALTER TABLE strategy_backtests ADD COLUMN source_factor_id TEXT",
             ),
+            ("agent_id", "ALTER TABLE strategy_backtests ADD COLUMN agent_id TEXT"),
+            ("candidate_rank", "ALTER TABLE strategy_backtests ADD COLUMN candidate_rank INTEGER"),
+            ("selection_score", "ALTER TABLE strategy_backtests ADD COLUMN selection_score REAL"),
+            ("is_primary", "ALTER TABLE strategy_backtests ADD COLUMN is_primary INTEGER"),
+            ("market_profile", "ALTER TABLE strategy_backtests ADD COLUMN market_profile TEXT"),
+            ("data_backend", "ALTER TABLE strategy_backtests ADD COLUMN data_backend TEXT"),
         ]:
             try:
                 conn.execute(ddl)
@@ -472,8 +668,9 @@ def persist_strategy_result(db_path: str | Path, payload: Dict[str, Any]) -> Non
                 strategy_id, label, run_type, strategy_mode, signal_source,
                 expression_json, strategy_config_json, metrics_json, daily_returns_json,
                 positions_json, trade_stats_json, chart_paths_json,
-                market, engine, ran_at, run_id, source_factor_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                market, engine, ran_at, run_id, source_factor_id, agent_id,
+                candidate_rank, selection_score, is_primary, market_profile, data_backend
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 payload.get("strategy_id"),
@@ -493,6 +690,12 @@ def persist_strategy_result(db_path: str | Path, payload: Dict[str, Any]) -> Non
                 payload.get("ran_at"),
                 payload.get("run_id"),
                 payload.get("source_factor_id"),
+                payload.get("agent_id"),
+                payload.get("candidate_rank"),
+                payload.get("selection_score"),
+                int(bool(payload.get("is_primary", False))),
+                payload.get("market_profile"),
+                payload.get("data_backend"),
             ),
         )
         conn.commit()
