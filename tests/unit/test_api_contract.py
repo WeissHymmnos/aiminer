@@ -40,6 +40,27 @@ def test_swarm_status_available_when_auth_disabled():
     assert "running_count" in payload
 
 
+def test_missing_auth_token_defaults_to_auth_disabled(monkeypatch):
+    monkeypatch.delenv("AIMINER_DISABLE_AUTH", raising=False)
+    monkeypatch.delenv("AIMINER_AUTH_TOKEN", raising=False)
+
+    mod = _module()
+    actor = mod._require_actor(credentials=None, request=None)
+
+    assert actor.identity == "auth-disabled"
+    assert mod.AUTH_DISABLED is True
+
+
+def test_disconnected_remote_maps_to_service_unavailable():
+    mod = _module()
+    exc = RuntimeError("Disconnected from the remote server")
+
+    http_exc = mod._service_error(exc, "backtest failed")
+
+    assert http_exc.status_code == 503
+    assert "RiceQuant disconnected" in http_exc.detail
+
+
 def test_swarm_logs_tail_returns_recent_entries(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     run_dir = tmp_path / "results" / "swarm_runs"

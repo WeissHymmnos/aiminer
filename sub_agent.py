@@ -1,6 +1,6 @@
 import pandas as pd
 from loguru import logger
-from workflow.graph import build_workflow
+from app_workflow.graph import build_workflow
 from core.runtime import log_context
 from core.settings import AiminerSettings, build_settings
 

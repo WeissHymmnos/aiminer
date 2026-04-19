@@ -11,14 +11,17 @@
             "id": "ed87ac99f55df97e",
             "type": "leaf",
             "state": {
-              "type": "markdown",
+              "type": "canvas",
               "state": {
-                "file": "Clippings/两周代码学习大纲设计.md",
-                "mode": "source",
-                "source": false
+                "file": "未命名.canvas",
+                "viewState": {
+                  "x": 0,
+                  "y": 0,
+                  "zoom": 0
+                }
               },
-              "icon": "lucide-file",
-              "title": "两周代码学习大纲设计"
+              "icon": "lucide-layout-dashboard",
+              "title": "未命名"
             }
           }
         ]
@@ -187,6 +190,7 @@
   "active": "ed87ac99f55df97e",
   "lastOpenFiles": [
     "Clippings/两周代码学习大纲设计.md",
+    "未命名.canvas",
     "Clippings",
     "hurst_scaled_liquidity_weighted_cross_sectional_mean_reversion_iter3.md",
     "hurst_scaled_liquidity_weighted_order_imbalance_reversal_iter2.md",
@@ -211,7 +215,6 @@
     "strategy_families_base.md",
     "index.md",
     "hurst_macro_vol_momentum_iter1.md",
-    "liquidity_adjusted_overnight_reversal_with_sector_dispersion_iter2.md",
-    "liquidity_filtered_overnight_gap_reversal_iter1.md"
+    "liquidity_adjusted_overnight_reversal_with_sector_dispersion_iter2.md"
   ]
 }

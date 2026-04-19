@@ -9,7 +9,7 @@ from loguru import logger
 from agents.strategy_agent import candidate_to_strategy_config
 from core.llm import get_llm
 from schemas.messages import RefinementProposalOutput
-from workflow.state import AlphaMinerState
+from app_workflow.state import AlphaMinerState
 
 
 # Convergence guards. These live as module constants so they can be tweaked or

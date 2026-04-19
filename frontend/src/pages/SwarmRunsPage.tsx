@@ -5,15 +5,28 @@ import { SectionCard } from "../components/SectionCard";
 import { api } from "../lib/api";
 import type { SwarmRunSummary } from "../types";
 
+const modeOptions = ["ricequant", "qlib"];
+const backendOptions = ["ricequant", "qlib", "local"];
+const engineOptions = ["polars", "pandas"];
+const marketModeOptions = ["single", "multi"];
+const localDataLayoutOptions = ["auto", "qlib", "contracts", "dominant"];
+
 const defaultRoles = [
   "专注Hurst指数与分形维度的动量专家",
   "利用高频量价相关性挖掘的量价专家",
   "基于宏观周期切换的行业中性专家",
+  "基于隐马尔可夫模型状态识别的市场环境专家",
+  "专注非线性因子合成与交叉验证的机器学习专家",
+  "利用订单流不平衡捕获微观趋势的盘口专家",
+  "基于协整关系与误差修正模型的统计套利专家",
+  "监测收益率肥尾风险与动态对冲的风险管理专家",
+  "专注财报超预期与公告事件驱动的文本挖掘专家",
+  "利用复杂网络与知识图谱挖掘产业链关联的图计算专家",
 ];
 
 export function SwarmRunsPage() {
   const [form, setForm] = useState({
-    iterations: "8",
+    iterations: "30",
     mode: "ricequant",
     data_backend: "ricequant",
     engine: "polars",
@@ -23,11 +36,11 @@ export function SwarmRunsPage() {
     embedding_provider: "openai",
     market_mode: "single",
     market_profile: "cn_stock",
-    market_profiles: "cn_stock",
+    market_profiles: "cn_stock,us_stock,futures",
     local_data_path: "",
     local_data_layout: "auto",
-    market_start: "2017-01-01",
-    market_end: "2020-10-31",
+    market_start: "2015-01-01",
+    market_end: "2020-12-01",
     parallel: true,
     roles: defaultRoles.join("\n"),
   });
@@ -109,31 +122,133 @@ export function SwarmRunsPage() {
             <input value={form.iterations} onChange={(event) => setForm({ ...form, iterations: event.target.value })} />
           </label>
           <label className="field">
+            Mode
+            <select value={form.mode} onChange={(event) => setForm({ ...form, mode: event.target.value })}>
+              {modeOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            Data Backend
+            <select
+              value={form.data_backend}
+              onChange={(event) => setForm({ ...form, data_backend: event.target.value })}
+            >
+              {backendOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
             Engine
-            <input value={form.engine} onChange={(event) => setForm({ ...form, engine: event.target.value })} />
+            <select value={form.engine} onChange={(event) => setForm({ ...form, engine: event.target.value })}>
+              {engineOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="field">
             LLM Provider
-            <input value={form.llm_provider} onChange={(event) => setForm({ ...form, llm_provider: event.target.value })} />
+            <input
+              value={form.llm_provider}
+              onChange={(event) => setForm({ ...form, llm_provider: event.target.value })}
+            />
           </label>
           <label className="field">
             LLM Model
-            <input value={form.llm_model} onChange={(event) => setForm({ ...form, llm_model: event.target.value })} />
+            <input
+              value={form.llm_model}
+              onChange={(event) => setForm({ ...form, llm_model: event.target.value })}
+            />
+          </label>
+          <label className="field">
+            LLM Base URL
+            <input
+              value={form.llm_base_url}
+              onChange={(event) => setForm({ ...form, llm_base_url: event.target.value })}
+            />
+          </label>
+          <label className="field">
+            Embedding Provider
+            <input
+              value={form.embedding_provider}
+              onChange={(event) => setForm({ ...form, embedding_provider: event.target.value })}
+            />
+          </label>
+          <label className="field">
+            Market Mode
+            <select
+              value={form.market_mode}
+              onChange={(event) => setForm({ ...form, market_mode: event.target.value })}
+            >
+              {marketModeOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="field">
             Market Profile
-            <input value={form.market_profile} onChange={(event) => setForm({ ...form, market_profile: event.target.value })} />
+            <input
+              value={form.market_profile}
+              onChange={(event) => setForm({ ...form, market_profile: event.target.value })}
+            />
           </label>
           <label className="field">
             Market Profiles
-            <input value={form.market_profiles} onChange={(event) => setForm({ ...form, market_profiles: event.target.value })} />
+            <input
+              value={form.market_profiles}
+              onChange={(event) => setForm({ ...form, market_profiles: event.target.value })}
+            />
+          </label>
+          <label className="field">
+            Local Data Path
+            <input
+              value={form.local_data_path}
+              onChange={(event) => setForm({ ...form, local_data_path: event.target.value })}
+            />
+          </label>
+          <label className="field">
+            Local Data Layout
+            <select
+              value={form.local_data_layout}
+              onChange={(event) => setForm({ ...form, local_data_layout: event.target.value })}
+            >
+              {localDataLayoutOptions.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field">
+            Market Start
+            <input
+              value={form.market_start}
+              onChange={(event) => setForm({ ...form, market_start: event.target.value })}
+            />
+          </label>
+          <label className="field">
+            Market End
+            <input
+              value={form.market_end}
+              onChange={(event) => setForm({ ...form, market_end: event.target.value })}
+            />
           </label>
         </div>
         <label className="field">
           Roles
-          <textarea rows={10} value={form.roles} onChange={(event) => setForm({ ...form, roles: event.target.value })} />
+          <textarea rows={12} value={form.roles} onChange={(event) => setForm({ ...form, roles: event.target.value })} />
         </label>
-        <label className="field">
+        <label className="field-toggle">
           <span>Parallel Execution</span>
           <input
             type="checkbox"

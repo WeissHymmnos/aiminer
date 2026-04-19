@@ -46,6 +46,17 @@ async function request<T>(input: string, init?: RequestInit): Promise<T> {
     ...init,
   });
   if (!response.ok) {
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType.includes("application/json")) {
+      try {
+        const payload = (await response.json()) as { detail?: string };
+        throw new Error(payload.detail || `Request failed: ${response.status}`);
+      } catch (error) {
+        if (error instanceof Error) {
+          throw error;
+        }
+      }
+    }
     const text = await response.text();
     throw new Error(text || `Request failed: ${response.status}`);
   }
@@ -98,6 +109,7 @@ export const api = {
   listAllFactors: (runId?: string) =>
     requestAllPages<FactorSummary>(runId ? withQuery("/api/results", { run_id: runId }) : "/api/results"),
   getFactor: (factorId: string) => request<Record<string, unknown>>(`/api/factors/${factorId}`),
+  getBacktest: (jobId: string) => request<Record<string, unknown>>(`/api/backtest/${jobId}`),
   runBacktest: (payload: Record<string, unknown>) =>
     request<Record<string, unknown>>("/api/backtest/run", {
       method: "POST",

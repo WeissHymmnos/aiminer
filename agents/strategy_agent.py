@@ -9,7 +9,7 @@ from loguru import logger
 from core.llm import get_llm
 from core.strategy import StrategyConfig, StrategyProposalOutput, strategy_templates
 from schemas.messages import StrategyProposalBatchOutput
-from workflow.state import AlphaMinerState
+from app_workflow.state import AlphaMinerState
 
 
 def candidate_to_strategy_config(

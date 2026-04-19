@@ -30,43 +30,62 @@ function getSocketOrigin() {
 
 export function useSocketFeed() {
   const [events, setEvents] = useState<SocketEvent[]>([]);
+  const [status, setStatus] = useState<"connecting" | "open" | "closed">("connecting");
 
   useEffect(() => {
     let active = true;
     let retry = 1000;
     let socket: WebSocket | null = null;
-    let pingTimer = 0;
-    let reconnectTimer = 0;
+    let pingTimer: any = 0;
+    let reconnectTimer: any = 0;
 
     function connect() {
       const token = getStoredToken();
       const query = token ? `?token=${encodeURIComponent(token)}` : "";
-      socket = new WebSocket(`${getSocketOrigin()}/ws${query}`);
+      const url = `${getSocketOrigin()}/ws${query}`;
+      
+      console.log(`[WebSocket] Connecting to ${getSocketOrigin()}/ws...`);
+      setStatus("connecting");
+      
+      socket = new WebSocket(url);
+      
       socket.onmessage = (event) => {
+        if (event.data === "pong") return;
         try {
           const payload = JSON.parse(event.data) as SocketEvent;
-          setEvents((previous) => [...previous.slice(-499), payload]);
+          setEvents((previous) => {
+            const next = [...previous, payload];
+            return next.length > 500 ? next.slice(-500) : next;
+          });
           retry = 1000;
-        } catch {
-          return;
+        } catch (e) {
+          console.warn("[WebSocket] Failed to parse message", e);
         }
       };
+
       socket.onopen = () => {
+        console.log("[WebSocket] Connection established");
+        setStatus("open");
+        retry = 1000;
         pingTimer = window.setInterval(() => {
           if (socket?.readyState === WebSocket.OPEN) {
             socket.send("ping");
           }
         }, 15000);
       };
-      socket.onclose = () => {
+
+      socket.onclose = (event) => {
+        setStatus("closed");
         window.clearInterval(pingTimer);
-        if (!active) {
-          return;
-        }
+        if (!active) return;
+        
+        console.log(`[WebSocket] Closed (code: ${event.code}). Retrying in ${retry}ms...`);
         reconnectTimer = window.setTimeout(connect, retry);
-        retry = Math.min(retry * 2, 10000);
+        retry = Math.min(retry * 2, 15000);
       };
-      socket.onerror = () => {
+
+      socket.onerror = (error) => {
+        console.error("[WebSocket] Error occurred", error);
         socket?.close();
       };
     }
@@ -76,11 +95,9 @@ export function useSocketFeed() {
       active = false;
       window.clearInterval(pingTimer);
       window.clearTimeout(reconnectTimer);
-      if (socket) {
-        socket.close();
-      }
+      if (socket) socket.close();
     };
   }, []);
 
-  return events;
+  return { events, status };
 }

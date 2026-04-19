@@ -4,7 +4,7 @@ from langchain_core.prompts import ChatPromptTemplate
 import json
 import re
 from loguru import logger
-from workflow.state import AlphaMinerState
+from app_workflow.state import AlphaMinerState
 from core.llm import get_llm
 from schemas.messages import FormalizationOutput, ImplementationOutput
 

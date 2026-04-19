@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
-from workflow.state import AlphaMinerState
+from app_workflow.state import AlphaMinerState
 from core.hybrid_knowledge import HybridKnowledge
 from core.llm import get_llm
 from schemas.messages import HypothesisOutput

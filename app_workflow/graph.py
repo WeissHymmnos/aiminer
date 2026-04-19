@@ -2,7 +2,7 @@ from __future__ import annotations
 from langgraph.graph import StateGraph, END
 from loguru import logger
 import time
-from workflow.state import AlphaMinerState
+from app_workflow.state import AlphaMinerState
 from agents.idea_agent import IdeaAgent
 from agents.factor_agent import FactorAgent
 from agents.eval_agent import EvalAgent

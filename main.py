@@ -6,7 +6,7 @@ import subprocess
 from datetime import datetime
 from loguru import logger
 
-from workflow.graph import build_workflow
+from app_workflow.graph import build_workflow
 from core.settings import build_settings
 
 

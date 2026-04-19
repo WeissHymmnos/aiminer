@@ -5,7 +5,7 @@ import random
 import hashlib
 import re
 from loguru import logger
-from workflow.state import AlphaMinerState
+from app_workflow.state import AlphaMinerState
 from core.hybrid_knowledge import HybridKnowledge
 from core.llm import get_llm
 from schemas.messages import ReflexiveReviewOutput

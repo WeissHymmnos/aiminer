@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import psutil
+from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
@@ -25,6 +26,8 @@ from core import manual_runner  # noqa: F401  (import-for-side-effect)
 from core.runtime import new_run_id
 from core.wiki import _parse_frontmatter as parse_wiki_frontmatter
 from manager import PortfolioManager
+
+load_dotenv()
 
 
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
@@ -40,8 +43,8 @@ LOG_PAGE_LIMIT_DEFAULT = 100
 LOG_PAGE_LIMIT_MAX = 500
 LIST_PAGE_LIMIT_DEFAULT = 50
 LIST_PAGE_LIMIT_MAX = 200
-AUTH_DISABLED = os.getenv("AIMINER_DISABLE_AUTH", "").lower() in {"1", "true", "yes"}
 AUTH_TOKEN = os.getenv("AIMINER_AUTH_TOKEN")
+AUTH_DISABLED = os.getenv("AIMINER_DISABLE_AUTH", "").lower() in {"1", "true", "yes"} or not AUTH_TOKEN
 ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.getenv(
@@ -272,11 +275,6 @@ def _require_actor(
         provided = credentials.credentials
     if request and not provided:
         provided = request.headers.get("X-API-Key")
-    if not AUTH_TOKEN:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="AIMINER_AUTH_TOKEN is not configured",
-        )
     if not provided or provided != AUTH_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -294,6 +292,16 @@ def _audit(actor: Actor, action: str, target: str, extra: Optional[Dict[str, Any
         "extra": extra or {},
     }
     logger.bind(role="Audit").info(_json_dumps(payload))
+
+
+def _service_error(exc: Exception, fallback: str) -> HTTPException:
+    message = str(exc).strip() or fallback
+    if "Disconnected from the remote server" in message:
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="RiceQuant disconnected from the remote server. Retry later, or switch Data Backend to local/qlib.",
+        )
+    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=message)
 
 
 async def broadcast(message: Dict[str, Any]) -> None:
@@ -1041,7 +1049,7 @@ async def backtest_run(
         raise HTTPException(400, str(exc))
     except Exception as exc:
         logger.error(f"[Manual BT] Unhandled error: {exc}\n{traceback.format_exc()}")
-        raise HTTPException(500, "backtest failed")
+        raise _service_error(exc, "backtest failed")
     result["cached"] = False
     return result
 
@@ -1101,7 +1109,7 @@ async def strategy_run(
         raise HTTPException(400, str(exc))
     except Exception as exc:
         logger.error(f"[Strategy BT] Unhandled error: {exc}\n{traceback.format_exc()}")
-        raise HTTPException(500, "strategy backtest failed")
+        raise _service_error(exc, "strategy backtest failed")
     return result
 
 
@@ -1429,5 +1437,7 @@ def frontend_fallback(full_path: str):
 
 if __name__ == "__main__":
     import uvicorn
+    import multiprocessing
+    multiprocessing.freeze_support()
 
     uvicorn.run(app, host="0.0.0.0", port=8000)
