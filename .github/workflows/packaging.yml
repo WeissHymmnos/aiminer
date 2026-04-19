@@ -105,6 +105,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 释放 Runner 磁盘空间 (PyInstaller onefile 打包 torch+qlib 栈需要 20GB+)
+      - name: Free disk space (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Free disk space (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          # 删除预装的大型工具, 释放 ~15GB
+          Remove-Item -Recurse -Force "C:\Program Files\dotnet" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\Program Files (x86)\Android" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\Program Files\MongoDB" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\Program Files\Google" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\Program Files\Firefox" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "$env:AGENT_TOOLSDIRECTORY\Ruby" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "$env:AGENT_TOOLSDIRECTORY\go" -ErrorAction SilentlyContinue
+          Get-PSDrive
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -138,9 +165,18 @@ jobs:
           # 安装编译产物到当前 Python 环境，让 PyInstaller 能收集
           pip install --force-reinstall --no-deps ../dist_plugins/polars_plugins-*.whl
 
+      - name: 打包前磁盘状况
+        shell: bash
+        run: df -h || Get-PSDrive
+
       - name: Build backend with PyInstaller
         shell: bash
         run: pyinstaller --clean --noconfirm aiminer-backend.spec
+
+      - name: 打包后磁盘状况
+        if: always()
+        shell: bash
+        run: df -h || Get-PSDrive
 
       - name: Rename sidecar binary (Tauri 命名规范)
         shell: bash

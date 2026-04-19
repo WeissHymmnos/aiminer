@@ -46,6 +46,29 @@ if not binaries:
         if binaries:
             break
 
+# 排除用不到但 PyInstaller hooks 会强行拉入的重量级依赖
+# 实测可节省 5-8GB 打包体积, 让 GitHub Actions Runner 能跑完 onefile 构建
+excludes = [
+    # 深度学习框架的无关部分
+    'tensorflow', 'tensorflow_core', 'tensorboard', 'tensorboardX',
+    'onnxruntime', 'onnx', 'triton',
+    # NVIDIA CUDA 运行时 (用户若无 GPU 也能跑 CPU 推理)
+    'nvidia.cudnn', 'nvidia.cusparselt', 'nvidia.nccl', 'nvidia.nvshmem',
+    'nvidia.cublas', 'nvidia.cufft', 'nvidia.curand', 'nvidia.cusolver',
+    'nvidia.cusparse', 'nvidia.nvjitlink', 'nvidia.nvtx',
+    # Jupyter / IPython 交互环境
+    'IPython', 'ipykernel', 'ipywidgets', 'jupyter', 'jupyter_client',
+    'jupyter_core', 'notebook', 'nbformat', 'nbconvert', 'qtconsole',
+    'jedi', 'parso', 'prompt_toolkit',
+    # 测试框架
+    'pytest', 'pytest_asyncio', '_pytest', 'py',
+    # GUI (纯命令行服务不需要)
+    'tkinter', '_tkinter', 'PyQt5', 'PyQt6', 'PySide2', 'PySide6',
+    'matplotlib.backends._backend_tk', 'matplotlib.backends.backend_qt5agg',
+    # 其他少用
+    'pandas.tests', 'numpy.tests', 'scipy.tests', 'sklearn.tests',
+]
+
 a = Analysis(
     ['api.py'],
     pathex=[],
@@ -55,7 +78,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=excludes,
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
