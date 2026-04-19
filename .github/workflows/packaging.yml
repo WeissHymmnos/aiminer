@@ -1,0 +1,281 @@
+name: Cross-Platform Packaging
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (例如 v1.0.0)，留空则使用 dev-{sha}'
+        required: false
+        default: ''
+      publish_release:
+        description: '是否创建 GitHub Release'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+env:
+  PYTHON_VERSION: '3.10'
+  NODE_VERSION: '20'
+
+jobs:
+  # ============================================================
+  # Stage 0: 解析版本号 — 后续所有阶段共享
+  # ============================================================
+  resolve-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
+      should_release: ${{ steps.v.outputs.should_release }}
+    steps:
+      - id: v
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            VERSION="${TAG#v}"
+            SHOULD_RELEASE="true"
+          elif [[ -n "${{ inputs.version }}" ]]; then
+            TAG="${{ inputs.version }}"
+            VERSION="${TAG#v}"
+            SHOULD_RELEASE="${{ inputs.publish_release }}"
+          else
+            TAG="dev-${GITHUB_SHA::7}"
+            VERSION="0.0.0-${GITHUB_SHA::7}"
+            SHOULD_RELEASE="false"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "should_release=$SHOULD_RELEASE" >> $GITHUB_OUTPUT
+          echo "解析结果: tag=$TAG, version=$VERSION, release=$SHOULD_RELEASE"
+
+  # ============================================================
+  # Stage 1: 前端构建 (一次构建, 全平台共用)
+  # ============================================================
+  build-frontend:
+    needs: resolve-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install & build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Upload frontend dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 7
+
+  # ============================================================
+  # Stage 2: 后端 Sidecar 构建 (每平台独立)
+  # ============================================================
+  build-backend:
+    needs: resolve-version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            ext: ''
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            ext: ''
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            ext: '.exe'
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            polars_plugins/target
+          key: cargo-${{ matrix.target }}-${{ hashFiles('polars_plugins/Cargo.lock') }}
+
+      - name: Install Python deps
+        shell: bash
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install maturin pyinstaller
+
+      - name: Build polars_plugins (Rust)
+        shell: bash
+        working-directory: polars_plugins
+        run: |
+          maturin build --release --out ../dist_plugins
+          # 安装编译产物到当前 Python 环境，让 PyInstaller 能收集
+          pip install --force-reinstall --no-deps ../dist_plugins/polars_plugins-*.whl
+
+      - name: Build backend with PyInstaller
+        shell: bash
+        run: pyinstaller --clean --noconfirm aiminer-backend.spec
+
+      - name: Rename sidecar binary (Tauri 命名规范)
+        shell: bash
+        run: |
+          mkdir -p sidecar-out
+          SRC="dist/aiminer-backend${{ matrix.ext }}"
+          DST="sidecar-out/aiminer-backend-${{ matrix.target }}${{ matrix.ext }}"
+          cp "$SRC" "$DST"
+          ls -lh sidecar-out/
+
+      - name: Upload sidecar
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidecar-${{ matrix.target }}
+          path: sidecar-out/*
+          retention-days: 7
+
+  # ============================================================
+  # Stage 3: Tauri 打包 (汇总前端 + 后端, 出安装包)
+  # ============================================================
+  build-tauri:
+    needs: [resolve-version, build-frontend, build-backend]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache tauri target
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/target
+          key: tauri-${{ matrix.target }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+
+      - name: Linux 系统依赖
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: 下载前端产物
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+
+      - name: 下载对应平台的 sidecar
+        uses: actions/download-artifact@v4
+        with:
+          name: sidecar-${{ matrix.target }}
+          path: src-tauri/binaries
+
+      - name: 设置 sidecar 可执行权限 (Unix)
+        if: matrix.platform != 'windows-latest'
+        run: chmod +x src-tauri/binaries/aiminer-backend-*
+
+      - name: 安装前端依赖 (Tauri 需要)
+        working-directory: frontend
+        run: npm ci
+
+      - name: Tauri 构建
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: --target ${{ matrix.target }}
+          # 不在这里建 release, 留给 Stage 4 统一处理
+
+      - name: 收集安装包
+        shell: bash
+        run: |
+          mkdir -p installers
+          BUNDLE_DIR="src-tauri/target/${{ matrix.target }}/release/bundle"
+          if [ -d "$BUNDLE_DIR" ]; then
+            find "$BUNDLE_DIR" -type f \( \
+              -name "*.dmg" -o -name "*.app.tar.gz" -o \
+              -name "*.msi" -o -name "*.exe" -o \
+              -name "*.deb" -o -name "*.rpm" -o -name "*.AppImage" \
+            \) -exec cp {} installers/ \;
+          fi
+          ls -lh installers/
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.target }}
+          path: installers/*
+          retention-days: 30
+
+  # ============================================================
+  # Stage 4: Release 发布 (仅 tag push 或手动指定时执行)
+  # ============================================================
+  publish-release:
+    needs: [resolve-version, build-tauri]
+    if: needs.resolve-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 下载所有平台安装包
+        uses: actions/download-artifact@v4
+        with:
+          pattern: installers-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: 列出待发布文件
+        run: ls -lh release-assets/
+
+      - name: 创建 / 更新 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve-version.outputs.tag }}
+          name: AIMiner ${{ needs.resolve-version.outputs.tag }}
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(needs.resolve-version.outputs.tag, '-') }}
+          files: release-assets/*
