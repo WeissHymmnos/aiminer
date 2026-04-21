@@ -201,6 +201,383 @@ flowchart TD
   FG --> FE2[StrategyBacktest 结果页]
 ```
 
+#### 3.3.1 策略输入契约
+
+策略链路的最小输入由两部分组成：
+
+- `expression`
+  因子表达式。它不是直接下单逻辑，而是先通过 evaluator 计算成一个二维信号面板。
+- `strategy_config`
+  交易规则配置。它描述如何把信号转成仓位、多久调仓、最多持多少标的、成本如何扣除。
+
+完整运行还会携带一组运行上下文：
+
+- `data_backend`
+  可为 `ricequant`、`qlib`、`local`，决定 evaluator 从哪里取行情和收益标签。
+- `market_profile`、`market_mode`、`market_profiles`
+  决定市场配置和单市场/多市场执行方式。
+- `local_data_path`、`local_data_layout`
+  当使用本地数据时，指定 panel 或 instrument files 的读取语义。
+- `run_id`、`source_factor_id`、`agent_id`、`candidate_rank`、`template_name`
+  Swarm 场景下的来源追踪字段，用来把策略结果回挂到具体 run、因子和候选策略。
+- `signal_multiplier`
+  用来支持负 IC 因子的反向交易。负 IC 因子在 Manager 层会设置为 `-1`，策略回测前会把信号整体反号。
+
+#### 3.3.2 `StrategyConfig` 的语义
+
+`StrategyConfig` 是策略层的核心数据结构，定义在 `core/strategy.py`。它不是任意 JSON，而是有语义校验的 Pydantic 模型。
+
+主要字段：
+
+- `strategy_mode`
+  `cross_sectional` 表示横截面策略；`time_series` 表示时序策略。
+- `signal_source`
+  当前主要使用 `expression`，表示信号来自单个因子表达式；预留 `factor_combo` 给组合因子。
+- `direction`
+  `long_only` 只做多；`long_short` 多空；`long_flat` 只在时序策略里表示多头/空仓切换。
+- `selection_rule`
+  `top_n`、`bottom_n`、`top_bottom_n`、`threshold`。
+- `rebalance_freq`
+  `daily`、`weekly`、`monthly`。
+- `top_n`、`bottom_n`
+  横截面排序策略的多头/空头数量。
+- `long_threshold`、`short_threshold`、`exit_threshold`
+  阈值策略的入场、反向或退出条件。
+- `max_positions`
+  最大持仓数量。
+- `max_weight_per_position`
+  单个标的最大权重。
+- `min_holding_days`
+  最短持有天数，防止刚开仓就被下一天信号立即换掉。
+- `commission_bps`、`slippage_bps`
+  手续费和滑点，按换手扣除。
+- `market`、`start_date`、`end_date`、`engine`
+  回测市场、区间和计算引擎。
+
+语义校验规则：
+
+- `top_n` 策略必须提供 `top_n`。
+- `bottom_n` 策略必须提供 `bottom_n`。
+- `top_bottom_n` 必须同时提供 `top_n` 和 `bottom_n`。
+- `threshold` 至少需要 `long_threshold` 或 `short_threshold`。
+- 横截面策略不支持 `long_flat`。
+- 时序策略只支持 `threshold`，不支持 `top_n`、`bottom_n`、`top_bottom_n`。
+
+#### 3.3.3 内置策略模板
+
+`strategy_templates()` 提供一组默认模板，供 Web/TUI 一键加载，也供 Agent 失败时回退：
+
+- `cs_top_bottom`
+  横截面 Top/Bottom 多空。每天选信号最高的一组做多，最低的一组做空。
+- `cs_top_only`
+  横截面 Top-N 多头。适合只想表达强信号多头暴露的因子。
+- `cs_threshold`
+  横截面阈值多头。适合已经归一化到固定范围的信号。
+- `ts_long_flat`
+  时序阈值多头/空仓。适合趋势型或择时型信号。
+- `ts_long_short`
+  时序阈值多空。适合同一标的上同时表达上涨与下跌方向的信号。
+
+模板只是起点，不是最终策略。Agent 或用户可以修改阈值、持仓数、调仓频率、成本模型和持有期约束。
+
+#### 3.3.4 手工策略回测链路
+
+手工策略回测由 Web/TUI/API 触发，主路径如下：
+
+```text
+POST /api/strategy/run
+-> api.strategy_run()
+-> core.manual_runner.run_manual_strategy_backtest()
+-> validate_expression()
+-> build_evaluator()
+-> evaluator.fetch_data()
+-> evaluator.compute_factors()
+-> signal_df / label_df
+-> StrategyBacktester.run()
+-> save_equity_curve() / save_turnover_curve()
+-> persist_strategy_cache()
+-> persist_strategy_job()
+-> persist_strategy_result()
+-> JSON payload 返回前端
+```
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor U as User/Web/TUI
+  participant API as api.strategy_run
+  participant MR as manual_runner
+  participant EV as Evaluator
+  participant BT as StrategyBacktester
+  participant FS as results/strategies
+  participant DB as strategy_backtests
+  U->>API: expression + strategy_config + runtime settings
+  API->>MR: run_manual_strategy_backtest
+  MR->>MR: validate_expression / cache_key
+  MR->>EV: build_evaluator
+  EV->>EV: fetch_data / compute_factors
+  EV-->>MR: factor_data + label_data
+  MR->>BT: signal_df + label_df + StrategyConfig
+  BT-->>MR: metrics + returns + positions + trade_stats
+  MR->>FS: strategy job json + chart png
+  MR->>DB: persist_strategy_result
+  MR-->>API: payload
+  API-->>U: strategy result
+```
+
+这一层有两类持久化：
+
+- `strategy_cache_*`
+  用于缓存相同表达式、策略配置、数据后端、市场配置、本地数据布局和 `signal_multiplier` 下的结果。
+- `strategy_*`
+  用户或 Swarm 可见的策略结果 ID。手工策略只按 cache scope 生成；Swarm 策略会额外加入 run/factor/candidate 信息，避免跨 run 覆盖。
+
+#### 3.3.5 信号面板到持仓面板
+
+策略回测的计算核心不是直接执行表达式，而是先把表达式转换为信号面板：
+
+```text
+evaluator.factor_data.iloc[:, 0]
+-> unstack()
+-> signal_df: index=date, columns=instrument, values=factor signal
+
+evaluator.label_data["label"]
+-> unstack()
+-> label_df: index=date, columns=instrument, values=forward return
+```
+
+然后 `StrategyBacktester` 按策略模式生成目标持仓。
+
+横截面策略：
+
+- 每个交易日独立看一行信号。
+- `top_n` 选信号最高的 `N` 个标的。
+- `bottom_n` 选信号最低的 `N` 个标的。
+- `top_bottom_n` 同时做多最高组、做空最低组。
+- `threshold` 按横截面信号值是否超过阈值开仓。
+- `long_only` 会把负仓位裁掉。
+
+时序策略：
+
+- 每个标的单独看自己的信号时间序列。
+- `long_flat` 在超过 `long_threshold` 时做多，低于退出条件时空仓。
+- `long_short` 在超过 `long_threshold` 时做多，低于 `short_threshold` 时做空。
+- `exit_threshold` 用于从已有仓位退出，避免阈值附近过度来回切换。
+
+目标持仓生成后，还会经过约束层：
+
+- `_rebalance_mask()`
+  根据 `daily/weekly/monthly` 判断哪些日期允许重新调仓。
+- `max_positions`
+  限制非零仓位数量。
+- `min_holding_days`
+  未达到最短持有期时，保留上一期仓位。
+- `_normalize_positions()`
+  按 gross exposure 标准化，并裁剪到 `max_weight_per_position`。
+
+#### 3.3.6 收益、成本和指标
+
+策略收益计算逻辑：
+
+```text
+gross_returns = sum(positions * label_df, axis=1)
+turnover = positions.diff().abs().sum(axis=1)
+cost_rate = (commission_bps + slippage_bps) / 10000
+costs = turnover * cost_rate
+net_returns = gross_returns - costs
+```
+
+输出指标包括：
+
+- `annualized_return`
+  净值曲线年化后的收益。
+- `sharpe`
+  日收益均值/波动率乘以 `sqrt(252)`。
+- `max_drawdown`
+  净值曲线最大回撤。
+- `turnover`
+  平均换手。
+- `win_rate`
+  日收益为正的比例。
+- `average_holding_period`
+  已平仓仓位的平均持有天数。
+- `gross_exposure`
+  平均总敞口。
+- `net_exposure`
+  平均净敞口。
+- `cost_drag`
+  总交易成本拖累。
+- `gross_return`、`net_return`
+  区间累计毛收益与净收益。
+
+同时会保存：
+
+- `daily_returns`
+  每日净收益，供前端 Sparkline 和策略后去相关使用。
+- `positions`
+  最近几天的非零持仓快照。
+- `trade_stats`
+  换手、成本、调仓日数等交易统计。
+- `chart_paths`
+  equity curve 和 turnover curve 图表路径。
+
+#### 3.3.7 Agent 自动策略链路
+
+Swarm 中策略层有两次机会产生结果：
+
+```text
+因子通过 EvalAgent
+-> route_after_eval()
+-> StrategyAgent 生成候选策略
+-> strategy_eval_node 回测候选
+-> StrategyCritic 可选反思和再生成候选
+-> best_strategy_result 写回 best_factor_snapshot
+-> SubAgent 返回 factor + strategy payload
+-> PortfolioManager 统一规范化/补跑/持久化
+```
+
+```mermaid
+flowchart TD
+  E[EvalAgent 通过因子] --> R{route_after_eval}
+  R -->|有效因子| SA[StrategyAgent]
+  SA -->|LLM JSON 候选| SE[strategy_eval_node]
+  SA -->|失败| FT[Fallback templates]
+  FT --> SE
+  SE --> SC{是否需要反思}
+  SC -->|是| CR[StrategyCritic]
+  CR --> SE
+  SC -->|否| BF[best_strategy_result]
+  BF --> SS[best_factor_snapshot]
+  SS --> PM[PortfolioManager]
+  PM --> DB[(strategy_backtests)]
+```
+
+`StrategyAgent` 的职责：
+
+- 读取 `market_profile`、角色、因子假说、表达式和因子指标。
+- 让 LLM 输出最多 3 个结构化候选。
+- 每个候选必须能转换成合法 `StrategyConfig`。
+- 如果 LLM 失败，使用模板回退。
+
+`strategy_eval_node` 的职责：
+
+- 重新构造 `signal_df` 和 `label_df`。
+- 对每个候选运行 `StrategyBacktester`。
+- 计算 `selection_score`。
+- 选择 `best_strategy_result`。
+- 把结果合并到当前最佳因子快照。
+- 策略阶段失败只写 `strategy_failure_reason`，不会把已通过的因子判为 fatal error。
+
+`StrategyCritic` 的职责：
+
+- 读取当前最佳策略的指标、分年/分季表现和最差月份。
+- 判断是否还值得继续优化。
+- 最多提出少量新的策略配置候选。
+- 只调整策略层字段，不改因子表达式。
+
+#### 3.3.8 Manager 层的策略归一化与组合筛选
+
+`PortfolioManager` 会在 Swarm 汇总阶段处理策略结果：
+
+- 如果 SubAgent 已返回 `strategy_results`，Manager 会复算 `selection_score` 并规范化字段。
+- 如果 SubAgent 只返回 `strategy_candidates`，Manager 会调用 `run_manual_strategy_backtest()` 补跑策略。
+- 如果两者都没有，Manager 按市场和 execution style 使用 fallback template。
+- 负 IC 因子会通过 `signal_multiplier=-1` 反向信号。
+- 每个策略都会生成 run-scoped `strategy_id`，避免同一表达式/配置在不同 run 中覆盖历史。
+- 每个因子内部选择 `selection_score` 最高的策略作为 `best_strategy_result`。
+- Manager 再按策略收益做一次去相关，避免多个因子虽然表达式不同但策略收益高度重复。
+
+`selection_score()` 的当前权重：
+
+```text
+score =
+  0.35 * annualized_return
++ 0.35 * sharpe
++ 0.15 * factor_ic
+- 0.08 * abs(max_drawdown)
+- 0.04 * turnover
+- 0.03 * cost_drag
+```
+
+如果启用了 walk-forward 且窗口数不少于 2，会削弱样本内 Sharpe 权重，并加入：
+
+- `min_sharpe`
+  最差窗口 Sharpe。
+- `consistency`
+  正 Sharpe 窗口占比。
+- `sharpe_std`
+  各窗口 Sharpe 波动。
+
+这能降低“只在单一幸运区间有效”的策略得分。
+
+#### 3.3.9 数据库和前端展示
+
+策略结果统一进入 `strategy_backtests` 表，主要字段包括：
+
+- `strategy_id`
+  前端和 API 使用的策略主键。
+- `cache_key`
+  相同表达式+配置+市场上下文的缓存键。
+- `run_id`
+  来源 Swarm run。
+- `source_factor_id`
+  策略来自哪个因子。
+- `agent_id`
+  生成因子的 Agent。
+- `candidate_rank`
+  原始候选排名。
+- `template_name`
+  模板或 LLM 候选名。
+- `rationale`
+  Agent 对策略的理由说明。
+- `selection_score`
+  Manager/Graph 选择策略时使用的综合分。
+- `is_primary`
+  是否为该因子的最佳策略。
+- `metrics_json`
+  策略指标。
+- `daily_returns_json`
+  策略每日收益。
+- `positions_json`
+  持仓快照。
+- `chart_paths_json`
+  图表路径。
+
+前端展示路径：
+
+```text
+StrategyBacktestPage
+-> api.runStrategy()
+-> /api/strategy/run
+-> 即时显示 metrics + Sparkline
+
+StrategyBacktestPage
+-> api.strategyHistory()
+-> /api/strategy/history
+-> 历史列表
+
+StrategyBacktestPage
+-> api.getStrategy()
+-> /api/strategies/{strategy_id}
+-> 详情 JSON / 图表 / 删除
+
+AlphaPoolPage
+-> 读取因子的 best_strategy
+-> Seed to Strategy / Use Strategy
+-> 回填 expression + strategy_config
+```
+
+维护策略字段时必须同步四处：
+
+- `core/strategy.py`
+  `StrategyConfig`、`StrategyBacktester`、`persist_strategy_result`。
+- `core/manual_runner.py`
+  cache key、payload 物化、图表和策略 job 持久化。
+- `api.py`
+  请求模型、详情序列化、列表字段。
+- `frontend/src/pages/StrategyBacktestPage.tsx`
+  默认配置、表单字段、JSON 编辑器、结果展示。
+
 ### 3.4 Wiki 图谱流程
 
 ```text
