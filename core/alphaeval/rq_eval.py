@@ -137,6 +137,23 @@ class RiceQuantEval:
         if not skip_auth:
             init_rq_auth()
 
+    @staticmethod
+    def _daily_rank_ic(all_data: pd.DataFrame) -> pd.Series:
+        """Compute per-date Spearman rank IC with sparse cross-section guards."""
+        def _corr(group: pd.DataFrame) -> float:
+            factor = group["factor"].replace([np.inf, -np.inf], np.nan)
+            label = group["label"].replace([np.inf, -np.inf], np.nan)
+            valid = pd.concat([factor, label], axis=1).dropna()
+            if len(valid) < 2:
+                return np.nan
+            if valid.iloc[:, 0].nunique(dropna=True) < 2:
+                return np.nan
+            if valid.iloc[:, 1].nunique(dropna=True) < 2:
+                return np.nan
+            return float(valid.iloc[:, 0].rank().corr(valid.iloc[:, 1].rank()))
+
+        return all_data.groupby(level="datetime").apply(_corr)
+
     def _configure_matplotlib(self):
         preferred_fonts = ["Microsoft YaHei", "SimHei", "Arial Unicode MS"]
         installed = {font.name for font in font_manager.fontManager.ttflist}
@@ -893,8 +910,10 @@ class RiceQuantEval:
         ic_series = all_data.groupby(level="datetime").apply(
             lambda x: x["factor"].corr(x["label"])
         ).fillna(0)
-        
+        rank_ic_series = self._daily_rank_ic(all_data).fillna(0)
+
         self.ic = round(float(ic_series.mean()), 4)
+        self.rankic = round(float(rank_ic_series.mean()), 4)
         
         # OOS IC calculation
         oos_mask = ic_series.index >= pd.to_datetime(self.oos_split_date)

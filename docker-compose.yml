@@ -1,29 +1,4 @@
 services:
-  aiminer:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: aiminer:latest
-    container_name: aiminer_app
-    volumes:
-      # Mount data directories for persistence
-      - ./data:/app/data
-      - ./results:/app/results
-      - ./logs:/app/logs
-      # Optional: Mount .env if you want to use local secrets
-      - ./.env:/app/.env:ro
-    environment:
-      - PYTHONUNBUFFERED=1
-      # Overridable environment variables
-      - USE_LOCAL_EMBEDDING=false
-    # Example command to run the TUI or API
-    # command: python tui.py
-    # For background processing:
-    # command: python main.py --iterations 5
-    stdin_open: true # Allows interactive mode (useful for TUI)
-    tty: true
-    restart: unless-stopped
-
   api:
     build:
       context: .
@@ -40,5 +15,45 @@ services:
     command: uvicorn api:app --host 0.0.0.0 --port 8000
     environment:
       - PYTHONUNBUFFERED=1
-      - AIMINER_CORS_ORIGINS=http://localhost:8000,http://127.0.0.1:8000
+      - AIMINER_CORS_ORIGINS=http://localhost:8000,http://127.0.0.1:8000,http://localhost:5173,http://127.0.0.1:5173
     restart: unless-stopped
+
+  worker:
+    profiles:
+      - research
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aiminer:latest
+    container_name: aiminer_worker
+    volumes:
+      - ./data:/app/data
+      - ./results:/app/results
+      - ./logs:/app/logs
+      - ./.env:/app/.env:ro
+    command: python manager.py --iterations ${AIMINER_ITERATIONS:-5}
+    environment:
+      - PYTHONUNBUFFERED=1
+      - USE_LOCAL_EMBEDDING=false
+    restart: "no"
+
+  tui:
+    profiles:
+      - tui
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aiminer:latest
+    container_name: aiminer_tui
+    volumes:
+      - ./data:/app/data
+      - ./results:/app/results
+      - ./logs:/app/logs
+      - ./.env:/app/.env:ro
+    command: python tui.py
+    environment:
+      - PYTHONUNBUFFERED=1
+      - USE_LOCAL_EMBEDDING=false
+    stdin_open: true
+    tty: true
+    restart: "no"

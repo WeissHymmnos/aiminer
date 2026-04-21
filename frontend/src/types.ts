@@ -8,7 +8,7 @@ export interface Paginated<T> {
 
 export interface SwarmRunSummary {
   run_id: string;
-  status: "pending" | "running" | "completed" | "failed";
+  status: "starting" | "pending" | "running" | "completed" | "failed" | "stopped";
   is_active: boolean;
   config: Record<string, any>;
   started_at?: string;
@@ -36,6 +36,8 @@ export interface FactorSummary {
   run_id: string;
   iteration: number;
   ic?: number;
+  selection_score?: number;
+  best_strategy_id?: string;
   metrics?: FactorMetrics;
   returns?: Record<string, number>;
 }
@@ -44,6 +46,13 @@ export interface StrategySummary {
   strategy_id: string;
   run_id: string;
   label: string;
+  template_name?: string | null;
+  rationale?: string | null;
+  ran_at?: string;
+  source_factor_id?: string;
+  candidate_rank?: number | null;
+  selection_score?: number | null;
+  is_primary?: boolean | null;
   strategy_mode: "cross_sectional" | "time_series";
   metrics?: {
     sharpe?: number;

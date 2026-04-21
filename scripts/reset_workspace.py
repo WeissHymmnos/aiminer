@@ -46,9 +46,7 @@ SCOPE_TARGETS: dict[str, list[str]] = {
         "data/test_db",
     ],
     "runs": [
-        "swarm_runs",
-        "runs",
-        "logs",
+        "results/swarm_runs",
     ],
 }
 SCOPE_TARGETS["all"] = sorted({p for paths in SCOPE_TARGETS.values() for p in paths})

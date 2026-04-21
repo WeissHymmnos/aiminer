@@ -37,6 +37,17 @@ AI Alpha Miner 是一个围绕量化因子研究构建的多 Agent 系统。它�
 -> TUI / API / Web 前端消费结果
 ```
 
+```mermaid
+flowchart LR
+  C[配置解析] --> D[市场/数据后端选择]
+  D --> A[Agent 生成因子]
+  A --> E[因子评估]
+  E --> M[Manager 汇总筛选]
+  M --> W[Wiki/报告生成]
+  W --> S[(SQLite/JSON/图表)]
+  S --> U[TUI/API/Web 前端]
+```
+
 ## 2. 目录级总览
 
 ### 2.1 根目录关键文件
@@ -50,7 +61,7 @@ AI Alpha Miner 是一个围绕量化因子研究构建的多 Agent 系统。它�
 - `docker-compose.yml`
   作用：本地容器编排，当前以 API 服务为主入口。
 - `.gitignore`
-  作用：忽略 Python 缓存、前端构建产物、前端 `node_modules`、TypeScript 构建缓存等。
+  作用：忽略 Python 缓存、前端构建产物、运行期 Wiki/结果数据、前端 `node_modules`、TypeScript 构建缓存等。
 - `.dockerignore`
   作用：减少 Docker build context，避免把前端依赖和构建产物打包进上下文。
 - `.github/workflows/ci.yml`
@@ -63,8 +74,8 @@ AI Alpha Miner 是一个围绕量化因子研究构建的多 Agent 系统。它�
   作用：容器运行说明。
 - `CLAUDE.md`
   作用：辅助开发说明，非运行时代码。
-- `a.md`
-  作用：补充文档，非运行主链。
+- `docs/notes/rd_agent_gap.md`
+  作用：RD-Agent 对比补充文档，非运行主链。
 
 ### 2.2 Python 源码目录
 
@@ -86,8 +97,8 @@ AI Alpha Miner 是一个围绕量化因子研究构建的多 Agent 系统。它�
 
 ### 2.4 测试目录
 
-- 根目录的 `test_*.py`
-  以历史实验测试和快速脚本为主。
+- `scripts/manual_tests/`
+  以历史实验测试和快速脚本为主，不参与默认 pytest 收集。
 - `tests/`
   规范化的单元测试与集成测试。
 
@@ -103,6 +114,24 @@ AI Alpha Miner 是一个围绕量化因子研究构建的多 Agent 系统。它�
   RAG 原始资料与模板。
 - `data/test_db/`
   测试向量数据库。
+
+```mermaid
+flowchart TD
+  Repo[/aiminer 仓库/] --> API[api.py]
+  Repo --> PM[manager.py]
+  Repo --> UI[frontend/tui.py]
+  Repo --> Data[data/目录]
+  Repo --> Out[results/目录]
+  API --> DB[(alpha_miner.db)]
+  PM --> DB
+  UI --> DB
+  UI --> Out
+  UI --> API
+  API --> Out
+  Data --> Wiki[wiki_vault/wiki_db/rag_docs/test_db]
+  Out -->|manifest/jsonl/chart| UI
+  Out -->|API 读取| API
+```
 
 ## 3. 运行模式与主数据流
 
@@ -129,6 +158,24 @@ Web/TUI/API 发起运行
 -> API 返回结构化 payload
 ```
 
+```mermaid
+sequenceDiagram
+  autonumber
+  actor U as Frontend
+  participant A as api.py
+  participant R as core.manual_runner
+  participant E as Evaluator
+  participant D as SQLite/文件系统
+  U->>A: POST /api/backtest
+  A->>R: validate_expression
+  A->>R: run_backtest
+  R->>E: fetch_data / compute_factors
+  E->>R: returns + 因子/指标
+  R->>D: 落盘 metrics / chart
+  R-->>A: 回测结果
+  A-->>U: JSON payload
+```
+
 ### 3.3 策略回测流程
 
 ```text
@@ -138,6 +185,20 @@ Web/TUI/API 发起运行
 -> 按横截面/时序模式生成仓位
 -> 重平衡、仓位约束、交易成本
 -> 输出 metrics / returns / 持久化
+```
+
+```mermaid
+flowchart TD
+  FE[前端输入表达式与策略]
+  FE -->|POST /api/strategy/run| AP[strategy_run API]
+  AP --> SR[run_manual_strategy_backtest]
+  SR --> RE[仓位引擎]
+  RE --> RM[重平衡/约束]
+  RM --> CO[交易成本]
+  CO --> MT[metrics 计算]
+  MT --> DB[(strategy_backtests)]
+  DB --> FG[chart/json 报告]
+  FG --> FE2[StrategyBacktest 结果页]
 ```
 
 ### 3.4 Wiki 图谱流程
@@ -150,6 +211,18 @@ LLMWiki.list_pages() / get_page()
 -> WikiPage 使用 ForceGraph2D 渲染 Obsidian 风格关系图
 ```
 
+```mermaid
+flowchart LR
+  VA[wiki_vault/*.md]
+  VA --> PL[api._load_wiki_pages]
+  PL --> BG[api._build_wiki_graph]
+  BG --> IDX[/api/wiki/index]
+  BG --> GR[ /api/wiki/graph ]
+  IDX --> WD[Wiki 页面渲染]
+  GR --> WD
+  WD --> FG[ForceGraph2D 展示]
+```
+
 ### 3.5 Web 前端运行流
 
 ```text
@@ -159,6 +232,68 @@ BrowserRouter
 -> WebSocket 订阅 /ws
 -> 页面级状态与表单驱动交互
 -> 指标卡片 / 日志 / 图谱 / 回测结果展示
+```
+
+```mermaid
+flowchart LR
+    BR[BrowserRouter]
+    BR --> L[Layout]
+    L --> Q[React Query]
+    Q -->|/api/*| API[FastAPI]
+    Q -->|WebSocket| WS[/ws 实时事件/]
+    API -->|分页列表| R1[Swarm/Pool/History]
+    API -->|图谱/文件| R2[Wiki/Report]
+    WS --> E[前端事件总线]
+    E --> L
+    L --> S[页面状态+表单]
+    S -->|start/stop/delete| API
+```
+
+### 3.6 Swarm 状态生命周期图
+
+```mermaid
+stateDiagram-v2
+    [*] --> Active: start_swarm()
+    Active --> Active: 进程存活检测通过(pid + create_time)
+    Active --> Stopping: stop_swarm()
+    Stopping --> Stopped: _wait_run_process() 确认退出
+    Stopped --> Deleted: 文件清理完成
+    Active --> Failed: 进程退出异常
+    Failed --> Retired: 记录清理
+    Retired --> [*]
+    Active --> OrphanRecovered: API 重启后根据 manifest 复原
+    OrphanRecovered --> Active: pid 命中且有效
+    OrphanRecovered --> Stopping: stop 请求已发出但进程未退出
+    OrphanRecovered --> Deleted: pid 失效可被安全删除
+```
+
+```mermaid
+flowchart LR
+    U[Web/TUI/API]
+    U -->|start run| A[start_swarm API]
+    A -->|spawn| M[Manager 子进程]
+    M -->|dispatch| R[Researcher 工作池]
+    R -->|factor rows| F[alpha_pool]
+    F -->|策略衍生| G[strategy_backtests]
+    M -->|事件写入| Q[Queue]
+    Q --> L[JSONL Log]
+    Q --> W[WebSocket 广播]
+    W --> FE[run detail 实时视图]
+```
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant FE as Frontend/TUI
+  participant API as FastAPI
+  participant PM as PortfolioManager
+  participant W as Worker Process
+  FE->>API: start_swarm 请求
+  API->>PM: spawn + run_swarm()
+  PM->>W: 分发研究任务
+  W->>PM: 写入 alpha_pool/strategy_backtests
+  PM->>API: 通过 queue 回报
+  API->>FE: WebSocket/log/polling 消费
 ```
 
 ## 4. 根目录文件逐项说明
@@ -185,8 +320,9 @@ BrowserRouter
 
 文件说明：
 
-- 定义 API 服务
-- 注入 CORS、鉴权、端口映射等运行环境
+- 默认只定义并启动 API 服务
+- 研究 worker 和 TUI 分别放在 `research` / `tui` profile 中
+- 注入 CORS、端口映射、数据/results/logs 挂载等运行环境
 - 当前偏向单服务部署，而不是前后端分离双容器部署
 
 关键实现块：
@@ -195,6 +331,10 @@ BrowserRouter
   解决本地开发时 `5173` 前端与 `8000` API 的跨域问题
 - API 单容器模式
   使生产环境可直接依赖一个进程入口
+- `worker` profile
+  使用 `python manager.py --iterations ${AIMINER_ITERATIONS:-5}`，不配置自动重启，避免有限任务循环写产物
+- `tui` profile
+  使用 `docker compose --profile tui run --rm tui` 进入交互式 TUI
 
 ### 4.3 `.gitignore`
 
@@ -208,6 +348,7 @@ BrowserRouter
 文件说明：
 
 - 避免 Docker 把前端依赖和构建缓存打进 context
+- 排除 `data/local_futures/`、`data/ml/`、`data/wiki_db/`、`data/wiki_vault/`、`results/`、`logs/`、`models/` 等生成数据目录
 - 减少镜像构建时间和传输量
 
 ### 4.5 `.github/workflows/ci.yml`
@@ -215,13 +356,61 @@ BrowserRouter
 文件说明：
 
 - 负责基础 CI
-- 目标是阻止明显不可运行的提交进入主线
+- 默认后端 job 只执行 hermetic unit 测试
+- 外部依赖和原生插件测试拆成手动触发 job
+- 目标是阻止明显不可运行的提交进入主线，同时避免 PR 默认依赖 RiceQuant 凭证或 Rust/Polars 本地插件构建
 
 关键实现块：
 
 - Python 安装与测试
+- `pytest tests/unit -m "unit and not external and not native" -q`
 - 前端依赖安装与 `npm run build`
 - 基础静态校验
+- `backend-external`
+  手动运行 `pytest -m external -q`，用于 RiceQuant/外部依赖测试
+- `backend-native`
+  手动构建 `polars_plugins` wheel 后运行 `pytest -m native -q`
+
+### 4.5.1 `.github/workflows/packaging.yml`
+
+文件说明：
+
+- 负责跨平台桌面包构建与可选 Release 发布
+- `test-gate` 在前端、sidecar、Tauri 构建前运行 hermetic unit
+- `build-frontend` 和 `build-backend` 都依赖 `test-gate`
+
+关键实现块：
+
+- `test-gate`
+  安装 Python 依赖、执行基础语法检查和 `pytest tests/unit -m "unit and not external and not native" -q`
+
+### 4.5.2 `pytest.ini`
+
+文件说明：
+
+- 只从 `tests/` 收集测试
+- 启用 `--strict-markers`
+- 声明 `unit`、`integration`、`external`、`native` markers
+
+测试矩阵：
+
+- `unit`
+  hermetic 单测，不依赖外部服务、凭证、生成数据目录或本地原生插件
+- `integration`
+  本地集成测试，不依赖外部服务
+- `external`
+  RiceQuant、网络、凭证或外部 vendor 依赖测试
+- `native`
+  需要已构建 Rust/Polars 原生插件的测试
+
+### 4.5.3 `scripts/reset_workspace.py`
+
+文件说明：
+
+- 提供 dry-run 优先的产物清理 CLI
+- `--confirm` 才会移动匹配路径
+- 目标被移动到 `results/.trash/<timestamp>/`
+- `runs` scope 指向真实 Swarm 产物目录 `results/swarm_runs`
 
 ### 4.6 `README.md`
 
@@ -257,11 +446,11 @@ BrowserRouter
 - 协作式开发说明文档
 - 不参与生产运行
 
-### 4.11 `a.md`
+### 4.11 `docs/notes/rd_agent_gap.md`
 
 文件说明：
 
-- 辅助文档，占位性质强，不在主流程中引用
+- RD-Agent 对比补充文档，不在主流程中引用
 
 ## 5. Python 入口文件逐项说明
 
@@ -309,6 +498,7 @@ BrowserRouter
   - `__init__`: 初始化内存态状态容器
   - `active_run_ids`: 返回当前仍存活的 run id 列表
   - `running_count`: 返回活动 run 数量
+  - `active_run_ids` 与 `running_count` 会同时参考 manifest 与进程活跃性，服务重启后仍可排除僵尸 run
 - `Actor`
   作用：表示鉴权后的调用方身份
 - `SwarmConfig`
@@ -346,6 +536,18 @@ BrowserRouter
   统计数据库中特定 `run_id` 或字段关联的行数。
 - `_factor_summary_for_run(run_id)`
   汇总某次 Swarm 的因子数和策略数。
+- `_resolve_active_pid(state, payload)`
+  通过 manifest 中的 `process_pid`、`process_create_time` 与 `psutil` 校验进程真实性。
+- `_normalized_run_status(run_id, manifest, default_status)`
+  结合运行时活跃性统一标准化返回状态。
+- `_annotate_run_manifest(manifest, persist=False)`
+  给 manifest 补齐 `is_active` 与 `effective_status`，并可选择持久化回写。
+- `_collect_active_run_ids()`
+  从 manifest 索引与系统进程扫描出当前真实运行集合。
+- `_manifest_result_counts(manifest)`
+  从 manifest 读取已缓存的计数结果，并对缺省值做标准化。
+- `_queue_put(queue, payload, required=False)`
+  给队列写入增加满队列降级与必达事件重试，降低 Swarm 日志回传阻塞。
 - `_require_actor(credentials, request)`
   鉴权核心逻辑。支持 `Authorization: Bearer` 和 `X-API-Key`，也支持显式关闭鉴权。
 - `_audit(actor, action, target, extra)`
@@ -430,8 +632,12 @@ BrowserRouter
   返回策略图表。
 - `swarm_status()`
   返回当前并发运行状态。
+- `admin_reset()`
+  执行可逆工作区重置，支持作用域筛选与确认签名。
 - `list_swarm_runs()`
   返回 Swarm 历史列表。
+- `delete_swarm_run()`
+  删除单个 Swarm run 文件资源（manifest + log），并校验进程活跃性后再执行。
 - `start_swarm()`
   新建 run、启动子进程、注册监听器。
 - `get_swarm_run()`
@@ -439,7 +645,7 @@ BrowserRouter
 - `get_swarm_run_logs()`
   返回分页日志。
 - `stop_swarm()`
-  中止运行中的 Swarm。
+  对运行中的 Swarm 发出停止请求；活跃进程先进入 `stopping`，只在 watcher 确认退出后收口到最终 `stopped`。
 - `websocket_endpoint()`
   WebSocket 连接入口，支持 token query 鉴权和 ping。
 - `frontend_fallback()`
@@ -455,6 +661,14 @@ BrowserRouter
   `/api/results`、`/api/wiki/index`、`/api/strategies`、`/api/swarm/runs`、`/api/swarm/runs/{run_id}/logs` 都已统一成分页返回结构。
 - Swarm 进程块
   API 不在主事件循环里直接跑长任务，而是开 multiprocessing 子进程，再用 queue+线程回传日志。
+- Swarm 活跃判定块
+  `list/running/status/delete` 场景下不再只依赖内存 run 状态，而是通过 manifest + 进程存活判断，解决 API 重启后 running 统计不准的问题。
+- `delete_swarm_run` 安全块
+  删除前会先复用活跃判定，避免删除进程仍在跑的任务记录。
+- 状态一致性块
+  `list_swarm_runs(status=running)` 会回写 `is_active` 并过滤陈旧运行，API 层不再返回“running 但 inactive”的矛盾记录。
+- Stop 两阶段状态机块
+  `POST /api/swarm/runs/{run_id}/stop` 不再直接写最终 `stopped`；若进程仍活着，会先写 `stopping` 并广播停止中的状态，待 `_wait_run_process` 确认退出后再写 `stopped`。
 - WebSocket 实时日志块
   同一份事件既会写 JSONL，也会通过 socket 广播给前端详情页。
 - 前端托管块
@@ -491,8 +705,11 @@ BrowserRouter
     对结果做阈值过滤、相关性去重、报告生成和入库。
   - `run_swarm(parallel=False, log_queue=None)`
     运行整个 Swarm。支持串行和并行，并把运行事件写入日志队列。
-  - `evaluate_strategies()`
-    基于结果池衍生策略回测并持久化。
+- `evaluate_strategies()`
+  基于结果池衍生策略回测并持久化。
+- `evaluate_strategies()`（新版本）
+  优先使用 `strategy_results` 或 `strategy_candidates`（来自 Sub Agent），并重算 `selection_score`，再按分数更新
+  `alpha_pool`/`strategy_pool` 排序。
 
 关键实现块：
 
@@ -599,6 +816,10 @@ BrowserRouter
     打开编辑器。
   - `_load_strategy_template`
     装载策略模板。
+  - `_apply_strategy_config_to_form`
+    将策略 JSON 回填到表单 + 同步文本区域，供“一键种子”与编辑复用。
+  - `_seed_selected_factor_to_strategy_tab`
+    从 Alpha Pool 选中因子读取 `best_strategy` 并一键填入策略配置页。
   - `_strategy_config_from_form`
     从表单生成策略配置。
   - `_parse_profiles`
@@ -617,6 +838,8 @@ BrowserRouter
     清理运行完成后的 UI 状态。
   - `action_quit`
     退出应用。
+  - `Seed to Strategy` 集成
+    因子页可直接跳转到策略页并回填因子表达式 + 最优策略元数据（`template_name`、`source_factor_id`、评分）用于快速继续迭代。
 
 关键实现块：
 
@@ -627,7 +850,7 @@ BrowserRouter
 - 数据刷新块
   让终端工作台能持续消费数据库最新结果
 
-### 5.6 `ast_dump.py`
+### 5.6 `scripts/maintenance/ast_dump.py`
 
 文件说明：
 
@@ -640,7 +863,7 @@ BrowserRouter
 - `dump_project`
   扫描项目并输出 AST 概览。
 
-### 5.7 `bundle_all.py`
+### 5.7 `scripts/maintenance/bundle_all.py`
 
 文件说明：
 
@@ -1140,7 +1363,7 @@ BrowserRouter
 关键实现块：
 
 - 策略表迁移块
-  当前已增加 `run_id` 和 `source_factor_id`，用于把策略结果回挂到 Swarm。
+  当前已增加 `run_id`、`source_factor_id`、`template_name`、`rationale`，用于把策略结果回挂到 Swarm 与策略来源展示。
 - 横截面持仓块
   支持 `top_bottom_n` 等规则。
 - 时序持仓块
@@ -1641,6 +1864,8 @@ BrowserRouter
   因子池列表项。
 - `StrategySummary`
   策略列表项。
+- `SwarmRunSummary`
+  当前状态字段除 `starting/running/completed/failed/stopped` 外，还需要兼容 `stopping` 这一中间态。
 - `WikiGraphNode`
   Wiki 图节点。
 - `WikiGraphEdge`
@@ -1661,7 +1886,7 @@ BrowserRouter
 - `withBase(path)`
   拼接 `VITE_API_BASE_URL`。
 - `request<T>(input, init)`
-  统一 fetch 包装，自动附加 Bearer token，处理 JSON/文本返回。
+  统一 fetch 包装，自动附加 `Authorization: Bearer` 与 `X-API-Key`，处理 JSON/文本返回。
 
 对象：
 
@@ -1672,16 +1897,22 @@ BrowserRouter
   - `getRunLogs`
   - `startRun`
   - `stopRun`
+  - `deleteRun`
+  - `adminReset`
   - `swarmStatus`
   - `listFactors`
   - `getFactor`
   - `runBacktest`
+  - `deleteBacktest`
   - `validateBacktest`
   - `backtestHistory`
   - `getStrategies`
   - `getStrategy`
   - `runStrategy`
+  - `deleteStrategy`
   - `strategyHistory`
+  - `wikiLint`
+  - `wikiMigrate`
   - `wikiIndex`
   - `wikiPage`
   - `wikiGraph`
@@ -1689,7 +1920,7 @@ BrowserRouter
 关键实现块：
 
 - Token 注入块
-  让前端在启用鉴权时无需重复输入 header
+  token 保存在 `localStorage`，HTTP 请求同时附带 `Authorization` 和 `X-API-Key`，避免启用鉴权后写操作 401。
 - Content-Type 自适应块
   Wiki 页面接口返回文本时不会被强行 JSON 解析
 
@@ -1780,6 +2011,7 @@ BrowserRouter
   - 查询当前运行数和并发上限
   - 发起新 run
   - 列出历史 run 并跳详情页
+  - 对运行中 run 发 stop 请求，并在列表项上显示 `Stopping...` 的中间态反馈
 
 关键实现块：
 
@@ -1789,6 +2021,8 @@ BrowserRouter
   把表单字符串统一转换成 API 所需结构
 - `startMutation`
   启动成功后失效 `runs` 和 `swarm-status` 查询
+- stop 反馈块
+  stop 发出后会先在本地标记 stopping，等后端状态真正落成最终态后再切换为删除按钮，避免 `status` / `is_active` 混用导致的按钮错位。
 
 ### 10.21 `frontend/src/pages/SwarmRunDetailPage.tsx`
 
@@ -1804,7 +2038,7 @@ BrowserRouter
   - 拉取历史日志
   - 通过 socket 接收实时日志
   - 聚合因子结果和策略结果
-  - 提供 stop run 按钮
+  - 提供 stop run 按钮和 `Stopping...` 过程反馈
 
 关键实现块：
 
@@ -1813,7 +2047,7 @@ BrowserRouter
 - `mergedLogs`
   合并实时事件与历史日志，并做去重
 - `stopMutation`
-  停止运行后刷新列表和详情
+  停止运行后刷新列表和详情；若 stop 请求已发出但进程仍活着，详情页会明确展示 `stopping` 而不是误标成最终停止
 
 ### 10.22 `frontend/src/pages/AlphaPoolPage.tsx`
 
@@ -1868,6 +2102,7 @@ BrowserRouter
   - 在表单模式和高级 JSON 模式之间切换
   - 运行策略回测
   - 展示策略历史与即时结果
+  - 读取 AlphaPool 最佳策略种子并支持一键写入策略表达式与配置
 
 关键实现块：
 
@@ -1930,73 +2165,73 @@ BrowserRouter
 
 ## 11. 测试文件逐项说明
 
-### 11.1 根目录历史测试文件
+### 11.1 `scripts/manual_tests/` 历史测试文件
 
-- `test_ctx.py`
-- `test_eval.py`
-- `test_eval2.py`
-- `test_eval3.py`
-- `test_eval4.py`
+- `scripts/manual_tests/test_ctx.py`
+- `scripts/manual_tests/test_eval.py`
+- `scripts/manual_tests/test_eval2.py`
+- `scripts/manual_tests/test_eval3.py`
+- `scripts/manual_tests/test_eval4.py`
 
 文件说明：
 
-- 历史探索性测试；当前已被处理为跳过，避免污染正式测试运行。
+- 历史探索性测试；当前已从仓库根目录迁移到 `scripts/manual_tests/`，避免污染正式测试运行。
 
-- `test_manual.py`
+- `scripts/manual_tests/test_manual.py`
   函数：
   - `test`
     手工验证入口。
 
-- `test_ansi.py`
+- `scripts/manual_tests/test_ansi.py`
   类：
   - `TestApp`
     - `__init__`
     - `compose`
 
-- `test_suspend.py`
+- `scripts/manual_tests/test_suspend.py`
   类：
   - `TestApp`
     - `compose`
     - `on_button_pressed`
 
-- `test_textual.py`
+- `scripts/manual_tests/test_textual.py`
   类：
   - `LogApp`
     - `compose`
 
-- `test_trans.py`
+- `scripts/manual_tests/test_trans.py`
   类：
   - `TestApp`
     - `compose`
 
-- `test_transparent.py`
+- `scripts/manual_tests/test_transparent.py`
   类：
   - `TransparentApp`
     - `compose`
 
-- `test_plot.py`
+- `scripts/manual_tests/test_plot.py`
   作用：图形实验测试。
 
-- `test_rq.py`
+- `scripts/manual_tests/test_rq.py`
   函数：
   - `test_connection`
     检查 RiceQuant 连接。
 
-- `test_compile.py`
+- `scripts/manual_tests/test_compile.py`
   作用：编译级快速验证脚本。
 
-- `test_fix_csrank.py`
+- `scripts/manual_tests/test_fix_csrank.py`
   函数：
   - `test_complex_formula`
     针对复杂公式验证 CSRank 等行为。
 
-- `test_polars_eval.py`
+- `scripts/manual_tests/test_polars_eval.py`
   函数：
   - `Mean`
   - `Rank`
   作用：早期 Polars 引擎实验。
 
-- `test_pl_ops.py`
+- `scripts/manual_tests/test_pl_ops.py`
   作用：Polars 运算符验证。
 
 ### 11.2 `tests/unit/test_settings.py`
@@ -2040,7 +2275,21 @@ BrowserRouter
 
 - 评估配置归一化
 
-### 11.5 `tests/unit/test_api_contract.py`
+### 11.5 `tests/unit/test_manager_strategy_eval.py`
+
+类：
+
+- `TestStrategyEvaluation`（若使用类封装）
+- `test_strategy_candidates_are_consumed_before_baseline_fallback`
+  校验 `strategy_candidates` 在缺失 `strategy_results` 时优先生效。
+- `test_strategy_results_re_scored_and_sorted`
+  校验已有策略回测结果先做 `selection_score` 重算，再影响 `alpha_pool`/`strategy_pool` 排序。
+
+验证目标：
+
+- 保证 Swarm 阶段策略结果与种子配置的一致性评分逻辑在回归场景可预期。
+
+### 11.6 `tests/unit/test_api_contract.py`
 
 函数：
 
@@ -2323,6 +2572,8 @@ BrowserRouter
 - `swarm_runs/*.jsonl`
   每次运行的日志流
 - 回测图表和 Markdown 报告文件
+- `scripts/reset_workspace.py --scope runs`
+  清理目标是 `results/swarm_runs`，不会再误指向仓库根目录的 `swarm_runs`
 
 ## 13. 关键实现块总汇
 
@@ -2341,7 +2592,7 @@ BrowserRouter
 ### 13.3 数据契约
 
 - 结果列表接口统一返回 `Paginated<T>`
-- 策略结果增加 `run_id` 和 `source_factor_id`
+- 策略结果增加 `run_id`、`source_factor_id`、`template_name`、`rationale`、`selection_score`、`candidate_rank`、`is_primary`
 - 前端 `types.ts` 与后端分页接口保持一致
 
 ### 13.4 Wiki 图谱
@@ -2362,6 +2613,8 @@ BrowserRouter
 - 任何新增表达式运算符，都应同时补 `core/alphaeval/polars_engine.py` 与对应测试。
 - 任何新增 Wiki 页面类型，都应同步更新 frontmatter 约定和 `WikiPage` 的节点着色策略。
 - 任何新增策略字段，都应同步更新 `StrategyConfig`、前端 `defaultConfig`、API 请求模型和数据库持久化逻辑。
+- Swarm 相关接口在 API 重启/跨进程边界必须以 manifest+pid 复核运行态，新增 run 状态字段时需同步更新
+  `api.py` 的 `list_swarm_runs` 过滤与 `swarm_status` 计数逻辑。
 - 如果未来彻底放弃 TUI，才考虑删除 `tui.py` 与相关历史测试；在那之前，它仍然是第二工作台而不是废代码。
 
 ## 15. 结论

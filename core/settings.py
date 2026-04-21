@@ -149,6 +149,42 @@ class AiminerSettings(BaseModel):
     def db_path(self) -> Path:
         return Path(self.results_dir) / "alpha_miner.db"
 
+    @property
+    def data_path(self) -> Path:
+        return Path(self.data_dir)
+
+    @property
+    def results_path(self) -> Path:
+        return Path(self.results_dir)
+
+    @property
+    def logs_path(self) -> Path:
+        return Path(self.logs_dir)
+
+    @property
+    def wiki_dir(self) -> Path:
+        return self.data_path / "wiki_vault"
+
+    @property
+    def swarm_run_dir(self) -> Path:
+        return self.results_path / "swarm_runs"
+
+    @property
+    def manual_dir(self) -> Path:
+        return self.results_path / "manual"
+
+    @property
+    def strategy_dir(self) -> Path:
+        return self.results_path / "strategies"
+
+    @property
+    def chart_dir(self) -> Path:
+        return self.results_path / "charts"
+
+    @property
+    def report_dir(self) -> Path:
+        return self.results_path / "reports"
+
 
 def provider_api_key(provider: str | None) -> str | None:
     provider_env = {
@@ -232,9 +268,16 @@ def build_settings(overrides: Mapping[str, Any] | None = None) -> AiminerSetting
         "wiki_bootstrap": _coerce_bool(overrides.get("wiki_bootstrap"), default=False),
         "verbose": _coerce_bool(overrides.get("verbose"), default=False),
         "roles": overrides.get("roles"),
-        "data_dir": _normalize_str(overrides.get("data_dir")) or "data",
-        "results_dir": _normalize_str(overrides.get("results_dir")) or "results",
-        "logs_dir": _normalize_str(overrides.get("logs_dir")) or "logs",
+        "data_dir": _normalize_str(overrides.get("data_dir"))
+        or _normalize_str(os.getenv("AIMINER_DATA_DIR"))
+        or "data",
+        "results_dir": _normalize_str(overrides.get("results_dir"))
+        or _normalize_str(os.getenv("AIMINER_RESULTS_DIR"))
+        or "results",
+        "logs_dir": _normalize_str(overrides.get("logs_dir"))
+        or _normalize_str(os.getenv("AIMINER_LOG_DIR"))
+        or _normalize_str(os.getenv("AIMINER_LOGS_DIR"))
+        or "logs",
     }
 
     try:

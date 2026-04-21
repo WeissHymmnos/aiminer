@@ -41,8 +41,8 @@ python -m pytest tests/test_polars_ops_extensive.py -v
 
 Standalone test scripts (not pytest):
 ```bash
-python test_eval.py
-python test_ctx.py
+python scripts/manual_tests/test_eval.py
+python scripts/manual_tests/test_ctx.py
 ```
 
 ## Architecture

@@ -80,6 +80,41 @@ class TestBuildPlan(unittest.TestCase):
             # No path appears twice even though "all" overlaps "pool".
             self.assertEqual(len(rels), len(set(rels)))
 
+    def test_runs_scope_targets_real_swarm_runs_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed(root, "results/swarm_runs/run-1.jsonl", b"log")
+            legacy_root_run = _seed(root, "swarm_runs/legacy.jsonl", b"legacy")
+
+            plan = build_plan(["runs"], root=root)
+            rels = [t.rel_path for t in plan.targets]
+
+            self.assertEqual(rels, ["results/swarm_runs"])
+            summary = execute_plan(
+                plan,
+                confirm=True,
+                root=root,
+                timestamp="20260101-000000",
+            )
+
+            self.assertFalse((root / "results" / "swarm_runs").exists())
+            self.assertTrue(legacy_root_run.exists())
+            self.assertEqual(
+                summary["moved"][0]["path"],
+                "results/swarm_runs",
+            )
+            self.assertTrue(
+                (
+                    root
+                    / "results"
+                    / ".trash"
+                    / "20260101-000000"
+                    / "results"
+                    / "swarm_runs"
+                    / "run-1.jsonl"
+                ).exists()
+            )
+
 
 class TestExecutePlan(unittest.TestCase):
     def test_dry_run_does_not_move_files(self):

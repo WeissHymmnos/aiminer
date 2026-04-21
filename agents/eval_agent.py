@@ -38,6 +38,111 @@ class EvalAgent:
             text = re.sub(r"\s*```$", "", text)
         return text.strip()
 
+    @staticmethod
+    def _simulated_metrics(code: str) -> Dict[str, Any]:
+        seed = int(hashlib.md5(code.encode()).hexdigest()[:8], 16)
+        rng = random.Random(seed)
+
+        return {
+            "information_coefficient": round(rng.uniform(-0.05, 0.15), 3),
+            "rank_ic": round(rng.uniform(-0.05, 0.15), 3),
+            "rre": round(rng.uniform(0.0, 1.0), 3),
+            "pfs1": round(rng.uniform(0.0, 1.0), 6),
+            "pfs2": round(rng.uniform(0.0, 1.0), 6),
+            "diversity": round(rng.uniform(0.0, 1.0), 3),
+            "llm_score": round(rng.uniform(50.0, 100.0), 2),
+            "daily_returns": {},
+            "plot_paths": {},
+            "_simulated": True,
+        }
+
+    @staticmethod
+    def _float_metric(value: Any, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @classmethod
+    def _add_ic_direction(cls, metrics: Dict[str, Any]) -> Dict[str, Any]:
+        ic = cls._float_metric(metrics.get("information_coefficient", 0.0))
+        rank_ic = cls._float_metric(metrics.get("rank_ic", 0.0))
+        if ic > 0:
+            direction = 1
+            label = "positive"
+        elif ic < 0:
+            direction = -1
+            label = "negative"
+        else:
+            direction = 0
+            label = "flat"
+        metrics["ic_direction"] = direction
+        metrics["ic_direction_label"] = label
+        metrics["ic_abs"] = abs(ic)
+        metrics["rank_ic_abs"] = abs(rank_ic)
+        return metrics
+
+    @classmethod
+    def _collect_evaluator_metrics(cls, evaluator: Any) -> Dict[str, Any]:
+        metrics = {
+            "information_coefficient": getattr(evaluator, "ic", 0.0),
+            "oos_ic": getattr(evaluator, "oos_ic", getattr(evaluator, "ic", 0.0)),
+            "rank_ic": getattr(evaluator, "rankic", 0.0),
+            "rre": getattr(evaluator, "rre", 0.0),
+            "sharpe": getattr(evaluator, "sharpe", 0.0),
+            "max_drawdown": getattr(evaluator, "max_dd", 0.0),
+            "plot_paths": getattr(evaluator, "plot_paths", {}) or {},
+            "daily_returns": getattr(evaluator, "daily_returns", {}) or {},
+        }
+        return cls._add_ic_direction(metrics)
+
+    @classmethod
+    def _best_ic_abs_from_state(cls, state: AlphaMinerState) -> float:
+        if state.get("best_ic_abs") is not None:
+            return cls._float_metric(state.get("best_ic_abs"), -1.0)
+        best_ic = state.get("best_ic")
+        if best_ic is None or cls._float_metric(best_ic, -999.0) <= -998.0:
+            return -1.0
+        return abs(cls._float_metric(best_ic, 0.0))
+
+    @staticmethod
+    def _build_factor_snapshot(
+        state: AlphaMinerState,
+        *,
+        metrics: Dict[str, Any],
+        daily_returns: Dict[str, Any],
+        plot_paths: Dict[str, Any],
+        review_summary: str,
+        is_effective: bool,
+        suggested_improvements: str,
+        is_simulated: bool,
+    ) -> Dict[str, Any]:
+        return {
+            "iteration": state.get("iteration"),
+            "role": state.get("role_prompt"),
+            "hypothesis": state.get("hypothesis_name"),
+            "hypothesis_name": state.get("hypothesis_name"),
+            "hypothesis_description": state.get("hypothesis_description"),
+            "rationale": state.get("rationale"),
+            "math_formula": state.get("math_formula"),
+            "variables_defined": state.get("variables_defined"),
+            "code": state.get("code_expression"),
+            "code_expression": state.get("code_expression"),
+            "metrics": dict(metrics),
+            "backtest_metrics": dict(metrics),
+            "factor_metrics": dict(metrics),
+            "returns": dict(daily_returns or {}),
+            "daily_returns": dict(daily_returns or {}),
+            "plot_paths": dict(plot_paths or {}),
+            "review_summary": review_summary,
+            "is_effective": is_effective,
+            "factor_is_effective": is_effective,
+            "suggested_improvements": suggested_improvements,
+            "is_simulated": is_simulated,
+            "ic_direction": metrics.get("ic_direction"),
+            "ic_direction_label": metrics.get("ic_direction_label"),
+        }
+
     def _execute_alphaeval_backtest(
         self,
         code: str,
@@ -45,7 +150,7 @@ class EvalAgent:
         engine: str = "pandas",
         test_start_date: str = "2018-01-01",
         test_end_date: str = "2025-12-31",
-    ) -> Dict[str, float]:
+    ) -> Dict[str, Any]:
         """
         Uses RiceQuantEval or AlphaEval framework to backtest and evaluate.
         """
@@ -78,54 +183,31 @@ class EvalAgent:
             )
 
             evaluator.run()
-            evaluator.run_robustness_test()
-
-            return {
-                "information_coefficient": evaluator.ic,
-                "oos_ic": getattr(evaluator, "oos_ic", evaluator.ic),
-                "rank_ic": getattr(evaluator, "rankic", 0.0),
-                "rre": getattr(evaluator, "rre", 0.0),
-                "sharpe": getattr(evaluator, "sharpe", 0.0),
-                "max_drawdown": getattr(evaluator, "max_dd", 0.0),
-                "plot_paths": getattr(evaluator, "plot_paths", {}),
-                "daily_returns": getattr(evaluator, "daily_returns", {}),
-            }
         except (FileNotFoundError, ValueError, ImportError) as e:
             logger.error(f"RiceQuant evaluation failed: {e}")
             logger.info("Falling back to simulated metrics.")
-
-            seed = int(hashlib.md5(code.encode()).hexdigest()[:8], 16)
-            rng = random.Random(seed)
-
-            return {
-                "information_coefficient": round(rng.uniform(-0.05, 0.15), 3),
-                "rank_ic": round(rng.uniform(-0.05, 0.15), 3),
-                "rre": round(rng.uniform(0.0, 1.0), 3),
-                "pfs1": round(rng.uniform(0.0, 1.0), 6),
-                "pfs2": round(rng.uniform(0.0, 1.0), 6),
-                "diversity": round(rng.uniform(0.0, 1.0), 3),
-                "llm_score": round(rng.uniform(50.0, 100.0), 2),
-                "daily_returns": {},
-                "_simulated": True,
-            }
+            return self._add_ic_direction(self._simulated_metrics(code))
         except Exception as e:
             logger.warning(f"RiceQuant backtest unexpected failure: {e}")
             logger.info("Falling back to simulated metrics.")
+            return self._add_ic_direction(self._simulated_metrics(code))
 
-            seed = int(hashlib.md5(code.encode()).hexdigest()[:8], 16)
-            rng = random.Random(seed)
-
-            return {
-                "information_coefficient": round(rng.uniform(-0.05, 0.15), 3),
-                "rank_ic": round(rng.uniform(-0.05, 0.15), 3),
-                "rre": round(rng.uniform(0.0, 1.0), 3),
-                "pfs1": round(rng.uniform(0.0, 1.0), 6),
-                "pfs2": round(rng.uniform(0.0, 1.0), 6),
-                "diversity": round(rng.uniform(0.0, 1.0), 3),
-                "llm_score": round(rng.uniform(50.0, 100.0), 2),
-                "daily_returns": {},
-                "_simulated": True,
-            }
+        metrics = self._collect_evaluator_metrics(evaluator)
+        robustness_fn = getattr(evaluator, "run_robustness_test", None)
+        if callable(robustness_fn):
+            try:
+                robustness_fn()
+                refreshed = self._collect_evaluator_metrics(evaluator)
+                refreshed.setdefault("daily_returns", metrics.get("daily_returns", {}))
+                refreshed.setdefault("plot_paths", metrics.get("plot_paths", {}))
+                metrics = refreshed
+            except Exception as e:
+                logger.warning(
+                    "[EvalAgent] Robustness test failed after a successful main "
+                    f"backtest; preserving real metrics: {e}"
+                )
+                metrics["robustness_error"] = str(e)
+        return metrics
 
     def __call__(self, state: AlphaMinerState) -> Dict[str, Any]:
         code = state.get("code_expression", "")
@@ -166,6 +248,7 @@ class EvalAgent:
                 for k, v in metrics.items()
                 if k not in ("_simulated", "daily_returns", "plot_paths")
             }
+            metrics = self._add_ic_direction(metrics)
             if is_simulated:
                 logger.warning(
                     "[EvalAgent] Using SIMULATED metrics — results are not real backtest data."
@@ -222,9 +305,12 @@ class EvalAgent:
             # IMPORTANT: Simulated metrics must NOT update best_ic or patience counter —
             # fake high IC from quota-exceeded fallback would otherwise trigger early stop
             # and freeze the patience counter at 0, preventing any real exploration.
-            current_ic = metrics.get("information_coefficient", 0.0)
+            current_ic = self._float_metric(metrics.get("information_coefficient", 0.0))
+            current_ic_abs = abs(current_ic)
             best_ic = state.get("best_ic", -999.0)
+            best_ic_abs = self._best_ic_abs_from_state(state)
             patience_counter = state.get("patience_counter", 0)
+            best_snapshot = state.get("best_factor_snapshot")
 
             if is_simulated:
                 # Freeze all early-stopping state; treat this iteration as a no-op
@@ -232,29 +318,48 @@ class EvalAgent:
                     "[EvalAgent] Simulated metrics detected — best_ic and patience_counter unchanged."
                 )
                 new_best_ic = best_ic
+                new_best_ic_abs = best_ic_abs
                 new_patience_counter = patience_counter
-                new_best_code = state.get("best_code_expression", code)
-            elif current_ic > best_ic:
+                new_best_code = state.get("best_code_expression")
+                new_best_snapshot = best_snapshot
+            elif current_ic_abs > best_ic_abs:
                 new_best_ic = current_ic
+                new_best_ic_abs = current_ic_abs
                 new_patience_counter = 0
                 new_best_code = code
+                new_best_snapshot = self._build_factor_snapshot(
+                    state,
+                    metrics=metrics,
+                    daily_returns=daily_returns,
+                    plot_paths=plot_paths,
+                    review_summary=review_result.review_summary,
+                    is_effective=review_result.is_effective,
+                    suggested_improvements=review_result.suggested_improvements,
+                    is_simulated=is_simulated,
+                )
             else:
                 new_best_ic = best_ic
+                new_best_ic_abs = best_ic_abs
                 new_patience_counter = patience_counter + 1
-                new_best_code = state.get("best_code_expression", code)
+                new_best_code = state.get("best_code_expression")
+                new_best_snapshot = best_snapshot
 
             return {
                 "backtest_metrics": metrics,
                 "factor_metrics": metrics,
                 "daily_returns": daily_returns,
                 "plot_paths": plot_paths,
+                "ic_direction": metrics.get("ic_direction", 0),
+                "ic_direction_label": metrics.get("ic_direction_label", "flat"),
                 "review_summary": review_result.review_summary,
                 "is_effective": review_result.is_effective,
                 "factor_is_effective": review_result.is_effective,
                 "is_simulated": is_simulated,
                 "suggested_improvements": review_result.suggested_improvements,
                 "best_ic": new_best_ic,
+                "best_ic_abs": new_best_ic_abs,
                 "best_code_expression": new_best_code,
+                "best_factor_snapshot": new_best_snapshot,
                 "patience_counter": new_patience_counter,
                 "messages": [
                     f"[EvalAgent] IC: {metrics['information_coefficient']}, Rank IC: {metrics['rank_ic']}, Simulated: {is_simulated}",

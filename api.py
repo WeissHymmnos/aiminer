@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import json
 import multiprocessing
 import os
+import queue as queue_module
 import re
 import sqlite3
 import threading
 import traceback
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -20,10 +23,19 @@ from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from core import manual_runner  # noqa: F401  (import-for-side-effect)
 from core.runtime import new_run_id
+from core.settings import (
+    SUPPORTED_DATA_BACKENDS,
+    SUPPORTED_EVALUATION_MODES,
+    SUPPORTED_LLM_PROVIDERS,
+    SUPPORTED_LOCAL_DATA_LAYOUTS,
+    SUPPORTED_MARKET_MODES,
+    SUPPORTED_MARKET_PROFILES,
+    build_settings,
+)
 from core.wiki import _parse_frontmatter as parse_wiki_frontmatter
 from manager import PortfolioManager
 
@@ -32,13 +44,19 @@ load_dotenv()
 
 SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
 WIKILINK_RE = re.compile(r"\[\[([A-Za-z0-9_\-]+)\]\]")
-DB_PATH = Path("results/alpha_miner.db")
-SWARM_RUN_DIR = Path("results/swarm_runs")
+SETTINGS = build_settings()
+DB_PATH = SETTINGS.db_path
+SWARM_RUN_DIR = SETTINGS.swarm_run_dir
+CHART_DIR = SETTINGS.chart_dir
+REPORT_DIR = SETTINGS.report_dir
+WIKI_DIR = SETTINGS.wiki_dir
 FRONTEND_DIST_CANDIDATES = (
     Path("frontend_dist"),
     Path("frontend/dist"),
 )
 MAX_CONCURRENT_SWARMS = int(os.getenv("AIMINER_MAX_CONCURRENT_SWARMS", "2"))
+SWARM_QUEUE_MAXSIZE = int(os.getenv("AIMINER_SWARM_QUEUE_MAXSIZE", "2000"))
+STALE_STARTING_SECONDS = int(os.getenv("AIMINER_STALE_STARTING_SECONDS", "120"))
 LOG_PAGE_LIMIT_DEFAULT = 100
 LOG_PAGE_LIMIT_MAX = 500
 LIST_PAGE_LIMIT_DEFAULT = 50
@@ -54,6 +72,11 @@ ALLOWED_ORIGINS = [
     if origin.strip()
 ]
 HTTP_BEARER = HTTPBearer(auto_error=False)
+ACTIVE_RUN_STATUSES = {"starting", "pending", "running"}
+FINAL_RUN_STATUSES = {"completed", "failed", "stopped"}
+ENGINE_CHOICES = ("pandas", "polars")
+_MANIFEST_LOCKS: Dict[str, threading.RLock] = {}
+_MANIFEST_LOCKS_GUARD = threading.Lock()
 
 
 app = FastAPI(title="AIMiner Alpha Workstation API")
@@ -61,7 +84,7 @@ app = FastAPI(title="AIMiner Alpha Workstation API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_methods=["GET", "POST", "DELETE"],
+    allow_methods=["GET", "POST", "DELETE", "PUT"],
     allow_headers=["Authorization", "Content-Type", "X-API-Key"],
 )
 
@@ -90,38 +113,226 @@ _ALPHA_POOL_OPTIONAL_COLUMNS: Dict[str, str] = {
     "best_strategy_id": "TEXT",
     "best_strategy_metrics_json": "TEXT",
     "execution_style": "TEXT",
+    "run_id": "TEXT",
 }
 
+_STRATEGY_BACKTEST_OPTIONAL_COLUMNS: Dict[str, str] = {
+    "template_name": "TEXT",
+    "rationale": "TEXT",
+    "run_id": "TEXT",
+    "source_factor_id": "TEXT",
+    "agent_id": "TEXT",
+    "candidate_rank": "INTEGER",
+    "selection_score": "REAL",
+    "is_primary": "INTEGER",
+    "market_profile": "TEXT",
+    "data_backend": "TEXT",
+}
 
-def _ensure_alpha_pool_schema(conn: sqlite3.Connection) -> None:
-    """Idempotent ALTER TABLE so reads can rely on the extended columns."""
+_ALPHA_POOL_RESULT_COLUMNS = (
+    "id",
+    "role",
+    "hypothesis",
+    "code",
+    "ic",
+    "rank_ic",
+    "is_effective",
+    "perf_metric",
+    "selection_score",
+    "best_strategy_id",
+    "report_path",
+    "timestamp",
+    "run_id",
+)
+
+_STRATEGY_LIST_COLUMNS = (
+    "strategy_id",
+    "label",
+    "template_name",
+    "rationale",
+    "strategy_mode",
+    "metrics_json",
+    "market",
+    "engine",
+    "ran_at",
+    "run_id",
+    "source_factor_id",
+    "candidate_rank",
+    "selection_score",
+    "is_primary",
+)
+
+_ALPHA_POOL_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS alpha_pool (
+    id TEXT PRIMARY KEY,
+    role TEXT,
+    hypothesis TEXT,
+    code TEXT,
+    ic REAL,
+    rank_ic REAL,
+    report_path TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    metrics_json TEXT,
+    returns_json TEXT,
+    is_effective INTEGER,
+    perf_metric REAL,
+    selection_score REAL,
+    best_strategy_id TEXT,
+    best_strategy_metrics_json TEXT,
+    execution_style TEXT,
+    run_id TEXT,
+    agent_id TEXT,
+    iteration INTEGER,
+    evaluation_mode TEXT,
+    evaluation_engine TEXT,
+    data_backend TEXT,
+    market_mode TEXT,
+    market_profile TEXT,
+    llm_provider TEXT,
+    llm_model TEXT,
+    is_simulated INTEGER
+)
+"""
+
+_STRATEGY_BACKTESTS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS strategy_backtests (
+    strategy_id TEXT PRIMARY KEY,
+    label TEXT,
+    template_name TEXT,
+    rationale TEXT,
+    run_type TEXT,
+    strategy_mode TEXT,
+    signal_source TEXT,
+    expression_json TEXT,
+    strategy_config_json TEXT,
+    metrics_json TEXT,
+    daily_returns_json TEXT,
+    positions_json TEXT,
+    trade_stats_json TEXT,
+    chart_paths_json TEXT,
+    market TEXT,
+    engine TEXT,
+    ran_at TEXT,
+    run_id TEXT,
+    source_factor_id TEXT,
+    agent_id TEXT,
+    candidate_rank INTEGER,
+    selection_score REAL,
+    is_primary INTEGER,
+    market_profile TEXT,
+    data_backend TEXT
+)
+"""
+
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
     try:
-        existing = {
-            row[1] for row in conn.execute("PRAGMA table_info(alpha_pool)").fetchall()
+        return {
+            str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
         }
-    except sqlite3.OperationalError:
-        return  # table not created yet
+    except sqlite3.OperationalError as exc:
+        logger.warning(f"[schema] failed to inspect {table}: {exc}")
+        return set()
+
+
+def _ensure_optional_columns(
+    conn: sqlite3.Connection,
+    table: str,
+    columns: Dict[str, str],
+) -> None:
+    existing = _table_columns(conn, table)
     if not existing:
         return
-    for column, sql_type in _ALPHA_POOL_OPTIONAL_COLUMNS.items():
+    mutated = False
+    for column, sql_type in columns.items():
         if column in existing:
             continue
         try:
-            conn.execute(f"ALTER TABLE alpha_pool ADD COLUMN {column} {sql_type}")
-        except sqlite3.OperationalError:
-            pass
-    conn.commit()
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}")
+            existing.add(column)
+            mutated = True
+        except sqlite3.OperationalError as exc:
+            logger.warning(f"[schema] failed to add {table}.{column}: {exc}")
+    if mutated:
+        conn.commit()
+
+
+def _ensure_alpha_pool_schema(conn: sqlite3.Connection) -> None:
+    conn.execute(_ALPHA_POOL_TABLE_SQL)
+    _ensure_optional_columns(conn, "alpha_pool", _ALPHA_POOL_OPTIONAL_COLUMNS)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_alpha_timestamp ON alpha_pool(timestamp)")
+    if "run_id" in _table_columns(conn, "alpha_pool"):
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_alpha_run_id ON alpha_pool(run_id)")
+
+
+def _ensure_strategy_backtests_schema(conn: sqlite3.Connection) -> None:
+    conn.execute(_STRATEGY_BACKTESTS_TABLE_SQL)
+    _ensure_optional_columns(conn, "strategy_backtests", _STRATEGY_BACKTEST_OPTIONAL_COLUMNS)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_strategy_backtests_ran_at ON strategy_backtests(ran_at)"
+    )
+    if "run_id" in _table_columns(conn, "strategy_backtests"):
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_strategy_backtests_run_id ON strategy_backtests(run_id)"
+        )
+
+
+def _ensure_db_schema(conn: sqlite3.Connection) -> None:
+    _ensure_alpha_pool_schema(conn)
+    _ensure_strategy_backtests_schema(conn)
+
+
+def _select_projection(existing: set[str], columns: tuple[str, ...]) -> str:
+    return ", ".join(
+        column if column in existing else f"NULL AS {column}"
+        for column in columns
+    )
 
 
 def _db_connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = sqlite3.connect(str(DB_PATH), timeout=10)
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout = 5000")
     conn.row_factory = sqlite3.Row
     return conn
 
 
 def _list_limit(value: int, maximum: int) -> int:
     return max(1, min(value, maximum))
+
+
+def _empty_page(offset: int, limit: int, maximum: int = LIST_PAGE_LIMIT_MAX) -> Dict[str, Any]:
+    start = max(0, offset)
+    page_limit = _list_limit(limit, maximum)
+    return {"items": [], "total": 0, "offset": start, "limit": page_limit, "next_offset": start}
+
+
+def _run_manifest_lock(run_id: str) -> threading.RLock:
+    with _MANIFEST_LOCKS_GUARD:
+        lock = _MANIFEST_LOCKS.get(run_id)
+        if lock is None:
+            lock = threading.RLock()
+            _MANIFEST_LOCKS[run_id] = lock
+        return lock
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(
+        f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+    )
+    try:
+        with tmp_path.open("w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except OSError:
+            pass
 
 
 def _append_jsonl(path: Path, payload: Dict[str, Any]) -> None:
@@ -161,15 +372,30 @@ def _load_jsonl_slice(
     limit: int = LOG_PAGE_LIMIT_DEFAULT,
     tail: bool = False,
 ) -> Dict[str, Any]:
-    if not path.exists():
-        return {"items": [], "total": 0, "offset": offset, "next_offset": offset}
     limit = _list_limit(limit, LOG_PAGE_LIMIT_MAX)
+    if not path.exists():
+        return _empty_page(offset, limit, LOG_PAGE_LIMIT_MAX)
     items: List[Dict[str, Any]] = []
-    all_lines = path.read_text(encoding="utf-8").splitlines()
-    total = len(all_lines)
-    start = max(0, total - limit) if tail else max(0, offset)
+    total = 0
+    start = max(0, offset)
+    if tail:
+        window: deque[str] = deque(maxlen=limit)
+        with path.open("r", encoding="utf-8") as fh:
+            for raw_line in fh:
+                total += 1
+                window.append(raw_line)
+        start = max(0, total - limit)
+        selected_lines = list(window)
+    else:
+        end = start + limit
+        selected_lines = []
+        with path.open("r", encoding="utf-8") as fh:
+            for line_index, raw_line in enumerate(fh):
+                total += 1
+                if start <= line_index < end:
+                    selected_lines.append(raw_line)
     end = min(total, start + limit)
-    for line in all_lines[start:end]:
+    for line in selected_lines:
         line = line.strip()
         if not line:
             continue
@@ -181,12 +407,17 @@ def _load_jsonl_slice(
         "items": items,
         "total": total,
         "offset": start,
-        "next_offset": end,
+        "limit": limit,
+        "next_offset": total if tail else end,
     }
 
 
 def _manifest_path(run_id: str) -> Path:
     return SWARM_RUN_DIR / f"{run_id}.json"
+
+
+def _manifest_lock_path(run_id: str) -> Path:
+    return SWARM_RUN_DIR / f"{run_id}.json.lock"
 
 
 def _log_path(run_id: str) -> Path:
@@ -203,7 +434,8 @@ def _count_rows(table: str, column: str, value: str) -> int:
                 (value,),
             ).fetchone()
             return int(row["c"]) if row else 0
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as exc:
+        logger.warning(f"[counts] failed to count {table}.{column} for {value}: {exc}")
         return 0
 
 
@@ -212,6 +444,120 @@ def _factor_summary_for_run(run_id: str) -> Dict[str, int]:
         "factor_count": _count_rows("alpha_pool", "run_id", run_id),
         "strategy_count": _count_rows("strategy_backtests", "run_id", run_id),
     }
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_iso_datetime(value: Any) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
+def _resolve_active_pid(manifest: Dict[str, Any], run_state: Optional["RunState"] = None) -> Optional[int]:
+    if run_state and run_state.process:
+        try:
+            if run_state.process.is_alive():
+                return run_state.pid
+        except Exception:
+            pass
+
+    pid = manifest.get("process_pid")
+    create_time = _safe_float(manifest.get("process_create_time"))
+    if not pid or create_time is None:
+        return None
+    if int(pid) == os.getpid():
+        return None
+    try:
+        process = psutil.Process(int(pid))
+        if not process.is_running() or process.status() == psutil.STATUS_ZOMBIE:
+            return None
+        if abs(process.create_time() - create_time) > 0.5:
+            return None
+    except psutil.Error:
+        return None
+    return int(pid)
+
+
+def _is_stale_starting_run(manifest: Dict[str, Any], is_active: bool) -> bool:
+    if is_active:
+        return False
+    if str(manifest.get("status") or "") not in {"starting", "pending"}:
+        return False
+    started = _parse_iso_datetime(manifest.get("started_at") or manifest.get("created_at"))
+    if not started:
+        return False
+    now = datetime.now(started.tzinfo) if started.tzinfo else datetime.utcnow()
+    return (now - started).total_seconds() >= STALE_STARTING_SECONDS
+
+
+def _normalized_run_status(manifest: Dict[str, Any], is_active: bool) -> str:
+    status = str(manifest.get("status") or "")
+    if _is_stale_starting_run(manifest, is_active):
+        return "failed"
+    if status == "stopped" and is_active:
+        return "stopping"
+    if status == "stopping" and not is_active:
+        return "stopped"
+    if status in ACTIVE_RUN_STATUSES and manifest.get("process_pid") and not is_active:
+        return "stopped"
+    return status
+
+
+def _annotate_run_manifest(
+    run_id: str,
+    manifest: Dict[str, Any],
+    run_state: Optional["RunState"] = None,
+    persist: bool = False,
+) -> Dict[str, Any]:
+    active_pid = _resolve_active_pid(manifest, run_state)
+    is_active = active_pid is not None
+    normalized_status = _normalized_run_status(manifest, is_active)
+    if persist:
+        patch: Dict[str, Any] = {}
+        stale_starting = _is_stale_starting_run(manifest, is_active)
+        if manifest.get("status") != normalized_status:
+            patch["status"] = normalized_status
+        if normalized_status in FINAL_RUN_STATUSES and not manifest.get("ended_at"):
+            patch["ended_at"] = _now_iso()
+        elif normalized_status not in FINAL_RUN_STATUSES and manifest.get("ended_at"):
+            patch["ended_at"] = None
+        if stale_starting and not manifest.get("failure_reason"):
+            patch["failure_reason"] = "stale starting run recovered by API"
+        if patch:
+            manifest = _write_run_manifest(run_id, patch)
+    manifest["status"] = normalized_status
+    manifest["is_active"] = is_active
+    return manifest
+
+
+def _collect_active_run_ids() -> List[str]:
+    run_ids = set()
+    with state.lock:
+        active_states = dict(state.runs)
+    for run_id, run_state in active_states.items():
+        try:
+            if run_state.process and run_state.process.is_alive():
+                run_ids.add(run_id)
+        except Exception:
+            continue
+    if SWARM_RUN_DIR.exists():
+        for path in SWARM_RUN_DIR.glob("run_*.json"):
+            manifest = _load_json(path)
+            if not manifest:
+                continue
+            run_id = manifest.get("run_id") or path.stem
+            if _resolve_active_pid(manifest, active_states.get(run_id)) is not None:
+                run_ids.add(run_id)
+    return sorted(run_ids)
 
 
 class RunState:
@@ -238,20 +584,15 @@ class RunState:
 
 class GlobalState:
     def __init__(self):
-        self.sockets: List[WebSocket] = []
+        self.sockets: set[WebSocket] = set()
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self.runs: Dict[str, RunState] = {}
-        self.lock = threading.Lock()
+        # API handlers sometimes call helper methods that also acquire the
+        # same state lock; use an RLock so those paths don't self-deadlock.
+        self.lock = threading.RLock()
 
     def active_run_ids(self) -> List[str]:
-        with self.lock:
-            return sorted(
-                [
-                    run_id
-                    for run_id, run_state in self.runs.items()
-                    if run_state.process and run_state.process.is_alive()
-                ]
-            )
+        return _collect_active_run_ids()
 
     def running_count(self) -> int:
         return len(self.active_run_ids())
@@ -305,17 +646,18 @@ def _service_error(exc: Exception, fallback: str) -> HTTPException:
 
 
 async def broadcast(message: Dict[str, Any]) -> None:
+    with state.lock:
+        sockets = list(state.sockets)
     dead: List[WebSocket] = []
-    for socket in state.sockets:
+    for socket in sockets:
         try:
             await socket.send_json(message)
         except Exception:
             dead.append(socket)
-    for socket in dead:
-        try:
-            state.sockets.remove(socket)
-        except ValueError:
-            pass
+    if dead:
+        with state.lock:
+            for socket in dead:
+                state.sockets.discard(socket)
 
 
 def _emit_event(message: Dict[str, Any]) -> None:
@@ -327,13 +669,21 @@ def _emit_event(message: Dict[str, Any]) -> None:
 
 def _write_run_manifest(run_id: str, patch: Dict[str, Any]) -> Dict[str, Any]:
     path = _manifest_path(run_id)
-    current = _load_json(path)
-    current.update(patch)
-    current.setdefault("run_id", run_id)
-    current.setdefault("log_path", str(_log_path(run_id)))
-    current["result_counts"] = _factor_summary_for_run(run_id)
-    path.write_text(_json_dumps(current), encoding="utf-8")
-    return current
+    with _run_manifest_lock(run_id):
+        lock_path = _manifest_lock_path(run_id)
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a", encoding="utf-8") as lock_fh:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+            try:
+                current = _load_json(path)
+                current.update(patch)
+                current.setdefault("run_id", run_id)
+                current.setdefault("log_path", str(_log_path(run_id)))
+                current["result_counts"] = _manifest_result_counts(current)
+                _atomic_write_text(path, _json_dumps(current))
+                return current
+            finally:
+                fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
 
 
 def _load_run_manifest(run_id: str) -> Dict[str, Any]:
@@ -342,12 +692,21 @@ def _load_run_manifest(run_id: str) -> Dict[str, Any]:
         raise HTTPException(404, "run not found")
     manifest.setdefault("run_id", run_id)
     manifest.setdefault("log_path", str(_log_path(run_id)))
-    manifest["result_counts"] = _factor_summary_for_run(run_id)
-    return manifest
+    if "result_counts" not in manifest:
+        counts = _factor_summary_for_run(run_id)
+        manifest["result_counts"] = counts
+        _write_run_manifest(run_id, {"result_counts": counts})
+    else:
+        manifest["result_counts"] = _manifest_result_counts(manifest)
+    with state.lock:
+        run_state = state.runs.get(run_id)
+    return _annotate_run_manifest(run_id, manifest, run_state, persist=True)
 
 
 def _list_run_manifests(offset: int = 0, limit: int = LIST_PAGE_LIMIT_DEFAULT, status_filter: Optional[str] = None) -> Dict[str, Any]:
     manifests: List[Dict[str, Any]] = []
+    with state.lock:
+        active_states = dict(state.runs)
     if SWARM_RUN_DIR.exists():
         for path in sorted(SWARM_RUN_DIR.glob("run_*.json")):
             manifest = _load_json(path)
@@ -355,7 +714,13 @@ def _list_run_manifests(offset: int = 0, limit: int = LIST_PAGE_LIMIT_DEFAULT, s
                 continue
             run_id = manifest.get("run_id") or path.stem
             manifest["run_id"] = run_id
-            manifest["result_counts"] = _factor_summary_for_run(run_id)
+            if "result_counts" not in manifest:
+                counts = _factor_summary_for_run(run_id)
+                manifest["result_counts"] = counts
+                _write_run_manifest(run_id, {"result_counts": counts})
+            else:
+                manifest["result_counts"] = _manifest_result_counts(manifest)
+            manifest = _annotate_run_manifest(run_id, manifest, active_states.get(run_id), persist=True)
             if status_filter and manifest.get("status") != status_filter:
                 continue
             manifests.append(manifest)
@@ -370,6 +735,7 @@ def _list_run_manifests(offset: int = 0, limit: int = LIST_PAGE_LIMIT_DEFAULT, s
         "items": manifests[start:end],
         "total": len(manifests),
         "offset": start,
+        "limit": page_limit,
         "next_offset": end,
     }
 
@@ -382,14 +748,15 @@ def _register_run(
     config: Dict[str, Any],
     status: str = "running",
 ) -> None:
-    state.runs[run_id] = RunState(
-        run_id=run_id,
-        process=process,
-        queue=queue,
-        listener_thread=listener_thread,
-        config=config,
-        status=status,
-    )
+    with state.lock:
+        state.runs[run_id] = RunState(
+            run_id=run_id,
+            process=process,
+            queue=queue,
+            listener_thread=listener_thread,
+            config=config,
+            status=status,
+        )
 
 
 def _cleanup_run(run_id: str) -> None:
@@ -432,11 +799,53 @@ def _stop_process_tree(pid: Optional[int]) -> None:
         pass
 
 
+def _manifest_result_counts(manifest: Dict[str, Any]) -> Dict[str, int]:
+    raw = manifest.get("result_counts")
+    if not isinstance(raw, dict):
+        raw = {}
+    return {
+        "factor_count": int(raw.get("factor_count") or 0),
+        "strategy_count": int(raw.get("strategy_count") or 0),
+    }
+
+
+def _queue_put(queue: Any, payload: Any, *, required: bool = False) -> None:
+    try:
+        queue.put(payload, timeout=1)
+        return
+    except queue_module.Full:
+        if not required and isinstance(payload, dict) and payload.get("type") == "log":
+            logger.warning("[swarm] log queue full; dropping log record")
+            return
+        try:
+            queue.put(payload, timeout=5)
+            return
+        except Exception as exc:
+            logger.warning(f"[swarm] failed to enqueue required event: {exc}")
+    except Exception as exc:
+        logger.warning(f"[swarm] queue put failed: {exc}")
+
+
 def _listen_run_queue(run_id: str, queue: Any) -> None:
     log_path = _log_path(run_id)
+    idle_polls = 0
     while True:
         try:
-            record = queue.get()
+            record = queue.get(timeout=1)
+            idle_polls = 0
+        except queue_module.Empty:
+            idle_polls += 1
+            if idle_polls >= 3:
+                manifest = _load_json(_manifest_path(run_id))
+                with state.lock:
+                    run_state = state.runs.get(run_id)
+                if (
+                    manifest
+                    and manifest.get("status") in FINAL_RUN_STATUSES
+                    and _resolve_active_pid(manifest, run_state) is None
+                ):
+                    break
+            continue
         except Exception:
             break
         if record is None:
@@ -465,7 +874,8 @@ def _listen_run_queue(run_id: str, queue: Any) -> None:
 
 def _swarm_process_target(run_id: str, config: Dict[str, Any], queue: Any) -> None:
     def queue_log(level: str, message: str, role: str, agent_id: Optional[str] = None) -> None:
-        queue.put(
+        _queue_put(
+            queue,
             {
                 "type": "log",
                 "run_id": run_id,
@@ -474,7 +884,7 @@ def _swarm_process_target(run_id: str, config: Dict[str, Any], queue: Any) -> No
                 "timestamp": datetime.utcnow().strftime("%H:%M:%S"),
                 "role": role,
                 "agent_id": agent_id,
-            }
+            },
         )
 
     def sink(log_message) -> None:
@@ -489,14 +899,16 @@ def _swarm_process_target(run_id: str, config: Dict[str, Any], queue: Any) -> No
 
     logger.remove()
     logger.add(sink, level="INFO")
-    queue.put(
+    _queue_put(
+        queue,
         {
             "type": "status",
             "run_id": run_id,
             "event": "started",
             "status": "running",
             "started_at": _now_iso(),
-        }
+        },
+        required=True,
     )
     try:
         manager = PortfolioManager(
@@ -519,25 +931,30 @@ def _swarm_process_target(run_id: str, config: Dict[str, Any], queue: Any) -> No
             market_end=config.get("market_end"),
         )
         manager.run_swarm(parallel=bool(config.get("parallel")), log_queue=queue)
-        queue.put(
+        _queue_put(
+            queue,
             {
                 "type": "summary",
                 "run_id": run_id,
                 "factor_count": len(manager.alpha_pool),
                 "strategy_count": len(manager.strategy_pool),
-            }
+            },
+            required=True,
         )
-        queue.put(
+        _queue_put(
+            queue,
             {
                 "type": "status",
                 "run_id": run_id,
                 "event": "completed",
                 "status": "completed",
                 "ended_at": _now_iso(),
-            }
+            },
+            required=True,
         )
     except Exception as exc:
-        queue.put(
+        _queue_put(
+            queue,
             {
                 "type": "log",
                 "run_id": run_id,
@@ -545,9 +962,10 @@ def _swarm_process_target(run_id: str, config: Dict[str, Any], queue: Any) -> No
                 "message": f"Swarm failure: {exc}",
                 "timestamp": datetime.utcnow().strftime("%H:%M:%S"),
                 "role": "System",
-            }
+            },
         )
-        queue.put(
+        _queue_put(
+            queue,
             {
                 "type": "log",
                 "run_id": run_id,
@@ -555,9 +973,10 @@ def _swarm_process_target(run_id: str, config: Dict[str, Any], queue: Any) -> No
                 "message": traceback.format_exc(),
                 "timestamp": datetime.utcnow().strftime("%H:%M:%S"),
                 "role": "System",
-            }
+            },
         )
-        queue.put(
+        _queue_put(
+            queue,
             {
                 "type": "status",
                 "run_id": run_id,
@@ -565,16 +984,67 @@ def _swarm_process_target(run_id: str, config: Dict[str, Any], queue: Any) -> No
                 "status": "failed",
                 "ended_at": _now_iso(),
                 "failure_reason": str(exc),
-            }
+            },
+            required=True,
         )
     finally:
-        queue.put(None)
+        _queue_put(queue, None, required=True)
 
 
 def _wait_run_process(run_id: str, process: multiprocessing.Process, queue: Any) -> None:
     process.join()
+    manifest = _load_json(_manifest_path(run_id))
+    exit_code = process.exitcode
+    status = manifest.get("status")
+    if manifest and status not in FINAL_RUN_STATUSES:
+        ended_at = _now_iso()
+        if status == "stopping":
+            next_status = "stopped"
+            failure_reason = manifest.get("failure_reason")
+        elif exit_code == 0:
+            next_status = "completed"
+            failure_reason = None
+        elif exit_code is not None and exit_code < 0:
+            next_status = "stopped"
+            failure_reason = manifest.get("failure_reason")
+        else:
+            next_status = "failed"
+            failure_reason = manifest.get("failure_reason") or f"worker exited with code {exit_code}"
+        final_counts = _factor_summary_for_run(run_id)
+        _write_run_manifest(
+            run_id,
+            {
+                "status": next_status,
+                "ended_at": ended_at,
+                "failure_reason": failure_reason,
+                "result_counts": final_counts,
+            },
+        )
+        _append_jsonl(
+            _log_path(run_id),
+            {
+                "type": "status",
+                "run_id": run_id,
+                "event": next_status,
+                "status": next_status,
+                "started_at": manifest.get("started_at"),
+                "ended_at": ended_at,
+                "failure_reason": failure_reason,
+            },
+        )
+        _emit_event(
+            {
+                "type": "status",
+                "run_id": run_id,
+                "event": next_status,
+                "status": next_status,
+                "started_at": manifest.get("started_at"),
+                "ended_at": ended_at,
+                "failure_reason": failure_reason,
+            }
+        )
     try:
-        queue.put(None)
+        _queue_put(queue, None, required=True)
     except Exception:
         pass
     _cleanup_run(run_id)
@@ -588,6 +1058,7 @@ def _paginate_rows(rows: list[sqlite3.Row], offset: int, limit: int) -> Dict[str
         "items": [dict(row) for row in rows[start:end]],
         "total": len(rows),
         "offset": start,
+        "limit": page_limit,
         "next_offset": end,
     }
 
@@ -612,8 +1083,8 @@ def _row_to_factor_detail(row: sqlite3.Row) -> Dict[str, Any]:
     if is_effective is not None:
         payload["is_effective"] = bool(is_effective)
     factor_id = payload.get("id")
-    chart_file = Path(f"results/charts/{factor_id}_curve.png")
-    report_file = Path(f"results/reports/{factor_id}.md")
+    chart_file = CHART_DIR / f"{factor_id}_curve.png"
+    report_file = REPORT_DIR / f"{factor_id}.md"
     payload["chart_url"] = f"/api/charts/{factor_id}" if chart_file.exists() else None
     payload["report_url"] = f"/api/reports/{factor_id}" if report_file.exists() else None
     return payload
@@ -648,7 +1119,7 @@ def _row_to_strategy_detail(row: sqlite3.Row) -> Dict[str, Any]:
 
 def _load_wiki_pages() -> Dict[str, Dict[str, Any]]:
     pages: Dict[str, Dict[str, Any]] = {}
-    root = Path("data/wiki_vault")
+    root = WIKI_DIR
     if not root.exists():
         return pages
     exclude = {"index.md", "log.md"}
@@ -715,11 +1186,238 @@ def _build_wiki_graph() -> Dict[str, Any]:
     }
 
 
-class SwarmConfig(BaseModel):
-    iterations: int = 2
-    mode: str = "ricequant"
+_EVALUATION_MODE_ALIASES = {
+    "rq": "ricequant",
+    "rice_quant": "ricequant",
+    "rice-quant": "ricequant",
+}
+_DATA_BACKEND_ALIASES = {
+    **_EVALUATION_MODE_ALIASES,
+    "csv": "local",
+    "parquet": "local",
+    "local_csv": "local",
+    "local_parquet": "local",
+}
+_ENGINE_ALIASES = {"pd": "pandas", "pl": "polars"}
+_MARKET_MODE_ALIASES = {
+    "single_market": "single",
+    "multi": "batch",
+    "multiple": "batch",
+    "hybrid": "mixed",
+}
+_MARKET_PROFILE_ALIASES = {
+    "cn": "cn_stock",
+    "china": "cn_stock",
+    "a_share": "cn_stock",
+    "a-share": "cn_stock",
+    "us": "us_stock",
+    "usa": "us_stock",
+    "future": "futures",
+}
+_LOCAL_DATA_LAYOUT_ALIASES = {
+    "single_file": "panel",
+    "file": "panel",
+    "qlib": "panel",
+    "instrument": "instrument_files",
+    "instrument_file": "instrument_files",
+    "contract": "instrument_files",
+    "contracts": "instrument_files",
+    "dominant": "instrument_files",
+}
+
+
+def _normalize_text(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _normalize_choice(
+    value: Any,
+    *,
+    field_name: str,
+    allowed: tuple[str, ...],
+    aliases: Optional[Dict[str, str]] = None,
+    optional: bool = False,
+) -> Optional[str]:
+    text = _normalize_text(value)
+    if text is None:
+        if optional:
+            return None
+        raise ValueError(f"{field_name} is required")
+    normalized = text.lower()
+    normalized = (aliases or {}).get(normalized, normalized)
+    if normalized not in allowed:
+        raise ValueError(f"{field_name} must be one of: {', '.join(allowed)}")
+    return normalized
+
+
+def _coerce_string_list(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    text = str(value).strip()
+    if not text:
+        return []
+    if text.startswith("["):
+        try:
+            raw = json.loads(text)
+            if isinstance(raw, list):
+                return [str(item).strip() for item in raw if str(item).strip()]
+        except json.JSONDecodeError:
+            pass
+    return [item.strip() for item in text.split(",") if item.strip()]
+
+
+class RuntimeRequestModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, validate_default=True)
+
+    @field_validator("mode", mode="before", check_fields=False)
+    @classmethod
+    def _validate_mode(cls, value: Any) -> str:
+        return str(
+            _normalize_choice(
+                value,
+                field_name="mode",
+                allowed=SUPPORTED_EVALUATION_MODES,
+                aliases=_EVALUATION_MODE_ALIASES,
+            )
+        )
+
+    @field_validator("data_backend", mode="before", check_fields=False)
+    @classmethod
+    def _validate_data_backend(cls, value: Any) -> str:
+        return str(
+            _normalize_choice(
+                value,
+                field_name="data_backend",
+                allowed=SUPPORTED_DATA_BACKENDS,
+                aliases=_DATA_BACKEND_ALIASES,
+            )
+        )
+
+    @field_validator("engine", mode="before", check_fields=False)
+    @classmethod
+    def _validate_engine(cls, value: Any) -> str:
+        return str(
+            _normalize_choice(
+                value,
+                field_name="engine",
+                allowed=ENGINE_CHOICES,
+                aliases=_ENGINE_ALIASES,
+            )
+        )
+
+    @field_validator("market_mode", mode="before", check_fields=False)
+    @classmethod
+    def _validate_market_mode(cls, value: Any) -> str:
+        return str(
+            _normalize_choice(
+                value,
+                field_name="market_mode",
+                allowed=SUPPORTED_MARKET_MODES,
+                aliases=_MARKET_MODE_ALIASES,
+            )
+        )
+
+    @field_validator("market_profile", mode="before", check_fields=False)
+    @classmethod
+    def _validate_market_profile(cls, value: Any) -> str:
+        return str(
+            _normalize_choice(
+                value,
+                field_name="market_profile",
+                allowed=SUPPORTED_MARKET_PROFILES,
+                aliases=_MARKET_PROFILE_ALIASES,
+            )
+        )
+
+    @field_validator("market_profiles", mode="before", check_fields=False)
+    @classmethod
+    def _validate_market_profiles(cls, value: Any) -> List[str]:
+        profiles = [
+            str(
+                _normalize_choice(
+                    item,
+                    field_name="market_profiles",
+                    allowed=SUPPORTED_MARKET_PROFILES,
+                    aliases=_MARKET_PROFILE_ALIASES,
+                )
+            )
+            for item in _coerce_string_list(value)
+        ]
+        return profiles
+
+    @field_validator("local_data_layout", mode="before", check_fields=False)
+    @classmethod
+    def _validate_local_data_layout(cls, value: Any) -> str:
+        return str(
+            _normalize_choice(
+                value,
+                field_name="local_data_layout",
+                allowed=SUPPORTED_LOCAL_DATA_LAYOUTS,
+                aliases=_LOCAL_DATA_LAYOUT_ALIASES,
+            )
+        )
+
+    @field_validator("llm_provider", mode="before", check_fields=False)
+    @classmethod
+    def _validate_llm_provider(cls, value: Any) -> Optional[str]:
+        provider = _normalize_text(value)
+        if provider is None:
+            return None
+        provider = provider.lower()
+        if provider not in SUPPORTED_LLM_PROVIDERS:
+            raise ValueError(
+                f"llm_provider must be one of: {', '.join(SUPPORTED_LLM_PROVIDERS)}"
+            )
+        return provider
+
+    @field_validator("embedding_provider", mode="before", check_fields=False)
+    @classmethod
+    def _validate_embedding_provider(cls, value: Any) -> Optional[str]:
+        provider = _normalize_text(value)
+        if provider is None:
+            return None
+        provider = provider.lower()
+        if provider != "local" and provider not in SUPPORTED_LLM_PROVIDERS:
+            raise ValueError(
+                f"embedding_provider must be 'local' or one of: {', '.join(SUPPORTED_LLM_PROVIDERS)}"
+            )
+        return provider
+
+    @field_validator("llm_base_url", "local_data_path", mode="before", check_fields=False)
+    @classmethod
+    def _blank_to_none(cls, value: Any) -> Optional[str]:
+        return _normalize_text(value)
+
+    @model_validator(mode="after")
+    def _validate_runtime_consistency(self) -> "RuntimeRequestModel":
+        market_profile = getattr(self, "market_profile", None)
+        market_profiles = list(getattr(self, "market_profiles", None) or [])
+        if market_profile:
+            if getattr(self, "market_mode", None) == "single":
+                setattr(self, "market_profiles", [market_profile])
+            elif market_profile not in market_profiles:
+                setattr(self, "market_profiles", [market_profile] + market_profiles)
+        if getattr(self, "data_backend", None) == "local" and not getattr(self, "local_data_path", None):
+            raise ValueError("local_data_path is required when data_backend='local'")
+        return self
+
+
+class SwarmConfig(RuntimeRequestModel):
+    iterations: int = Field(default=2, ge=1)
+    mode: str = Field(
+        default="ricequant",
+        validation_alias=AliasChoices("mode", "evaluation_mode"),
+    )
     data_backend: str = "ricequant"
-    engine: str = "polars"
+    engine: str = Field(
+        default="polars",
+        validation_alias=AliasChoices("engine", "evaluation_engine"),
+    )
     roles: List[str]
     market_start: str = "2017-01-01"
     market_end: str = "2020-10-31"
@@ -734,15 +1432,27 @@ class SwarmConfig(BaseModel):
     local_data_layout: str = "auto"
     parallel: bool = True
 
+    @field_validator("roles", mode="before")
+    @classmethod
+    def _validate_roles(cls, value: Any) -> List[str]:
+        roles = _coerce_string_list(value)
+        if not roles:
+            raise ValueError("roles must contain at least one role")
+        return roles
 
-class BacktestRequest(BaseModel):
+
+class BacktestRequest(RuntimeRequestModel):
     expression: str = Field(
         ...,
         description="Raw Qlib-style factor expression, e.g. 'Rank(Delta($close, 5))'.",
     )
     start_date: str = "2017-01-01"
     end_date: str = "2020-10-31"
-    engine: str = Field("polars", description="'pandas' or 'polars'")
+    engine: str = Field(
+        default="polars",
+        description="'pandas' or 'polars'",
+        validation_alias=AliasChoices("engine", "evaluation_engine"),
+    )
     market: str = Field("000300.XSHG", description="Universe index code")
     daily_normalize: bool = True
     run_robustness: bool = True
@@ -756,7 +1466,7 @@ class BacktestRequest(BaseModel):
     local_data_layout: str = "auto"
 
 
-class StrategyRunRequest(BaseModel):
+class StrategyRunRequest(RuntimeRequestModel):
     expression: str
     strategy_config: Dict[str, Any]
     data_backend: str = "ricequant"
@@ -767,13 +1477,90 @@ class StrategyRunRequest(BaseModel):
     local_data_layout: str = "auto"
 
 
+def _shutdown_active_swarm_runs() -> None:
+    with state.lock:
+        active_states = dict(state.runs)
+
+    run_ids = set(active_states)
+    if SWARM_RUN_DIR.exists():
+        run_ids.update(path.stem for path in SWARM_RUN_DIR.glob("run_*.json"))
+
+    for run_id in sorted(run_ids):
+        manifest = _load_json(_manifest_path(run_id))
+        run_state = active_states.get(run_id)
+        active_pid = _resolve_active_pid(manifest, run_state)
+        if active_pid is None:
+            continue
+
+        started_at = manifest.get("started_at")
+        _write_run_manifest(
+            run_id,
+            {
+                "status": "stopping",
+                "ended_at": None,
+                "failure_reason": manifest.get("failure_reason"),
+            },
+        )
+        stopping_event = {
+            "type": "status",
+            "run_id": run_id,
+            "event": "stopping",
+            "status": "stopping",
+            "started_at": started_at,
+            "reason": "api_shutdown",
+        }
+        _append_jsonl(_log_path(run_id), stopping_event)
+
+        _stop_process_tree(active_pid)
+        if run_state and run_state.process:
+            try:
+                run_state.process.join(timeout=5)
+            except TypeError:
+                run_state.process.join()
+            except Exception:
+                pass
+        if run_state and run_state.queue:
+            _queue_put(run_state.queue, None, required=True)
+
+        ended_at = _now_iso()
+        _write_run_manifest(
+            run_id,
+            {
+                "status": "stopped",
+                "ended_at": ended_at,
+                "failure_reason": manifest.get("failure_reason"),
+            },
+        )
+        _append_jsonl(
+            _log_path(run_id),
+            {
+                "type": "status",
+                "run_id": run_id,
+                "event": "stopped",
+                "status": "stopped",
+                "started_at": started_at,
+                "ended_at": ended_at,
+                "reason": "api_shutdown",
+            },
+        )
+        _cleanup_run(run_id)
+
+
 @app.on_event("startup")
 async def startup_event() -> None:
     _ensure_runtime_dirs()
     if DB_PATH.exists():
         with _db_connect() as conn:
-            _ensure_alpha_pool_schema(conn)
+            _ensure_db_schema(conn)
     state.loop = asyncio.get_running_loop()
+
+
+@app.on_event("shutdown")
+async def shutdown_event() -> None:
+    _shutdown_active_swarm_runs()
+    with state.lock:
+        state.sockets.clear()
+        state.loop = None
 
 
 @app.get("/", response_model=None)
@@ -805,22 +1592,27 @@ def get_results(
     if run_id:
         run_id = _safe_segment(run_id)
     if not DB_PATH.exists():
-        return {"items": [], "total": 0, "offset": offset, "next_offset": offset}
-    select_cols = (
-        "id, role, hypothesis, code, ic, rank_ic, is_effective, "
-        "perf_metric, selection_score, best_strategy_id, report_path, timestamp, run_id"
-    )
+        return _empty_page(offset, limit)
     with _db_connect() as conn:
-        _ensure_alpha_pool_schema(conn)
-        if run_id:
-            rows = conn.execute(
-                f"SELECT {select_cols} FROM alpha_pool WHERE run_id=? ORDER BY timestamp DESC",
-                (run_id,),
-            ).fetchall()
+        _ensure_db_schema(conn)
+        existing = _table_columns(conn, "alpha_pool")
+        if not existing:
+            rows = []
         else:
-            rows = conn.execute(
-                f"SELECT {select_cols} FROM alpha_pool ORDER BY timestamp DESC"
-            ).fetchall()
+            select_cols = _select_projection(existing, _ALPHA_POOL_RESULT_COLUMNS)
+            order_clause = "timestamp DESC" if "timestamp" in existing else "rowid DESC"
+            if run_id:
+                if "run_id" not in existing:
+                    rows = []
+                else:
+                    rows = conn.execute(
+                        f"SELECT {select_cols} FROM alpha_pool WHERE run_id=? ORDER BY {order_clause}",
+                        (run_id,),
+                    ).fetchall()
+            else:
+                rows = conn.execute(
+                    f"SELECT {select_cols} FROM alpha_pool ORDER BY {order_clause}"
+                ).fetchall()
     return _paginate_rows(list(rows), offset, limit)
 
 
@@ -830,9 +1622,11 @@ def get_factor_detail(factor_id: str) -> Dict[str, Any]:
     if not DB_PATH.exists():
         raise HTTPException(404, "db missing")
     with _db_connect() as conn:
+        _ensure_db_schema(conn)
         row = conn.execute("SELECT * FROM alpha_pool WHERE id=?", (factor_id,)).fetchone()
         strategy_row = None
         if row and "best_strategy_id" in row.keys() and row["best_strategy_id"]:
+            _ensure_strategy_backtests_schema(conn)
             try:
                 strategy_row = conn.execute(
                     "SELECT * FROM strategy_backtests WHERE strategy_id=?",
@@ -851,7 +1645,7 @@ def get_factor_detail(factor_id: str) -> Dict[str, Any]:
 @app.get("/api/charts/{factor_id}")
 def get_chart(factor_id: str) -> FileResponse:
     factor_id = _safe_segment(factor_id)
-    path = Path(f"results/charts/{factor_id}_curve.png")
+    path = CHART_DIR / f"{factor_id}_curve.png"
     if not path.exists():
         raise HTTPException(404, "chart not found")
     return FileResponse(str(path), media_type="image/png")
@@ -860,7 +1654,7 @@ def get_chart(factor_id: str) -> FileResponse:
 @app.get("/api/reports/{factor_id}", response_class=PlainTextResponse)
 def get_report(factor_id: str) -> PlainTextResponse:
     factor_id = _safe_segment(factor_id)
-    path = Path(f"results/reports/{factor_id}.md")
+    path = REPORT_DIR / f"{factor_id}.md"
     if not path.exists():
         raise HTTPException(404, "report not found")
     return PlainTextResponse(
@@ -894,6 +1688,7 @@ def wiki_index(
         "items": rows[start:end],
         "total": total,
         "offset": start,
+        "limit": page_limit,
         "next_offset": end,
     }
 
@@ -901,7 +1696,7 @@ def wiki_index(
 @app.get("/api/wiki/page/{slug}", response_class=PlainTextResponse)
 def wiki_page(slug: str) -> PlainTextResponse:
     slug = _safe_segment(slug)
-    path = Path("data/wiki_vault") / f"{slug}.md"
+    path = WIKI_DIR / f"{slug}.md"
     if not path.exists() or path.name in {"index.md", "log.md"}:
         raise HTTPException(404, "wiki page not found")
     return PlainTextResponse(
@@ -931,6 +1726,10 @@ class ResetRequest(BaseModel):
             "Defends against accidental destructive POSTs by reusing-API-token clients."
         ),
     )
+
+
+class WikiPageUpdateRequest(BaseModel):
+    content: str = Field(min_length=1, description="Full markdown page content including optional frontmatter.")
 
 
 @app.post("/api/admin/reset")
@@ -978,6 +1777,28 @@ def wiki_lint(
         return wiki.lint(stale_days=stale_days)
     except Exception as exc:
         raise HTTPException(500, f"lint failed: {exc}")
+
+
+@app.put("/api/wiki/page/{slug}")
+def wiki_update_page(
+    slug: str,
+    req: WikiPageUpdateRequest,
+    actor: Actor = Depends(_require_actor),
+) -> Dict[str, Any]:
+    slug = _safe_segment(slug)
+    path = WIKI_DIR / f"{slug}.md"
+    if path.name in {"index.md", "log.md"}:
+        raise HTTPException(400, "system wiki pages are read-only")
+    if not path.exists():
+        raise HTTPException(404, "wiki page not found")
+    meta, _body = parse_wiki_frontmatter(req.content)
+    frontmatter_slug = str(meta.get("slug") or "").strip()
+    if frontmatter_slug and _safe_segment(frontmatter_slug) != slug:
+        raise HTTPException(400, "frontmatter slug must match requested slug")
+    _audit(actor, "wiki.update", slug)
+    normalized = req.content.rstrip() + "\n"
+    path.write_text(normalized, encoding="utf-8")
+    return {"status": "saved", "slug": slug, "bytes": len(normalized.encode("utf-8"))}
 
 
 @app.post("/api/wiki/migrate")
@@ -1130,49 +1951,26 @@ def get_strategies(
     if run_id:
         run_id = _safe_segment(run_id)
     if not DB_PATH.exists():
-        return {"items": [], "total": 0, "offset": offset, "next_offset": offset}
+        return _empty_page(offset, limit)
     with _db_connect() as conn:
-        try:
+        _ensure_db_schema(conn)
+        existing = _table_columns(conn, "strategy_backtests")
+        if not existing:
+            rows = []
+        else:
+            select_cols = _select_projection(existing, _STRATEGY_LIST_COLUMNS)
+            order_clause = "ran_at DESC" if "ran_at" in existing else "rowid DESC"
             if run_id:
-                rows = conn.execute(
-                    """
-                    SELECT strategy_id, label, strategy_mode, metrics_json, market, engine,
-                           ran_at, run_id, source_factor_id, candidate_rank, selection_score, is_primary
-                    FROM strategy_backtests
-                    WHERE run_id=?
-                    ORDER BY ran_at DESC
-                    """,
-                    (run_id,),
-                ).fetchall()
+                if "run_id" not in existing:
+                    rows = []
+                else:
+                    rows = conn.execute(
+                        f"SELECT {select_cols} FROM strategy_backtests WHERE run_id=? ORDER BY {order_clause}",
+                        (run_id,),
+                    ).fetchall()
             else:
                 rows = conn.execute(
-                    """
-                    SELECT strategy_id, label, strategy_mode, metrics_json, market, engine,
-                           ran_at, run_id, source_factor_id, candidate_rank, selection_score, is_primary
-                    FROM strategy_backtests
-                    ORDER BY ran_at DESC
-                    """
-                ).fetchall()
-        except sqlite3.OperationalError:
-            if run_id:
-                rows = conn.execute(
-                    """
-                    SELECT strategy_id, label, strategy_mode, metrics_json, market, engine,
-                           ran_at, run_id, source_factor_id, NULL AS candidate_rank, NULL AS selection_score, NULL AS is_primary
-                    FROM strategy_backtests
-                    WHERE run_id=?
-                    ORDER BY ran_at DESC
-                    """,
-                    (run_id,),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    """
-                    SELECT strategy_id, label, strategy_mode, metrics_json, market, engine,
-                           ran_at, run_id, source_factor_id, NULL AS candidate_rank, NULL AS selection_score, NULL AS is_primary
-                    FROM strategy_backtests
-                    ORDER BY ran_at DESC
-                    """
+                    f"SELECT {select_cols} FROM strategy_backtests ORDER BY {order_clause}"
                 ).fetchall()
     paged = _paginate_rows(list(rows), offset, limit)
     items: List[Dict[str, Any]] = []
@@ -1193,10 +1991,15 @@ def get_strategy(strategy_id: str) -> Dict[str, Any]:
     if not DB_PATH.exists():
         raise HTTPException(404, "db missing")
     with _db_connect() as conn:
-        row = conn.execute(
-            "SELECT * FROM strategy_backtests WHERE strategy_id=?",
-            (strategy_id,),
-        ).fetchone()
+        _ensure_db_schema(conn)
+        try:
+            row = conn.execute(
+                "SELECT * FROM strategy_backtests WHERE strategy_id=?",
+                (strategy_id,),
+            ).fetchone()
+        except sqlite3.OperationalError as exc:
+            logger.warning(f"[schema] failed to read strategy_backtests: {exc}")
+            row = None
     if not row:
         raise HTTPException(404, "strategy not found")
     return _row_to_strategy_detail(row)
@@ -1209,15 +2012,19 @@ def delete_strategy(
 ) -> Dict[str, Any]:
     strategy_id = _safe_segment(strategy_id)
     _audit(actor, "strategy.delete", strategy_id)
-    if not manual_runner.delete_strategy_job(strategy_id):
-        raise HTTPException(404, "strategy backtest not found")
+    file_deleted = manual_runner.delete_strategy_job(strategy_id)
+    deleted_rows = 0
     if DB_PATH.exists():
         with _db_connect() as conn:
-            conn.execute(
+            _ensure_strategy_backtests_schema(conn)
+            cursor = conn.execute(
                 "DELETE FROM strategy_backtests WHERE strategy_id=?",
                 (strategy_id,),
             )
+            deleted_rows = cursor.rowcount
             conn.commit()
+    if not file_deleted and deleted_rows == 0:
+        raise HTTPException(404, "strategy backtest not found")
     return {"status": "deleted", "strategy_id": strategy_id}
 
 
@@ -1229,6 +2036,7 @@ def get_strategy_chart(strategy_id: str, kind: str) -> FileResponse:
     if not DB_PATH.exists():
         raise HTTPException(404, "db missing")
     with _db_connect() as conn:
+        _ensure_strategy_backtests_schema(conn)
         row = conn.execute(
             "SELECT chart_paths_json FROM strategy_backtests WHERE strategy_id=?",
             (strategy_id,),
@@ -1287,7 +2095,7 @@ def start_swarm(
                 "result_counts": {"factor_count": 0, "strategy_count": 0},
             },
         )
-        queue = multiprocessing.Queue()
+        queue = multiprocessing.Queue(maxsize=SWARM_QUEUE_MAXSIZE)
         listener_thread = threading.Thread(
             target=_listen_run_queue,
             args=(run_id, queue),
@@ -1300,7 +2108,19 @@ def start_swarm(
             daemon=False,
         )
         process.start()
-        _write_run_manifest(run_id, {"process_pid": process.pid, "status": "running"})
+        process_create_time = None
+        try:
+            process_create_time = psutil.Process(process.pid).create_time()
+        except psutil.Error:
+            pass
+        _write_run_manifest(
+            run_id,
+            {
+                "process_pid": process.pid,
+                "process_create_time": process_create_time,
+                "status": "running",
+            },
+        )
         _register_run(run_id, process, queue, listener_thread, config_payload)
     threading.Thread(
         target=_wait_run_process,
@@ -1330,8 +2150,7 @@ def get_swarm_run(
     manifest = _load_run_manifest(run_id)
     with state.lock:
         run_state = state.runs.get(run_id)
-    manifest["is_active"] = bool(run_state and run_state.process.is_alive())
-    return manifest
+    return _annotate_run_manifest(run_id, manifest, run_state, persist=True)
 
 
 @app.get("/api/swarm/runs/{run_id}/logs")
@@ -1360,30 +2179,78 @@ def stop_swarm(
         run_state = state.runs.get(run_id)
     manifest = _load_run_manifest(run_id)
     current_status = manifest.get("status")
+    if current_status == "stopping":
+        return {"status": current_status, "run_id": run_id}
     if current_status in {"completed", "failed", "stopped"}:
         return {"status": current_status, "run_id": run_id}
-    if not run_state:
-        raise HTTPException(404, "run not active")
-    _stop_process_tree(run_state.pid)
-    ended_at = _now_iso()
+    active_pid = _resolve_active_pid(manifest, run_state)
+    if active_pid is None:
+        ended_at = _now_iso()
+        _write_run_manifest(
+            run_id,
+            {
+                "status": "stopped",
+                "ended_at": ended_at,
+            },
+        )
+        event = {
+            "type": "status",
+            "run_id": run_id,
+            "event": "stopped",
+            "status": "stopped",
+            "started_at": manifest.get("started_at"),
+            "ended_at": ended_at,
+        }
+        _append_jsonl(_log_path(run_id), event)
+        _emit_event(event)
+        _cleanup_run(run_id)
+        return {"status": "stopped", "run_id": run_id}
     _write_run_manifest(
         run_id,
         {
-            "status": "stopped",
-            "ended_at": ended_at,
+            "status": "stopping",
+            "ended_at": None,
         },
     )
+    if run_state:
+        run_state.status = "stopping"
     event = {
         "type": "status",
         "run_id": run_id,
-        "event": "stopped",
-        "status": "stopped",
+        "event": "stopping",
+        "status": "stopping",
         "started_at": manifest.get("started_at"),
-        "ended_at": ended_at,
     }
     _append_jsonl(_log_path(run_id), event)
     _emit_event(event)
-    return {"status": "stopped", "run_id": run_id}
+    _stop_process_tree(active_pid)
+    return {"status": "stopping", "run_id": run_id}
+
+
+@app.delete("/api/swarm/runs/{run_id}")
+def delete_swarm_run(
+    run_id: str,
+    actor: Actor = Depends(_require_actor),
+) -> Dict[str, Any]:
+    run_id = _safe_segment(run_id)
+    _audit(actor, "swarm.delete", run_id)
+    manifest = _load_run_manifest(run_id)
+    with state.lock:
+        run_state = state.runs.get(run_id)
+    if _resolve_active_pid(manifest, run_state) is not None:
+        raise HTTPException(409, "run is still active; stop it first")
+    manifest_path = _manifest_path(run_id)
+    lock_path = _manifest_lock_path(run_id)
+    log_path = _log_path(run_id)
+    if not manifest_path.exists() and not log_path.exists():
+        raise HTTPException(404, "run not found")
+    for path in (manifest_path, log_path, lock_path):
+        try:
+            if path.exists():
+                path.unlink()
+        except OSError:
+            pass
+    return {"status": "deleted", "run_id": run_id}
 
 
 @app.websocket("/ws")
@@ -1397,7 +2264,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             await websocket.close(code=1008)
             return
     await websocket.accept()
-    state.sockets.append(websocket)
+    with state.lock:
+        state.sockets.add(websocket)
     await websocket.send_json(
         {
             "type": "status",
@@ -1411,10 +2279,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        try:
-            state.sockets.remove(websocket)
-        except ValueError:
-            pass
+        with state.lock:
+            state.sockets.discard(websocket)
 
 
 FRONTEND_DIST_DIR = _resolve_frontend_dist_dir()

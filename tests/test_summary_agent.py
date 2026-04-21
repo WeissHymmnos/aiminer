@@ -3,6 +3,7 @@ import os
 import pandas as pd
 from unittest.mock import patch, MagicMock
 from agents.summary_agent import SummaryAgent
+from core.settings import AiminerSettings
 
 
 class TestSummaryAgent(unittest.TestCase):
@@ -55,6 +56,42 @@ class TestSummaryAgent(unittest.TestCase):
             os.remove("results/reports/test_alpha_001.md")
         if os.path.exists("results/charts/test_alpha_001_curve.png"):
             os.remove("results/charts/test_alpha_001_curve.png")
+
+
+def test_summary_agent_uses_settings_paths_and_dict_returns(tmp_path):
+    settings = AiminerSettings(results_dir=str(tmp_path / "results"))
+    with patch("agents.summary_agent.get_llm", return_value=MagicMock()):
+        agent = SummaryAgent(settings=settings)
+
+    mock_chain = MagicMock()
+    mock_chain.invoke.return_value.content = "Mocked economic analysis."
+    with patch("agents.summary_agent.ChatPromptTemplate") as mock_prompt:
+        mock_prompt.from_messages.return_value.__or__.return_value = mock_chain
+        report_path = agent.generate_markdown_report(
+            {
+                "id": "dict_returns_factor",
+                "hypothesis": "Dictionary returns should plot.",
+                "code": "Rank($close)",
+                "metrics": {
+                    "information_coefficient": 0.02,
+                    "rank_ic": 0.03,
+                    "oos_ic": 0.01,
+                    "sharpe": 1.0,
+                    "max_drawdown": -0.05,
+                },
+                "returns": {
+                    "2024-01-01": 0.01,
+                    "2024-01-02": -0.002,
+                    "2024-01-03": 0.004,
+                },
+            }
+        )
+
+    expected_report = settings.report_dir / "dict_returns_factor.md"
+    expected_chart = settings.chart_dir / "dict_returns_factor_curve.png"
+    assert report_path == str(expected_report.resolve())
+    assert expected_report.exists()
+    assert expected_chart.exists()
 
 
 if __name__ == "__main__":

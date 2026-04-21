@@ -1,8 +1,16 @@
 import unittest
 import pandas as pd
 import numpy as np
+
+import pytest
+
+pytest.importorskip("rqdatac", reason="RiceQuant evaluator imports the optional rqdatac client")
+
 from core.alphaeval.rq_eval import RiceQuantEval
 from loguru import logger
+
+
+pytestmark = pytest.mark.native
 
 
 class TestNumericalConsistency(unittest.TestCase):

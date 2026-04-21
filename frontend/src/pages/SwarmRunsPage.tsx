@@ -1,8 +1,8 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { SectionCard } from "../components/SectionCard";
-import { api } from "../lib/api";
+import { api, getErrorMessage, getRunStatusView } from "../lib/api";
 import type { SwarmRunSummary } from "../types";
 
 const modeOptions = ["ricequant", "qlib"];
@@ -10,6 +10,7 @@ const backendOptions = ["ricequant", "qlib", "local"];
 const engineOptions = ["polars", "pandas"];
 const marketModeOptions = ["single", "multi"];
 const localDataLayoutOptions = ["auto", "qlib", "contracts", "dominant"];
+const RUNS_PAGE_SIZE = 20;
 
 const defaultRoles = [
   "专注Hurst指数与分形维度的动量专家",
@@ -25,6 +26,9 @@ const defaultRoles = [
 ];
 
 export function SwarmRunsPage() {
+  const navigate = useNavigate();
+  const [runsPage, setRunsPage] = useState(0);
+  const [stoppingRunIds, setStoppingRunIds] = useState<string[]>([]);
   const [form, setForm] = useState({
     iterations: "30",
     mode: "ricequant",
@@ -45,21 +49,43 @@ export function SwarmRunsPage() {
     roles: defaultRoles.join("\n"),
   });
   const queryClient = useQueryClient();
-  const runs = useQuery({
-    queryKey: ["runs"],
-    queryFn: api.listAllRuns,
-    refetchInterval: 5000,
-  });
+  const runsOffset = runsPage * RUNS_PAGE_SIZE;
   const swarmStatus = useQuery({
     queryKey: ["swarm-status"],
     queryFn: api.swarmStatus,
     refetchInterval: 5000,
   });
+  const runs = useQuery({
+    queryKey: ["runs", runsOffset, RUNS_PAGE_SIZE],
+    queryFn: () => api.listRuns({ offset: runsOffset, limit: RUNS_PAGE_SIZE }),
+    placeholderData: keepPreviousData,
+    refetchInterval: swarmStatus.data?.running_count ? 5000 : 15000,
+  });
   const startMutation = useMutation({
     mutationFn: api.startRun,
+    onSuccess: (data) => {
+      void queryClient.invalidateQueries({ queryKey: ["runs"] });
+      void queryClient.invalidateQueries({ queryKey: ["swarm-status"] });
+      navigate(`/runs/${data.run_id}`);
+    },
+  });
+  const stopMutation = useMutation({
+    mutationFn: api.stopRun,
+    onMutate: async (runId) => {
+      setStoppingRunIds((current) => (current.includes(runId) ? current : [...current, runId]));
+    },
+    onError: (_error, runId) => {
+      setStoppingRunIds((current) => current.filter((id) => id !== runId));
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["runs"] });
       void queryClient.invalidateQueries({ queryKey: ["swarm-status"] });
+    },
+  });
+  const deleteMutation = useMutation({
+    mutationFn: api.deleteRun,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["runs"] });
     },
   });
 
@@ -92,6 +118,27 @@ export function SwarmRunsPage() {
     [form],
   );
 
+  const runItems = runs.data?.items ?? [];
+  const hasNextRunPage = (runs.data?.next_offset ?? 0) < (runs.data?.total ?? 0);
+  const launcherError =
+    startMutation.error ?? stopMutation.error ?? deleteMutation.error ?? swarmStatus.error;
+
+  useEffect(() => {
+    if (!runItems.length) {
+      return;
+    }
+    setStoppingRunIds((current) =>
+      current.filter((runId) => {
+        const run = runItems.find((item) => item.run_id === runId);
+        if (!run) {
+          return true;
+        }
+        const rawStatus = String(run.status ?? "").toLowerCase();
+        return !(["completed", "failed", "stopped"].includes(rawStatus) && !run.is_active);
+      }),
+    );
+  }, [runItems]);
+
   return (
     <div className="page-grid two-col">
       <SectionCard
@@ -106,6 +153,7 @@ export function SwarmRunsPage() {
           </button>
         }
       >
+        {launcherError ? <div className="status-block error">{getErrorMessage(launcherError)}</div> : null}
         <div className="metric-grid">
           <div className="metric">
             <span>Running</span>
@@ -256,26 +304,76 @@ export function SwarmRunsPage() {
             onChange={(event) => setForm({ ...form, parallel: event.target.checked })}
           />
         </label>
-        {startMutation.error ? (
-          <p className="error-text">{(startMutation.error as Error).message}</p>
+        {swarmStatus.isPending && !swarmStatus.data ? (
+          <div className="status-inline">Loading swarm status...</div>
         ) : null}
       </SectionCard>
 
-      <SectionCard title="Swarm Runs">
+      <SectionCard
+        title="Swarm Runs"
+        actions={
+          <div className="pagination-bar compact">
+            <button className="button" disabled={runsPage === 0} onClick={() => setRunsPage((page) => Math.max(0, page - 1))}>
+              Prev
+            </button>
+            <span className="pagination-summary">
+              Page {runsPage + 1}
+              {typeof runs.data?.total === "number" ? ` · ${runs.data.total} runs` : ""}
+            </span>
+            <button className="button" disabled={!hasNextRunPage} onClick={() => setRunsPage((page) => page + 1)}>
+              Next
+            </button>
+          </div>
+        }
+      >
+        {runs.isPending && !runs.data ? <div className="status-block loading">Loading runs...</div> : null}
+        {runs.isError ? <div className="status-block error">{getErrorMessage(runs.error)}</div> : null}
         <div className="list">
-          {(runs.data ?? []).map((run: SwarmRunSummary) => (
-            <Link key={run.run_id} className="list-row" to={`/runs/${run.run_id}`}>
-              <div>
-                <strong>{run.run_id}</strong>
-                <p className="muted">{run.status}</p>
+          {runItems.map((run: SwarmRunSummary) => {
+            const runStatus = getRunStatusView(run, { stopRequested: stoppingRunIds.includes(run.run_id) });
+            return (
+              <div key={run.run_id} className="list-row">
+                <Link
+                  className="button-reset"
+                  style={{ flex: 1, minWidth: 0, display: "flex", gap: 12, alignItems: "center" }}
+                  to={`/runs/${run.run_id}`}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <strong>{run.run_id}</strong>
+                    <p className="muted">{runStatus.label}</p>
+                  </div>
+                  <div className="align-right">
+                    <div>{run.result_counts?.factor_count ?? 0} factors</div>
+                    <div className="muted">{run.result_counts?.strategy_count ?? 0} strategies</div>
+                  </div>
+                </Link>
+                {!runStatus.showDelete ? (
+                  <button
+                    type="button"
+                    className="button"
+                    disabled={!runStatus.canStop || runStatus.isStopping || stopMutation.isPending}
+                    onClick={() => stopMutation.mutate(run.run_id)}
+                  >
+                    {runStatus.isStopping ? "Stopping..." : "Stop"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="button button-danger"
+                    disabled={deleteMutation.isPending}
+                    onClick={() => {
+                      if (confirm(`Delete run ${run.run_id}?`)) {
+                        deleteMutation.mutate(run.run_id);
+                      }
+                    }}
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
-              <div className="align-right">
-                <div>{run.result_counts?.factor_count ?? 0} factors</div>
-                <div className="muted">{run.result_counts?.strategy_count ?? 0} strategies</div>
-              </div>
-            </Link>
-          ))}
-          {!runs.data?.length ? <p className="muted">No runs yet.</p> : null}
+            );
+          })}
+          {!runs.isPending && !runItems.length ? <p className="muted">No runs on this page.</p> : null}
         </div>
       </SectionCard>
     </div>

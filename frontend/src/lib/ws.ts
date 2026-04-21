@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { getStoredToken } from "./api";
+import { getBearerlessToken, getStoredToken, TOKEN_CHANGED_EVENT, TOKEN_STORAGE_KEY } from "./api";
 
 export type SocketEvent = Record<string, unknown>;
+export type SocketStatus = "connecting" | "open" | "closed" | "error";
 
 function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/, "");
@@ -28,9 +29,45 @@ function getSocketOrigin() {
   return `${protocol}://${window.location.host}`;
 }
 
+function getSocketUrl(token: string) {
+  const url = new URL(`${getSocketOrigin()}/ws`);
+  const apiKey = getBearerlessToken(token);
+  if (apiKey) {
+    url.searchParams.set("token", apiKey);
+  }
+  return url.toString();
+}
+
+function useStoredTokenSnapshot() {
+  const [token, setToken] = useState(() => getStoredToken());
+
+  useEffect(() => {
+    const refreshToken = () => setToken(getStoredToken());
+    const handleTokenChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ token?: string }>).detail;
+      setToken(detail?.token ?? getStoredToken());
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === TOKEN_STORAGE_KEY) {
+        refreshToken();
+      }
+    };
+
+    window.addEventListener(TOKEN_CHANGED_EVENT, handleTokenChange);
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener(TOKEN_CHANGED_EVENT, handleTokenChange);
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, []);
+
+  return token;
+}
+
 export function useSocketFeed() {
+  const token = useStoredTokenSnapshot();
   const [events, setEvents] = useState<SocketEvent[]>([]);
-  const [status, setStatus] = useState<"connecting" | "open" | "closed">("connecting");
+  const [status, setStatus] = useState<SocketStatus>("connecting");
 
   useEffect(() => {
     let active = true;
@@ -38,13 +75,13 @@ export function useSocketFeed() {
     let socket: WebSocket | null = null;
     let pingTimer: any = 0;
     let reconnectTimer: any = 0;
+    let hadError = false;
 
     function connect() {
-      const token = getStoredToken();
-      const query = token ? `?token=${encodeURIComponent(token)}` : "";
-      const url = `${getSocketOrigin()}/ws${query}`;
-      
-      console.log(`[WebSocket] Connecting to ${getSocketOrigin()}/ws...`);
+      const url = getSocketUrl(token);
+
+      console.log(`[WebSocket] Connecting to ${url.replace(/([?&]token=)[^&]+/, "$1***")}...`);
+      hadError = false;
       setStatus("connecting");
       
       socket = new WebSocket(url);
@@ -75,7 +112,7 @@ export function useSocketFeed() {
       };
 
       socket.onclose = (event) => {
-        setStatus("closed");
+        setStatus(hadError ? "error" : "closed");
         window.clearInterval(pingTimer);
         if (!active) return;
         
@@ -86,6 +123,8 @@ export function useSocketFeed() {
 
       socket.onerror = (error) => {
         console.error("[WebSocket] Error occurred", error);
+        hadError = true;
+        setStatus("error");
         socket?.close();
       };
     }
@@ -97,7 +136,7 @@ export function useSocketFeed() {
       window.clearTimeout(reconnectTimer);
       if (socket) socket.close();
     };
-  }, []);
+  }, [token]);
 
   return { events, status };
 }

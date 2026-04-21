@@ -1,4 +1,4 @@
-from typing import TypedDict, Annotated, List, Dict, Optional
+from typing import Any, TypedDict, Annotated, List, Dict, Optional
 import operator
 
 
@@ -31,14 +31,17 @@ class AlphaMinerState(TypedDict, total=False):
     is_valid_syntax: bool
 
     # EvalAgent
-    backtest_metrics: Dict[str, float]
-    factor_metrics: Dict[str, float]
+    backtest_metrics: Dict[str, Any]
+    factor_metrics: Dict[str, Any]
     daily_returns: Dict[str, float]
+    plot_paths: Dict[str, str]
     review_summary: str
     is_effective: bool
     factor_is_effective: bool
     suggested_improvements: str
     is_simulated: bool  # True when backtest used fallback/simulated metrics
+    ic_direction: int
+    ic_direction_label: str
 
     # Strategy stage
     strategy_candidates: List[Dict[str, object]]
@@ -58,7 +61,9 @@ class AlphaMinerState(TypedDict, total=False):
     strategy_refinement_history: List[Dict[str, object]]
 
     best_ic: float
+    best_ic_abs: float
     best_code_expression: Optional[str]
+    best_factor_snapshot: Optional[Dict[str, Any]]
     patience_counter: int
 
     # Control flow & History

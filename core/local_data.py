@@ -24,6 +24,10 @@ _COLUMN_ALIASES = {
     "money": "total_turnover",
 }
 
+_INSTRUMENT_COLUMN_NAMES = {
+    name for name, canonical in _COLUMN_ALIASES.items() if canonical == "instrument"
+} | {"instrument"}
+
 
 def _read_table(path: Path) -> pd.DataFrame:
     suffix = path.suffix.lower()
@@ -115,6 +119,12 @@ def _iter_data_files(path: Path) -> Iterable[Path]:
             yield child
 
 
+def _has_instrument_column(path: Path) -> bool:
+    table = _read_table(path)
+    columns = {str(col).strip().lower() for col in table.columns}
+    return bool(columns & _INSTRUMENT_COLUMN_NAMES)
+
+
 def infer_layout(path: Path) -> str:
     if path.is_file():
         return "panel"
@@ -122,8 +132,18 @@ def infer_layout(path: Path) -> str:
     if not files:
         raise FileNotFoundError(f"No CSV/Parquet files found under {path}")
     if len(files) == 1:
+        return "panel" if _has_instrument_column(files[0]) else "instrument_files"
+
+    has_instrument = [_has_instrument_column(file_path) for file_path in files]
+    if all(has_instrument):
         return "panel"
-    return "instrument_files"
+    if not any(has_instrument):
+        return "instrument_files"
+    raise ValueError(
+        "Ambiguous local data directory: panel files include an instrument column, "
+        "instrument_files omit it and use filenames as instruments. Do not mix both "
+        "semantics in one auto-detected directory."
+    )
 
 
 def resolve_local_profile_path(base_path: str | os.PathLike[str], market_profile: str) -> Path:
@@ -160,16 +180,28 @@ def load_local_ohlcv(
             files = list(_iter_data_files(source))
             if not files:
                 raise FileNotFoundError(f"No local data files found in {source}")
-            table = _read_table(files[0])
+            for file_path in files:
+                try:
+                    frames.append(
+                        _ensure_schema(
+                            _read_table(file_path),
+                            market_profile=market_profile,
+                            instrument_prefix=instrument_prefix,
+                        )
+                    )
+                except ValueError as exc:
+                    raise ValueError(
+                        "panel layout treats every file in a directory as a panel shard "
+                        f"and requires an instrument column; {file_path.name}: {exc}"
+                    ) from exc
         else:
-            table = _read_table(source)
-        frames.append(
-            _ensure_schema(
-                table,
-                market_profile=market_profile,
-                instrument_prefix=instrument_prefix,
+            frames.append(
+                _ensure_schema(
+                    _read_table(source),
+                    market_profile=market_profile,
+                    instrument_prefix=instrument_prefix,
+                )
             )
-        )
     else:
         if not source.is_dir():
             raise ValueError("instrument_files layout requires a directory input.")

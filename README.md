@@ -27,6 +27,88 @@ python manager.py --iterations 5 --mode ricequant \
 --parallel
 ```
 
+### 启动 Web 工作台
+开发模式：
+
+```bash
+./start_web.sh
+```
+
+生产模式（后端直接托管 `frontend/dist`）：
+
+```bash
+./start_web.sh --prod
+```
+
+默认情况下，脚本会统一设置：
+
+- `AIMINER_DATA_DIR`
+- `AIMINER_RESULTS_DIR`
+- `AIMINER_LOG_DIR`
+
+这保证 API、Manager、手工回测和 Web 工作台读取的是同一套数据与日志目录，而不是各自落到不同路径。
+
+### 鉴权说明
+
+如果启用了鉴权，请先设置：
+
+```bash
+export AIMINER_AUTH_TOKEN="your-token"
+```
+
+Web 工作台侧边栏提供 `API Token` 输入框。输入后，前端会自动为请求附带：
+
+- `Authorization: Bearer <token>`
+- `X-API-Key: <token>`
+
+### Stop Run 说明
+
+Swarm 的停止现在是两阶段状态机：
+
+- `stopping`：停止请求已经发出，正在等待 worker 进程退出
+- `stopped`：进程已经确认退出，运行真正结束
+
+因此，点击 `Stop Run` 后，Web/TUI 可能会短暂显示 `Stopping...`，这是预期行为，不代表失败。
+
+### Docker / Compose
+
+`docker compose up -d --build` 默认只启动 API 服务，避免有限研究任务在 `restart: unless-stopped` 下反复执行并写入产物。
+
+```bash
+docker compose up -d --build
+```
+
+研究 worker 和 TUI 使用 profile 或一次性 run 启动：
+
+```bash
+AIMINER_ITERATIONS=5 docker compose --profile research run --rm worker
+docker compose --profile tui run --rm tui
+```
+
+### 测试矩阵
+
+默认 CI 只跑 hermetic unit，不依赖外部凭证、网络服务、生成数据目录或本地 Rust/Polars 原生插件：
+
+```bash
+PYTHONPATH=. pytest tests/unit -m "unit and not external and not native" -q
+```
+
+可选测试分开执行：
+
+```bash
+PYTHONPATH=. pytest -m external -q  # RiceQuant/外部依赖
+PYTHONPATH=. pytest -m native -q    # Rust/Polars 原生插件
+```
+
+### Reset 产物
+
+reset 默认是 dry-run，使用 `--confirm` 才会把匹配路径移动到 `results/.trash/<timestamp>/`。`runs` scope 对应真实 Swarm 产物目录 `results/swarm_runs`：
+
+```bash
+python scripts/reset_workspace.py --scope runs
+python scripts/reset_workspace.py --scope runs --confirm
+```
+
 ## 📊 系统输出
 *   **最优代码**: 每个 Agent 迭代出的最佳 Python 因子表达式。
 *   **评估报告**: 包含 IC、Rank IC、夏普比率等核心指标。

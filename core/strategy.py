@@ -332,22 +332,20 @@ def _normalize_positions(row: pd.Series, max_weight: float) -> pd.Series:
     if gross <= 1e-12:
         return row * 0.0
     normalized = row / gross
-    normalized = normalized.clip(lower=-max_weight, upper=max_weight)
-    gross = normalized.abs().sum()
-    if gross <= 1e-12:
-        return normalized
-    return normalized / gross
+    return normalized.clip(lower=-max_weight, upper=max_weight)
 
 
 def _rebalance_mask(index: pd.Index, freq: RebalanceFreq) -> pd.Series:
-    dt_index = pd.to_datetime(index)
+    original_index = pd.Index(index)
+    dt_index = pd.DatetimeIndex(pd.to_datetime(original_index))
     if freq == "daily":
-        return pd.Series(True, index=dt_index)
+        return pd.Series(True, index=original_index)
     if freq == "weekly":
         periods = dt_index.to_period("W")
     else:
         periods = dt_index.to_period("M")
-    return pd.Series(periods != periods.shift(1), index=dt_index).fillna(True)
+    period_series = pd.Series(periods.astype(str), index=original_index)
+    return period_series.ne(period_series.shift(1)).fillna(True)
 
 
 class StrategyBacktester:
@@ -568,10 +566,10 @@ class StrategyBacktester:
         holding_lengths: list[int] = []
 
         prev = pd.Series(0.0, index=desired.columns, dtype=float)
-        for dt in desired.index:
+        for pos, dt in enumerate(desired.index):
             candidate = (
                 desired.loc[dt].copy()
-                if rebalance.loc[pd.to_datetime(dt)]
+                if bool(rebalance.iloc[pos])
                 else prev.copy()
             )
             if cfg.max_positions:
@@ -602,6 +600,8 @@ class StrategyBacktester:
 
 
 def ensure_strategy_table(db_path: str | Path) -> None:
+    db_path = Path(db_path)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
     db_path = str(db_path)
     with sqlite3.connect(db_path) as conn:
         conn.execute(
@@ -609,6 +609,8 @@ def ensure_strategy_table(db_path: str | Path) -> None:
             CREATE TABLE IF NOT EXISTS strategy_backtests (
                 strategy_id TEXT PRIMARY KEY,
                 label TEXT,
+                template_name TEXT,
+                rationale TEXT,
                 run_type TEXT,
                 strategy_mode TEXT,
                 signal_source TEXT,
@@ -629,11 +631,14 @@ def ensure_strategy_table(db_path: str | Path) -> None:
                 selection_score REAL,
                 is_primary INTEGER,
                 market_profile TEXT,
-                data_backend TEXT
+                data_backend TEXT,
+                cache_key TEXT
             )
             """
         )
         for column, ddl in [
+            ("template_name", "ALTER TABLE strategy_backtests ADD COLUMN template_name TEXT"),
+            ("rationale", "ALTER TABLE strategy_backtests ADD COLUMN rationale TEXT"),
             ("run_id", "ALTER TABLE strategy_backtests ADD COLUMN run_id TEXT"),
             (
                 "source_factor_id",
@@ -645,6 +650,7 @@ def ensure_strategy_table(db_path: str | Path) -> None:
             ("is_primary", "ALTER TABLE strategy_backtests ADD COLUMN is_primary INTEGER"),
             ("market_profile", "ALTER TABLE strategy_backtests ADD COLUMN market_profile TEXT"),
             ("data_backend", "ALTER TABLE strategy_backtests ADD COLUMN data_backend TEXT"),
+            ("cache_key", "ALTER TABLE strategy_backtests ADD COLUMN cache_key TEXT"),
         ]:
             try:
                 conn.execute(ddl)
@@ -656,6 +662,9 @@ def ensure_strategy_table(db_path: str | Path) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_strategy_backtests_run_id ON strategy_backtests(run_id)"
         )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_strategy_backtests_cache_key ON strategy_backtests(cache_key)"
+        )
         conn.commit()
 
 
@@ -665,16 +674,18 @@ def persist_strategy_result(db_path: str | Path, payload: Dict[str, Any]) -> Non
         conn.execute(
             """
             INSERT OR REPLACE INTO strategy_backtests (
-                strategy_id, label, run_type, strategy_mode, signal_source,
+                strategy_id, label, template_name, rationale, run_type, strategy_mode, signal_source,
                 expression_json, strategy_config_json, metrics_json, daily_returns_json,
                 positions_json, trade_stats_json, chart_paths_json,
                 market, engine, ran_at, run_id, source_factor_id, agent_id,
-                candidate_rank, selection_score, is_primary, market_profile, data_backend
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                candidate_rank, selection_score, is_primary, market_profile, data_backend, cache_key
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 payload.get("strategy_id"),
                 payload.get("label"),
+                payload.get("template_name"),
+                payload.get("rationale"),
                 payload.get("run_type"),
                 payload.get("strategy_config", {}).get("strategy_mode"),
                 payload.get("strategy_config", {}).get("signal_source"),
@@ -696,6 +707,7 @@ def persist_strategy_result(db_path: str | Path, payload: Dict[str, Any]) -> Non
                 int(bool(payload.get("is_primary", False))),
                 payload.get("market_profile"),
                 payload.get("data_backend"),
+                payload.get("cache_key") or payload.get("strategy_cache_key"),
             ),
         )
         conn.commit()

@@ -2,21 +2,16 @@ import asyncio
 import json
 import os
 
-# Disable default loguru stderr logging to prevent TUI corruption by child processes
-os.environ["LOGURU_AUTOINIT"] = "False"
-
 import sqlite3
+import multiprocessing
+import shlex
 import subprocess
 import tempfile
-import time
-import multiprocessing
-import threading
 import traceback
-from datetime import datetime
-from pathlib import Path
-import psutil
+import urllib.error
+import urllib.parse
+import urllib.request
 
-from loguru import logger
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.widgets import (
@@ -38,8 +33,8 @@ from textual_plotext import PlotextPlot
 
 # Import core backend directly to make TUI standalone
 from core import manual_runner
+from core.settings import build_settings
 from core.strategy import StrategyConfig, strategy_templates
-from manager import PortfolioManager
 
 
 def _db_connect(path: str):
@@ -48,32 +43,6 @@ def _db_connect(path: str):
     conn.execute("PRAGMA journal_mode=WAL")
     conn.row_factory = sqlite3.Row
     return conn
-
-
-def run_manager_process(kwargs, log_queue, parallel):
-    try:
-        # Custom sink for loguru in this process
-        def tui_sink(message):
-            rec = message.record
-            log_queue.put({
-                "level": rec["level"].name,
-                "message": rec["message"],
-                "role": rec.get("extra", {}).get("role", "System")
-            })
-        
-        logger.remove()
-        logger.add(tui_sink, level="INFO")
-        
-        manager = PortfolioManager(**kwargs)
-        manager.dispatch_tasks(log_queue=log_queue)
-        manager.run_swarm(parallel=parallel, log_queue=log_queue)
-        
-        log_queue.put({"level": "SUCCESS", "message": "Swarm execution completed!", "role": "System"})
-    except Exception as e:
-        log_queue.put({"level": "ERROR", "message": f"Swarm Error: {e}", "role": "System"})
-        log_queue.put({"level": "ERROR", "message": traceback.format_exc(), "role": "System"})
-    finally:
-        log_queue.put(None)
 
 
 class TUIApp(App):
@@ -88,9 +57,11 @@ class TUIApp(App):
         ("l", "vim_right", "Right"),
     ]
 
-    def __init__(self):
-        super().__init__()
-        self.db_path = "results/alpha_miner.db"
+    def __init__(self, *args, **kwargs):
+        kwargs.pop("manager_ctx", None)
+        super().__init__(*args, **kwargs)
+        self.settings = build_settings()
+        self.db_path = str(self.settings.db_path)
         self.current_expression = "Rank(Delta($close, 5))"
         self.strategy_defaults = strategy_templates()
         self.current_strategy_json = json.dumps(
@@ -99,7 +70,124 @@ class TUIApp(App):
             indent=2,
         )
         self.swarm_running = False
-        self.swarm_process = None
+        self.swarm_stopping = False
+        self.swarm_run_id = None
+        self.swarm_log_offset = 0
+        self.swarm_poll_task = None
+        self.swarm_api_base_url = os.getenv("AIMINER_API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+        self.swarm_api_token = os.getenv("AIMINER_AUTH_TOKEN", "")
+        self.swarm_poll_interval = self._to_positive_float(
+            os.getenv("AIMINER_TUI_SWARM_POLL_INTERVAL", "0.8"), 0.8
+        )
+        self.swarm_log_batch = self._to_positive_int(os.getenv("AIMINER_TUI_SWARM_LOG_BATCH", "100"), 100)
+        self.selected_factor_seed = None
+
+    @staticmethod
+    def _to_int(value: str, default: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _to_positive_int(value: str, default: int) -> int:
+        try:
+            parsed = int(value)
+            return parsed if parsed > 0 else default
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _to_positive_float(value: str, default: float) -> float:
+        try:
+            parsed = float(value)
+            return parsed if parsed > 0 else default
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _color_for_level(level: str) -> str:
+        lvl = (level or "").upper()
+        if lvl == "ERROR":
+            return "red"
+        if lvl == "WARNING":
+            return "yellow"
+        if lvl == "SUCCESS":
+            return "green"
+        return "white"
+
+    def _swarm_api_url(self, path: str) -> str:
+        path = path.lstrip("/")
+        return f"{self.swarm_api_base_url}/{path}"
+
+    def _swarm_api_headers(self) -> dict:
+        headers = {"Content-Type": "application/json"}
+        if self.swarm_api_token:
+            headers["Authorization"] = f"Bearer {self.swarm_api_token}"
+            headers["X-API-Key"] = self.swarm_api_token
+        return headers
+
+    async def _swarm_api_request(
+        self, method: str, path: str, payload: dict | None = None, params: dict | None = None
+    ) -> dict:
+        return await asyncio.to_thread(self._swarm_api_request_sync, method, path, payload, params)
+
+    def _swarm_api_request_sync(self, method: str, path: str, payload: dict | None, params: dict | None) -> dict:
+        url = self._swarm_api_url(path)
+        if params:
+            url = f"{url}?{urllib.parse.urlencode(params)}"
+        data = None
+        if payload is not None:
+            data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=data,
+            method=method,
+            headers=self._swarm_api_headers(),
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as response:
+                raw = response.read()
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="ignore")
+            raise RuntimeError(f"Swarm API {method} {url} failed: {exc.code} {detail}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"Swarm API {method} {url} unreachable: {exc}") from exc
+        except Exception as exc:
+            raise RuntimeError(f"Swarm API {method} {url} error: {exc}") from exc
+
+        if not raw:
+            return {}
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Swarm API {method} {url} returned invalid JSON payload") from exc
+
+    @staticmethod
+    def _format_swarm_log_line(event: dict) -> str:
+        event_type = event.get("type")
+        if event_type == "log":
+            level = event.get("level", "INFO")
+            role = event.get("role", "System")
+            message = event.get("message", "")
+            color = TUIApp._color_for_level(str(level))
+            timestamp = event.get("timestamp")
+            prefix = f"[{timestamp}] " if timestamp else ""
+            return f"{prefix}[[bold {color}]{level}[/bold {color}]] [cyan]{role}[/cyan]: {message}"
+
+        if event_type == "status":
+            status = event.get("status") or event.get("event") or "status"
+            return f"[[bold blue]STATUS[/bold blue]] run={event.get('run_id')} status={status}"
+
+        if event_type == "summary":
+            return f"[[bold blue]SUMMARY[/bold blue]] factors={event.get('factor_count', 0)} strategies={event.get('strategy_count', 0)}"
+
+        return f"[[bold blue]EVENT[/bold blue]] {event}"
+
+    def _append_swarm_log_lines(self, lines: list[str]) -> None:
+        if not lines:
+            return
+        self.query_one("#swarm-logs", RichLog).write("\n".join(lines))
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -184,6 +272,12 @@ class TUIApp(App):
                     yield DataTable(id="factors-table", classes="box")
                     with VerticalScroll(classes="box", id="pool-details-container"):
                         yield Label("Factor Details", classes="title")
+                        yield Button(
+                            "Seed To Strategy Tab",
+                            id="btn-seed-strategy",
+                            variant="primary",
+                            disabled=True,
+                        )
                         yield Markdown("", id="factor-details")
                         yield PlotextPlot(id="pool-chart")
 
@@ -279,7 +373,16 @@ class TUIApp(App):
                             yield Button("Run Strategy", id="btn-strategy-run", variant="success")
 
                     with Vertical(classes="box", id="strategy-right-box"):
-                        yield Label("Strategy JSON (Advanced Mode)", classes="title")
+                        yield Label("Strategy JSON", classes="title")
+                        yield Checkbox(
+                            "Use Advanced JSON for next run",
+                            value=False,
+                            id="strategy-use-json",
+                        )
+                        yield Static(
+                            "Default source is the form on the left. Enable this only when the raw JSON should override the form.",
+                            id="strategy-source-hint",
+                        )
                         yield TextArea(text=self.current_strategy_json, id="strategy-json")
                         yield Static("Run a strategy backtest to see metrics here.", id="strategy-metrics-display")
                         yield PlotextPlot(id="strategy-chart")
@@ -345,7 +448,7 @@ class TUIApp(App):
         table.add_columns("ID", "Hypothesis", "IC", "Effective")
         strategy_table = self.query_one("#strategies-table", DataTable)
         strategy_table.cursor_type = "row"
-        strategy_table.add_columns("ID", "Label", "Mode", "Sharpe", "MaxDD")
+        strategy_table.add_columns("Label", "Tpl", "Source", "P", "C#", "Score", "Sharpe", "MaxDD")
         self.load_factors()
         self.load_strategies()
 
@@ -358,10 +461,19 @@ class TUIApp(App):
         
         with _db_connect(self.db_path) as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT id, hypothesis, ic, is_effective FROM alpha_pool ORDER BY timestamp DESC"
-            )
-            rows = cursor.fetchall()
+            try:
+                cursor.execute(
+                    "SELECT id, hypothesis, ic, is_effective FROM alpha_pool ORDER BY timestamp DESC"
+                )
+                rows = cursor.fetchall()
+            except sqlite3.OperationalError:
+                try:
+                    cursor.execute(
+                        "SELECT id, hypothesis, ic, is_effective FROM alpha_pool"
+                    )
+                    rows = cursor.fetchall()
+                except sqlite3.OperationalError:
+                    rows = []
             
             for row in rows:
                 d = dict(row)
@@ -384,20 +496,34 @@ class TUIApp(App):
             try:
                 rows = conn.execute(
                     """
-                    SELECT strategy_id, label, strategy_mode, metrics_json
+                    SELECT strategy_id, label, template_name, source_factor_id,
+                           is_primary, candidate_rank, selection_score, metrics_json
                     FROM strategy_backtests
                     ORDER BY ran_at DESC
                     """
                 ).fetchall()
             except sqlite3.OperationalError:
-                rows = []
+                try:
+                    rows = conn.execute(
+                        """
+                        SELECT strategy_id, label, NULL AS template_name, NULL AS source_factor_id,
+                               NULL AS is_primary, NULL AS candidate_rank, NULL AS selection_score, metrics_json
+                        FROM strategy_backtests
+                        ORDER BY ran_at DESC
+                        """
+                    ).fetchall()
+                except sqlite3.OperationalError:
+                    rows = []
         for row in rows:
             data = dict(row)
             metrics = json.loads(data.get("metrics_json") or "{}")
             table.add_row(
-                data.get("strategy_id", "N/A"),
                 data.get("label") or "Unnamed Strategy",
-                data.get("strategy_mode") or "N/A",
+                data.get("template_name") or "-",
+                data.get("source_factor_id") or "-",
+                "Y" if data.get("is_primary") else "",
+                str(data.get("candidate_rank") or "-"),
+                f"{float(data.get('selection_score') or 0.0):.4f}",
                 f"{float(metrics.get('sharpe') or 0.0):.4f}",
                 f"{float(metrics.get('max_drawdown') or 0.0):.4f}",
                 key=data.get("strategy_id", "N/A"),
@@ -411,6 +537,16 @@ class TUIApp(App):
         if event.data_table.id == "factors-table":
             with _db_connect(self.db_path) as conn:
                 row = conn.execute("SELECT * FROM alpha_pool WHERE id=?", (row_key,)).fetchone()
+                strategy_row = None
+                row_dict = dict(row) if row else {}
+                if row_dict.get("best_strategy_id"):
+                    try:
+                        strategy_row = conn.execute(
+                            "SELECT * FROM strategy_backtests WHERE strategy_id=?",
+                            (row_dict["best_strategy_id"],),
+                        ).fetchone()
+                    except sqlite3.OperationalError:
+                        strategy_row = None
 
             if not row:
                 return
@@ -418,6 +554,24 @@ class TUIApp(App):
             d = dict(row)
             metrics = json.loads(d.get("metrics_json") or "{}")
             returns = json.loads(d.get("returns_json") or "{}")
+            best_strategy_summary = "\n**Best Strategy:**\n- None persisted for this factor."
+            seed_button = self.query_one("#btn-seed-strategy", Button)
+            if strategy_row:
+                s = dict(strategy_row)
+                best_strategy_summary = (
+                    "\n**Best Strategy:**\n"
+                    f"- **Strategy ID:** {s.get('strategy_id') or 'N/A'}\n"
+                    f"- **Template:** {s.get('template_name') or 'N/A'}\n"
+                    f"- **Primary:** {'Yes' if s.get('is_primary') else 'No'}\n"
+                    f"- **Candidate Rank:** {s.get('candidate_rank') or 'N/A'}\n"
+                    f"- **Selection Score:** {float(s.get('selection_score') or 0.0):.4f}\n"
+                    f"- **Rationale:** {s.get('rationale') or 'N/A'}"
+                )
+                self.selected_factor_seed = {"factor": d, "strategy": s}
+                seed_button.disabled = False
+            else:
+                self.selected_factor_seed = None
+                seed_button.disabled = True
 
             ic_val = metrics.get('information_coefficient')
             if ic_val is None:
@@ -445,6 +599,9 @@ class TUIApp(App):
 - **Rank IC:** {rank_ic_val:.4f}
 - **Annualized Return:** {ann_ret_val:.4f}
 - **Max Drawdown:** {max_dd_val:.4f}
+- **Selection Score:** {float(d.get('selection_score') or 0.0):.4f}
+- **Execution Style:** {d.get('execution_style') or 'N/A'}
+{best_strategy_summary}
         """
             self.query_one("#factor-details", Markdown).update(details_md)
 
@@ -475,7 +632,21 @@ class TUIApp(App):
             cfg = json.loads(d.get("strategy_config_json") or "{}")
             trade = json.loads(d.get("trade_stats_json") or "{}")
             details_md = f"""
+**Strategy ID:** {d.get('strategy_id') or 'N/A'}
+
 **Label:** {d.get('label') or 'Unnamed Strategy'}
+
+**Template:** {d.get('template_name') or 'N/A'}
+
+**Source Factor:** {d.get('source_factor_id') or 'N/A'}
+
+**Primary Candidate:** {"Yes" if d.get('is_primary') else "No"}
+
+**Candidate Rank:** {d.get('candidate_rank') or 'N/A'}
+
+**Selection Score:** {float(d.get('selection_score') or 0.0):.4f}
+
+**Rationale:** {d.get('rationale') or 'N/A'}
 
 **Expression:**
 ```python
@@ -535,29 +706,56 @@ class TUIApp(App):
             self._sync_strategy_json()
         elif event.button.id == "btn-strategy-run":
             await self._run_strategy_backtester()
+        elif event.button.id == "btn-seed-strategy":
+            self._seed_selected_factor_to_strategy_tab()
         elif event.button.id == "btn-swarm-start":
-            self._start_swarm()
+            asyncio.create_task(self._start_swarm())
         elif event.button.id == "btn-swarm-stop":
-            self._stop_swarm()
+            asyncio.create_task(self._stop_swarm())
 
     async def _open_editor(self) -> None:
-        # Suspend TUI, open nvim
+        editor_cmd = shlex.split(os.getenv("EDITOR", "nvim")) or ["nvim"]
+        editor_name = editor_cmd[0]
+        tmp_path = ""
+
+        def show_editor_error(message: str) -> None:
+            self.query_one("#metrics-display", Static).update(f"Editor error: {message}")
+            try:
+                self.notify(message, severity="error")
+            except Exception:
+                pass
+
+        # Suspend TUI, open the configured editor.
         with tempfile.NamedTemporaryFile(mode='w+', suffix='.py', delete=False) as tmp:
             tmp.write(self.current_expression)
             tmp_path = tmp.name
 
-        with self.suspend():
-            subprocess.run(["nvim", tmp_path])
+        try:
+            with self.suspend():
+                result = subprocess.run([*editor_cmd, tmp_path], check=False)
+            if result.returncode != 0:
+                show_editor_error(
+                    f"{editor_name} exited with code {result.returncode}. "
+                    "Your expression was not changed."
+                )
+                return
 
-        # Read back
-        with open(tmp_path, 'r') as f:
-            new_code = f.read().strip()
-            
-        os.remove(tmp_path)
-        
-        if new_code:
-            self.current_expression = new_code
-            self.query_one("#expression-display", Static).update(self.current_expression)
+            # Read back
+            with open(tmp_path, 'r') as f:
+                new_code = f.read().strip()
+
+            if new_code:
+                self.current_expression = new_code
+                self.query_one("#expression-display", Static).update(self.current_expression)
+        except FileNotFoundError:
+            show_editor_error(
+                f"Editor command not found: {editor_name}. Install it or set EDITOR, for example EDITOR='nano'."
+            )
+        except Exception as exc:
+            show_editor_error(f"Could not open editor {editor_name}: {exc}")
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.remove(tmp_path)
 
     def _load_strategy_template(self) -> None:
         template_key = self.query_one("#strategy-template", Input).value.strip() or "cs_top_bottom"
@@ -589,6 +787,75 @@ class TUIApp(App):
             cfg.model_dump(mode="json"), ensure_ascii=False, indent=2
         )
         self.query_one("#strategy-json", TextArea).text = self.current_strategy_json
+        self.query_one("#strategy-use-json", Checkbox).value = False
+        self.query_one("#strategy-metrics-display", Static).update(
+            "Loaded template into form fields. Run Strategy uses the form unless Advanced JSON is enabled."
+        )
+
+    def _apply_strategy_config_to_form(self, config: dict, template_name: str | None = None) -> None:
+        cfg = StrategyConfig.model_validate(config)
+        self.query_one("#strategy-template", Input).value = template_name or cfg.label or "seeded"
+        self.query_one("#strategy-mode", Input).value = cfg.strategy_mode
+        self.query_one("#strategy-direction", Input).value = cfg.direction
+        self.query_one("#strategy-rule", Input).value = cfg.selection_rule
+        self.query_one("#strategy-rebalance", Input).value = cfg.rebalance_freq
+        self.query_one("#strategy-top-n", Input).value = str(cfg.top_n or "")
+        self.query_one("#strategy-bottom-n", Input).value = str(cfg.bottom_n or "")
+        self.query_one("#strategy-long-threshold", Input).value = str(cfg.long_threshold or "")
+        self.query_one("#strategy-short-threshold", Input).value = str(cfg.short_threshold or "")
+        self.query_one("#strategy-exit-threshold", Input).value = str(cfg.exit_threshold or "")
+        self.query_one("#strategy-max-positions", Input).value = str(cfg.max_positions or "")
+        self.query_one("#strategy-max-weight", Input).value = str(cfg.max_weight_per_position)
+        self.query_one("#strategy-min-holding", Input).value = str(cfg.min_holding_days)
+        self.query_one("#strategy-commission", Input).value = str(cfg.commission_bps)
+        self.query_one("#strategy-slippage", Input).value = str(cfg.slippage_bps)
+        self.query_one("#strategy-market", Input).value = cfg.market
+        self.query_one("#strategy-start", Input).value = cfg.start_date
+        self.query_one("#strategy-end", Input).value = cfg.end_date
+        self.query_one("#strategy-engine", Input).value = cfg.engine
+        self.current_strategy_json = json.dumps(
+            cfg.model_dump(mode="json"), ensure_ascii=False, indent=2
+        )
+        self.query_one("#strategy-json", TextArea).text = self.current_strategy_json
+        self.query_one("#strategy-use-json", Checkbox).value = False
+
+    def _seed_selected_factor_to_strategy_tab(self) -> None:
+        if not self.selected_factor_seed:
+            return
+        factor = self.selected_factor_seed.get("factor") or {}
+        strategy = self.selected_factor_seed.get("strategy") or {}
+        expression = factor.get("code") or ""
+        if expression:
+            self.current_expression = expression
+            self.query_one("#expression-display", Static).update(self.current_expression)
+        strategy_config = json.loads(strategy.get("strategy_config_json") or "{}")
+        if strategy_config:
+            self._apply_strategy_config_to_form(
+                strategy_config,
+                template_name=strategy.get("template_name"),
+            )
+        backend = strategy.get("data_backend") or factor.get("data_backend")
+        if backend:
+            self.query_one("#strategy-backend", Input).value = str(backend)
+        market_mode = factor.get("market_mode")
+        if market_mode:
+            self.query_one("#strategy-market-mode", Input).value = str(market_mode)
+        market_profile = strategy.get("market_profile") or factor.get("market_profile")
+        if market_profile:
+            self.query_one("#strategy-market-profile", Input).value = str(market_profile)
+            self.query_one("#strategy-market-profiles", Input).value = str(market_profile)
+        rationale = strategy.get("rationale") or "Seeded strategy config from selected factor."
+        self.query_one("#strategy-metrics-display", Static).update(
+            "\n".join(
+                [
+                    f"Seeded from factor: {factor.get('id') or 'N/A'}",
+                    f"Strategy: {strategy.get('strategy_id') or 'N/A'}",
+                    f"Template: {strategy.get('template_name') or 'N/A'}",
+                    f"Rationale: {rationale}",
+                ]
+            )
+        )
+        self.query_one("#main-tabs", TabbedContent).active = "strategy-tab"
 
     def _strategy_config_from_form(self) -> StrategyConfig:
         def _num(value: str, cast=float):
@@ -630,6 +897,9 @@ class TUIApp(App):
             cfg.model_dump(mode="json"), ensure_ascii=False, indent=2
         )
         self.query_one("#strategy-json", TextArea).text = self.current_strategy_json
+        self.query_one("#strategy-metrics-display", Static).update(
+            "Synced form fields to JSON. Form fields remain the run source unless Advanced JSON is enabled."
+        )
 
     async def _run_backtester(self) -> None:
         btn = self.query_one("#btn-run", Button)
@@ -713,11 +983,21 @@ RRE: {(metrics.get('rre') or 0.0):.4f}
         metrics_widget = self.query_one("#strategy-metrics-display", Static)
         metrics_widget.update("Running strategy backtest... Please wait.")
         try:
-            json_text = self.query_one("#strategy-json", TextArea).text.strip()
-            if json_text:
+            use_advanced_json = self.query_one("#strategy-use-json", Checkbox).value
+            if use_advanced_json:
+                json_text = self.query_one("#strategy-json", TextArea).text.strip()
+                if not json_text:
+                    raise ValueError("Advanced JSON is enabled, but Strategy JSON is empty.")
                 strategy_config = StrategyConfig.model_validate_json(json_text)
+                source_label = "advanced JSON"
             else:
                 strategy_config = self._strategy_config_from_form()
+                self.current_strategy_json = json.dumps(
+                    strategy_config.model_dump(mode="json"), ensure_ascii=False, indent=2
+                )
+                self.query_one("#strategy-json", TextArea).text = self.current_strategy_json
+                source_label = "form fields"
+            metrics_widget.update(f"Running strategy backtest using {source_label}... Please wait.")
             result = await asyncio.to_thread(
                 manual_runner.run_manual_strategy_backtest,
                 self.current_expression,
@@ -769,18 +1049,19 @@ RRE: {(metrics.get('rre') or 0.0):.4f}
             btn.disabled = False
             btn.label = "Run Strategy"
 
-    def _start_swarm(self) -> None:
+    async def _start_swarm(self) -> None:
         if self.swarm_running:
             return
-            
-        self.swarm_running = True
+
         btn_start = self.query_one("#btn-swarm-start", Button)
         btn_stop = self.query_one("#btn-swarm-stop", Button)
         btn_start.disabled = True
         btn_stop.disabled = False
-        
+        btn_stop.label = "Stop Swarm"
+        self.swarm_stopping = False
+
         # Read parameters
-        iterations = int(self.query_one("#swarm-iter", Input).value)
+        iterations = self._to_int(self.query_one("#swarm-iter", Input).value, 30)
         mode = self.query_one("#swarm-mode", Input).value
         backend = self.query_one("#swarm-backend", Input).value
         engine = self.query_one("#swarm-engine", Input).value
@@ -799,114 +1080,172 @@ RRE: {(metrics.get('rre') or 0.0):.4f}
         
         roles_text = self.query_one("#swarm-roles", TextArea).text
         roles = [r.strip() for r in roles_text.split("\n") if r.strip()]
-        
+
         log_widget = self.query_one("#swarm-logs", RichLog)
         log_widget.clear()
         log_widget.write("[bold green]Starting Swarm...[/bold green]")
-        
-        kwargs = {
-            "roles": roles,
-            "max_iterations": iterations,
-            "evaluation_mode": mode,
+
+        profiles = self._parse_profiles(market_profiles) or [market_profile]
+        payload = {
+            "iterations": iterations,
+            "mode": mode,
             "data_backend": backend,
-            "evaluation_engine": engine,
+            "engine": engine,
+            "roles": roles,
+            "market_start": start,
+            "market_end": end,
             "llm_provider": provider,
             "llm_model": model,
             "llm_base_url": base_url or None,
-            "embedding_provider": embed,
+            "embedding_provider": embed or None,
             "market_mode": market_mode,
             "market_profile": market_profile,
-            "market_profiles": market_profiles,
+            "market_profiles": profiles,
             "local_data_path": local_data_path or None,
             "local_data_layout": local_data_layout or "auto",
-            "market_start": start,
-            "market_end": end,
+            "parallel": bool(parallel),
         }
 
-        log_queue = multiprocessing.Queue()
-
-        def log_listener():
-            while True:
-                try:
-                    record = log_queue.get(timeout=0.5)
-                    if record is None:
-                        break
-                    
-                    lvl = record.get("level", "INFO")
-                    msg = record.get("message", "")
-                    role = record.get("role", "System")
-                    
-                    color = "white"
-                    if lvl == "ERROR": color = "red"
-                    elif lvl == "WARNING": color = "yellow"
-                    elif lvl == "SUCCESS": color = "green"
-                    
-                    formatted = f"[[bold {color}]{lvl}[/bold {color}]] [cyan]{role}[/cyan]: {msg}"
-                    self.call_from_thread(log_widget.write, formatted)
-                    
-                    if lvl == "SUCCESS" and msg == "Swarm execution completed!":
-                        self.call_from_thread(self.load_factors)
-                except Exception:
-                    pass
-
-        self.listener_thread = threading.Thread(target=log_listener, daemon=True)
-        self.listener_thread.start()
-
-        self.swarm_process = multiprocessing.Process(
-            target=run_manager_process, 
-            args=(kwargs, log_queue, parallel),
-            daemon=False
-        )
-        self.swarm_process.start()
-
-        # Thread to wait for process completion
-        def wait_for_process():
-            self.swarm_process.join()
-            log_queue.put(None) # stop listener
-            self.call_from_thread(self._finish_swarm)
-
-        threading.Thread(target=wait_for_process, daemon=True).start()
-
-    def _stop_swarm(self) -> None:
-        if not self.swarm_running:
+        self.swarm_running = True
+        self._append_swarm_log_lines(["[bold blue]Submitting Swarm request to API...[/bold blue]"])
+        try:
+            resp = await self._swarm_api_request("POST", "/api/swarm/runs", payload=payload)
+            self.swarm_run_id = resp.get("run_id")
+        except Exception as exc:
+            self._append_swarm_log_lines([f"[bold red]Failed to start Swarm: {exc}[/bold red]"])
+            self._finish_swarm()
             return
 
-        log_widget: RichLog | None = None
+        if not self.swarm_run_id:
+            self._append_swarm_log_lines(["[bold red]No run_id returned from API.[/bold red]"])
+            self._finish_swarm()
+            return
+
+        self.swarm_log_offset = 0
+        self.swarm_poll_task = asyncio.create_task(self._poll_swarm_run(self.swarm_run_id))
+
+    async def _poll_swarm_run(self, run_id: str) -> None:
+        self._append_swarm_log_lines([f"[bold green]Swarm run started: {run_id}[/bold green]"])
+        last_status = None
         try:
-            log_widget = self.query_one("#swarm-logs", RichLog)
-            log_widget.write("[bold red]Stopping Swarm...[/bold red]")
+            while self.swarm_running and self.swarm_run_id == run_id:
+                logs = await self._swarm_api_request(
+                    "GET",
+                    f"/api/swarm/runs/{run_id}/logs",
+                    params={"offset": self.swarm_log_offset, "limit": self.swarm_log_batch},
+                )
+                items = logs.get("items") if isinstance(logs, dict) else []
+                if not isinstance(items, list):
+                    items = []
+                if items:
+                    self.swarm_log_offset = int(logs.get("next_offset", self.swarm_log_offset + len(items)))
+                    self._append_swarm_log_lines([self._format_swarm_log_line(item) for item in items])
+                status_info = await self._swarm_api_request("GET", f"/api/swarm/runs/{run_id}")
+                status = status_info.get("status")
+                if status and status != last_status:
+                    self._append_swarm_log_lines(
+                        [f"[bold blue]Run status: {status}[/bold blue]"]
+                    )
+                    last_status = status
+                if status in {"completed", "failed", "stopped"}:
+                    if status == "completed":
+                        self._append_swarm_log_lines(["[bold green]Swarm completed.[/bold green]"])
+                        self._append_swarm_log_lines(
+                            [f"[bold blue]Result summary: factors={status_info.get('result_counts', {}).get('factor_count', 0)} "
+                             f"strategies={status_info.get('result_counts', {}).get('strategy_count', 0)}[/bold blue]"]
+                        )
+                        self.load_factors()
+                    elif status == "failed":
+                        reason = status_info.get("failure_reason") or "Unknown failure"
+                        self._append_swarm_log_lines([f"[bold red]Swarm failed: {reason}[/bold red]"])
+                    else:
+                        self._append_swarm_log_lines(["[bold yellow]Swarm stopped.[/bold yellow]"])
+                    break
+                await asyncio.sleep(self.swarm_poll_interval)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._append_swarm_log_lines([f"[bold red]Swarm status/log polling failed: {exc}[/bold red]"])
+        finally:
+            self._finish_swarm(from_poll_task=True)
+
+    async def _stop_swarm(self) -> None:
+        if not self.swarm_running:
+            return
+        if self.swarm_stopping:
+            self._append_swarm_log_lines(
+                ["[bold yellow]Stop already requested; continuing to poll until terminal status.[/bold yellow]"]
+            )
+            return
+
+        if not self.swarm_run_id:
+            self._finish_swarm()
+            return
+        self.swarm_stopping = True
+        try:
+            btn_stop = self.query_one("#btn-swarm-stop", Button)
+            btn_stop.disabled = True
+            btn_stop.label = "Stopping..."
         except Exception:
             pass
-
-        if self.swarm_process and self.swarm_process.is_alive():
+        self._append_swarm_log_lines(
+            ["[bold yellow]Stopping Swarm. Keeping polling active until the API reports completed, failed, or stopped.[/bold yellow]"]
+        )
+        try:
+            await self._swarm_api_request("POST", f"/api/swarm/runs/{self.swarm_run_id}/stop")
+            self._append_swarm_log_lines(
+                ["[bold yellow]Stop request accepted; waiting for terminal status...[/bold yellow]"]
+            )
+        except Exception as exc:
+            self._append_swarm_log_lines([f"[bold red]Stop request failed: {exc}[/bold red]"])
+            self.swarm_stopping = False
             try:
-                parent = psutil.Process(self.swarm_process.pid)
-                for child in parent.children(recursive=True):
-                    child.terminate()
-                parent.terminate()
-            except Exception as e:
-                if log_widget is not None:
-                    try:
-                        log_widget.write(f"[bold red]Failed to kill process: {e}[/bold red]")
-                    except Exception:
-                        pass
+                btn_stop = self.query_one("#btn-swarm-stop", Button)
+                btn_stop.disabled = False
+                btn_stop.label = "Stop Swarm"
+            except Exception:
+                pass
 
-        self._finish_swarm()
-
-    def _finish_swarm(self) -> None:
+    def _finish_swarm(self, from_poll_task: bool = False) -> None:
+        if self.swarm_poll_task and not self.swarm_poll_task.done():
+            current = asyncio.current_task()
+            if current is not self.swarm_poll_task or not from_poll_task:
+                self.swarm_poll_task.cancel()
         self.swarm_running = False
-        self.swarm_process = None
+        self.swarm_stopping = False
+        self.swarm_run_id = None
+        self.swarm_log_offset = 0
         try:
             btn_start = self.query_one("#btn-swarm-start", Button)
             btn_stop = self.query_one("#btn-swarm-stop", Button)
             btn_start.disabled = False
             btn_stop.disabled = True
+            btn_stop.label = "Stop Swarm"
         except Exception:
             pass
 
-    def action_quit(self) -> None:
-        self._stop_swarm()
+    async def _quit_after_optional_stop(self) -> None:
+        if self.swarm_running:
+            self._append_swarm_log_lines(
+                ["[bold yellow]Quit requested: sending stop request, then exiting without waiting for terminal status.[/bold yellow]"]
+            )
+            if self.swarm_run_id and not self.swarm_stopping:
+                try:
+                    await self._swarm_api_request("POST", f"/api/swarm/runs/{self.swarm_run_id}/stop")
+                    self._append_swarm_log_lines(["[bold yellow]Stop request sent before quit.[/bold yellow]"])
+                except Exception as exc:
+                    self._append_swarm_log_lines(
+                        [f"[bold red]Stop before quit failed: {exc}. Exiting anyway.[/bold red]"]
+                    )
+            elif self.swarm_stopping:
+                self._append_swarm_log_lines(
+                    ["[bold yellow]Stop was already pending. Exiting without another stop request.[/bold yellow]"]
+                )
+            self._finish_swarm()
         self.exit()
+
+    def action_quit(self) -> None:
+        asyncio.create_task(self._quit_after_optional_stop())
 
 
 if __name__ == "__main__":

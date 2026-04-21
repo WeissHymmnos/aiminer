@@ -9,6 +9,7 @@ from chromadb.utils.embedding_functions import (
     SentenceTransformerEmbeddingFunction,
 )
 from core.llm import get_llm_config
+from core.settings import AiminerSettings, build_settings
 
 
 # --- Frontmatter helpers (avoid PyYAML dep) ---
@@ -78,8 +79,16 @@ _WIKILINK_RE = re.compile(r"\[\[([A-Za-z0-9_\-]+)\]\]")
 
 
 class LLMWiki:
-    def __init__(self, db_dir: str = "data/wiki_db", wiki_vault: str = "data/wiki_vault", embedding_provider: str = None):
-        self.wiki_vault = wiki_vault
+    def __init__(
+        self,
+        db_dir: str | None = None,
+        wiki_vault: str | None = None,
+        embedding_provider: str = None,
+        settings: AiminerSettings | None = None,
+    ):
+        self.settings = settings or build_settings()
+        db_root = db_dir or str(self.settings.data_path / "wiki_db")
+        self.wiki_vault = wiki_vault or str(self.settings.wiki_dir)
         os.makedirs(self.wiki_vault, exist_ok=True)
         # When True, add_or_update_page skips the per-write recompile and
         # defers it to an explicit flush() call — use during batch swarm runs.
@@ -150,7 +159,7 @@ class LLMWiki:
                     model_name="BAAI/bge-large-zh-v1.5"
                 )
 
-        self.db_dir = os.path.join(db_dir, model_tag)
+        self.db_dir = os.path.join(db_root, model_tag)
         os.makedirs(self.db_dir, exist_ok=True)
         self.client = chromadb.PersistentClient(path=self.db_dir)
         self.wiki_col = self.client.get_or_create_collection(

@@ -1,5 +1,13 @@
 import unittest
+
+import pytest
+
+pytest.importorskip("rqdatac", reason="RiceQuant evaluator imports the optional rqdatac client")
+
 from core.alphaeval.rq_eval import RiceQuantEval
+
+
+pytestmark = pytest.mark.external
 
 
 class TestDryRun(unittest.TestCase):

@@ -7,21 +7,35 @@ from datetime import datetime
 from loguru import logger
 
 from app_workflow.graph import build_workflow
-from core.settings import build_settings
+from core.settings import AiminerSettings, build_settings
 
 
-def setup_logging(verbose: bool = False):
-    os.makedirs("logs", exist_ok=True)
+def setup_logging(verbose: bool = False, settings: AiminerSettings | None = None):
+    settings = settings or build_settings()
+    settings.logs_path.mkdir(parents=True, exist_ok=True)
     logger.add(
-        "logs/aiminer_{time}.log", rotation="10 MB", retention="10 days", level="DEBUG"
+        str(settings.logs_path / "aiminer_{time}.log"),
+        rotation="10 MB",
+        retention="10 days",
+        level="DEBUG",
     )
     if verbose:
         logger.add(sys.stderr, level="DEBUG")
 
 
-def save_results(final_state: dict, output_file: str = "results/results.json"):
+def save_results(
+    final_state: dict,
+    output_file: str | os.PathLike[str] | None = None,
+    settings: AiminerSettings | None = None,
+):
     """Save execution results to JSON file."""
-    os.makedirs("results", exist_ok=True)
+    settings = settings or build_settings()
+    settings.results_path.mkdir(parents=True, exist_ok=True)
+    output_path = (
+        settings.results_path / "results.json"
+        if output_file is None
+        else os.fspath(output_file)
+    )
 
     result_entry = {
         "timestamp": datetime.now().isoformat(),
@@ -40,18 +54,18 @@ def save_results(final_state: dict, output_file: str = "results/results.json"):
 
     # Load existing results
     results = {"results": []}
-    if os.path.exists(output_file):
-        with open(output_file, "r", encoding="utf-8") as f:
+    if os.path.exists(output_path):
+        with open(output_path, "r", encoding="utf-8") as f:
             results = json.load(f)
 
     # Append new result
     results["results"].append(result_entry)
 
     # Save back
-    with open(output_file, "w", encoding="utf-8") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
 
-    logger.info(f"Results saved to {output_file}")
+    logger.info(f"Results saved to {output_path}")
 
 
 def print_summary(final_state: dict):
@@ -210,7 +224,7 @@ def main():
         }
     )
 
-    setup_logging(verbose=settings.verbose)
+    setup_logging(verbose=settings.verbose, settings=settings)
     logger.info(
         f"Initializing Multi-Agent AI Alpha Miner for {settings.max_iterations} iteration(s) in {settings.evaluation_mode} mode..."
     )
@@ -305,7 +319,11 @@ def main():
         if final_state.get("code_expression") and not final_state.get("is_simulated"):
             try:
                 from agents.summary_agent import SummaryAgent
-                summary_agent = SummaryAgent(provider=args.llm_provider, model=args.llm_model)
+                summary_agent = SummaryAgent(
+                    provider=args.llm_provider,
+                    model=args.llm_model,
+                    settings=settings,
+                )
                 factor_id = final_state.get("hypothesis_name", f"factor_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
                 report_data = {
                     "id": factor_id,
@@ -320,16 +338,16 @@ def main():
             except Exception as e:
                 logger.error(f"Failed to generate final report: {e}")
 
-        save_results(final_state)
+        save_results(final_state, settings=settings)
         print_summary(final_state)
 
     except KeyboardInterrupt:
         logger.warning("Execution interrupted by user.")
-        save_results(final_state)
+        save_results(final_state, settings=settings)
         print_summary(final_state)
     except Exception as e:
         logger.exception(f"Workflow execution failed: {e}")
-        save_results(final_state)
+        save_results(final_state, settings=settings)
         print_summary(final_state)
 
 

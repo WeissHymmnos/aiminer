@@ -3,9 +3,10 @@ name: ci
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
-  backend:
+  backend-unit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,10 +19,49 @@ jobs:
           pip install -r requirements.txt
       - name: Syntax check
         run: python -m py_compile api.py manager.py core/strategy.py tui.py
-      - name: Test collection
-        run: PYTHONPATH=. pytest --collect-only -q
-      - name: Unit smoke tests
-        run: PYTHONPATH=. pytest tests/unit/test_settings.py tests/unit/test_local_data.py tests/unit/test_evaluator_factory.py tests/unit/test_api_contract.py -q
+      - name: Hermetic unit tests
+        run: PYTHONPATH=. pytest tests/unit -m "unit and not external and not native" -q
+
+  backend-external:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      RQ_TOKEN: ${{ secrets.RQ_TOKEN }}
+      RQ_USER: ${{ secrets.RQ_USER }}
+      RQ_PASS: ${{ secrets.RQ_PASS }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: External tests
+        run: PYTHONPATH=. pytest -m "external" -q
+
+  backend-native:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install maturin
+      - name: Build polars plugin
+        working-directory: polars_plugins
+        run: |
+          maturin build --release --out ../dist_plugins
+          pip install --force-reinstall --no-deps ../dist_plugins/polars_plugins-*.whl
+      - name: Native tests
+        run: PYTHONPATH=. pytest -m "native" -q
 
   frontend:
     runs-on: ubuntu-latest

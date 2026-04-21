@@ -57,7 +57,7 @@ def route_after_eval(state: AlphaMinerState) -> str:
 
 def route_after_strategy(state: AlphaMinerState) -> str:
     if state.get("error"):
-        return "end"
+        return "wiki_update"
     if not state.get("strategy_candidates"):
         return "wiki_update"
     return "strategy_eval"
@@ -139,9 +139,11 @@ def increment_iteration(state: AlphaMinerState):
     return {
         "iteration": state.get("iteration", 1) + 1,
         "best_ic": state.get("best_ic", -999.0),
+        "best_ic_abs": state.get("best_ic_abs", -1.0),
         "best_code_expression": state.get(
             "best_code_expression", state.get("code_expression")
         ),
+        "best_factor_snapshot": state.get("best_factor_snapshot"),
         "patience_counter": state.get("patience_counter", 0),
         "error": None,
         "is_valid_syntax": True,
@@ -154,10 +156,14 @@ def increment_iteration(state: AlphaMinerState):
         "variables_defined": None,
         "backtest_metrics": None,
         "factor_metrics": None,
+        "daily_returns": None,
+        "plot_paths": None,
         "review_summary": None,
         "is_effective": None,
         "factor_is_effective": None,
         "is_simulated": False,
+        "ic_direction": None,
+        "ic_direction_label": None,
         "suggested_improvements": None,
         "strategy_candidates": [],
         "strategy_results": [],
@@ -172,6 +178,42 @@ def increment_iteration(state: AlphaMinerState):
         "strategy_refinement_round": 0,
         "strategy_refinement_history": [],
     }
+
+
+def _merge_strategy_update_into_best_snapshot(
+    state: AlphaMinerState, update: dict
+) -> dict:
+    """Attach strategy-stage outputs to the factor snapshot for this iteration.
+
+    The manager can then receive the best factor's complete state even when a
+    later iteration finishes last.
+    """
+    snapshot = state.get("best_factor_snapshot")
+    if not snapshot:
+        return update
+    if snapshot.get("iteration") != state.get("iteration"):
+        return update
+    if snapshot.get("code_expression") != state.get("code_expression"):
+        return update
+
+    merged = dict(snapshot)
+    merged["strategy_candidates"] = state.get("strategy_candidates", [])
+    for key in (
+        "strategy_results",
+        "best_strategy_result",
+        "best_strategy_config",
+        "best_strategy_metrics",
+        "best_strategy_id",
+        "strategy_daily_returns",
+        "selection_score",
+        "execution_style",
+        "strategy_failure_reason",
+    ):
+        if key in update:
+            merged[key] = update.get(key)
+        elif key in state:
+            merged[key] = state.get(key)
+    return {**update, "best_factor_snapshot": merged}
 
 
 def build_workflow(
@@ -241,34 +283,39 @@ def build_workflow(
 
         candidates = state.get("strategy_candidates") or []
         if not candidates:
-            return {"strategy_results": [], "strategy_failure_reason": "no_candidates"}
+            return _merge_strategy_update_into_best_snapshot(
+                state, {"strategy_results": [], "strategy_failure_reason": "no_candidates"}
+            )
 
         expression = state.get("code_expression")
         if not expression:
-            return {"strategy_results": [], "strategy_failure_reason": "missing_expression"}
+            return _merge_strategy_update_into_best_snapshot(
+                state,
+                {"strategy_results": [], "strategy_failure_reason": "missing_expression"},
+            )
 
-        evaluator = build_evaluator(
-            factor_expressions=[expression],
-            config=evaluation_config_from_mapping(
-                {
-                    "data_backend": state.get("data_backend", state.get("evaluation_mode", "ricequant")),
-                    "evaluation_engine": state.get("evaluation_engine", "polars"),
-                    "market_mode": state.get("market_mode", "single"),
-                    "market_profile": state.get("market_profile", "cn_stock"),
-                    "market_profiles": state.get("market_profiles"),
-                    "local_data_path": state.get("local_data_path"),
-                    "local_data_layout": state.get("local_data_layout", "auto"),
-                    "market_start": state.get("market_analysis_start_date"),
-                    "market_end": state.get("market_analysis_end_date"),
-                }
-            ),
-            test_start_date=state.get("market_analysis_start_date"),
-            test_end_date=state.get("market_analysis_end_date"),
-            daily_normalize=True,
-        )
-        evaluator.fetch_data()
-        evaluator.compute_factors()
         try:
+            evaluator = build_evaluator(
+                factor_expressions=[expression],
+                config=evaluation_config_from_mapping(
+                    {
+                        "data_backend": state.get("data_backend", state.get("evaluation_mode", "ricequant")),
+                        "evaluation_engine": state.get("evaluation_engine", "polars"),
+                        "market_mode": state.get("market_mode", "single"),
+                        "market_profile": state.get("market_profile", "cn_stock"),
+                        "market_profiles": state.get("market_profiles"),
+                        "local_data_path": state.get("local_data_path"),
+                        "local_data_layout": state.get("local_data_layout", "auto"),
+                        "market_start": state.get("market_analysis_start_date"),
+                        "market_end": state.get("market_analysis_end_date"),
+                    }
+                ),
+                test_start_date=state.get("market_analysis_start_date"),
+                test_end_date=state.get("market_analysis_end_date"),
+                daily_normalize=True,
+            )
+            evaluator.fetch_data()
+            evaluator.compute_factors()
             signal_series = evaluator.factor_data.iloc[:, 0]
             label_series = evaluator.label_data["label"]
             # Align on the union of (date, ticker) pairs so unstack() yields
@@ -278,10 +325,19 @@ def build_workflow(
             label_df = label_series.reindex(common_idx).unstack().sort_index().sort_index(axis=1)
             label_df = label_df.reindex(index=signal_df.index, columns=signal_df.columns)
         except Exception as exc:
-            logger.warning(f"[StrategyEval] Failed to materialize signal/label panels: {exc}")
-            return {"strategy_results": [], "strategy_failure_reason": "panel_construction_failed"}
+            logger.warning(f"[StrategyEval] Failed to prepare signal/label panels: {exc}")
+            return _merge_strategy_update_into_best_snapshot(
+                state,
+                {
+                    "strategy_results": [],
+                    "strategy_failure_reason": "panel_construction_failed",
+                    "messages": [f"[StrategyEval] Skipped strategy stage: {exc}"],
+                },
+            )
         if signal_df.empty or label_df.empty:
-            return {"strategy_results": [], "strategy_failure_reason": "empty_panels"}
+            return _merge_strategy_update_into_best_snapshot(
+                state, {"strategy_results": [], "strategy_failure_reason": "empty_panels"}
+            )
 
         factor_ic = float((state.get("backtest_metrics") or {}).get("information_coefficient", 0.0) or 0.0)
         results = []
@@ -337,10 +393,16 @@ def build_workflow(
             comparison_pool.append(prior_best)
 
         if not comparison_pool:
-            return {"strategy_results": [], "strategy_failure_reason": "all_candidates_failed"}
+            return _merge_strategy_update_into_best_snapshot(
+                state,
+                {
+                    "strategy_results": [],
+                    "strategy_failure_reason": "all_candidates_failed",
+                },
+            )
         best = max(comparison_pool, key=lambda item: item.get("selection_score", float("-inf")))
         best["is_primary"] = True
-        return {
+        return _merge_strategy_update_into_best_snapshot(state, {
             "strategy_results": results,
             "best_strategy_result": best,
             "best_strategy_config": best.get("strategy_config", {}),
@@ -348,8 +410,9 @@ def build_workflow(
             "best_strategy_id": best.get("strategy_id"),
             "strategy_daily_returns": best.get("daily_returns", {}),
             "selection_score": float(best.get("selection_score", 0.0) or 0.0),
+            "strategy_failure_reason": None,
             "messages": [f"[StrategyEval] Selected {best.get('strategy_id')} score={best.get('selection_score', 0.0):.4f}"],
-        }
+        })
 
     workflow.add_node("strategy_eval", strategy_eval_node)
 

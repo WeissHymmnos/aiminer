@@ -1,8 +1,15 @@
 import unittest
 import pandas as pd
 import numpy as np
-import polars as pl
+
+import pytest
+
+pl = pytest.importorskip("polars", reason="Polars tests require the optional native engine stack")
+
 from core.alphaeval.polars_engine import PolarsEngine
+
+
+pytestmark = pytest.mark.native
 
 
 class TestPolarsOperatorsExtensive(unittest.TestCase):

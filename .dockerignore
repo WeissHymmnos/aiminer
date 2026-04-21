@@ -20,9 +20,15 @@ venv/
 .env
 .env.local
 data/chroma_db/
+data/local_futures/
+data/market_meta/
+data/ml/
+data/test_db/
 data/wiki_db/
+data/wiki_vault/
 results/
 logs/
+models/
 
 # IDEs
 .vscode/
