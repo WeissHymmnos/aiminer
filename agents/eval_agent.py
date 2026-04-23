@@ -18,6 +18,7 @@ class EvalAgent:
         provider: str = None,
         model: str = None,
         base_url: str = None,
+        reasoning_effort: str = None,
     ):
         self.knowledge = knowledge
         self.llm = get_llm(
@@ -25,6 +26,7 @@ class EvalAgent:
             provider=provider,
             model_name=model,
             base_url=base_url,
+            reasoning_effort=reasoning_effort,
         )
 
     @staticmethod

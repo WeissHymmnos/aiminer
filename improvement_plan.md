@@ -541,3 +541,86 @@ Agent E 落地状态：
 - `cd frontend && npm run build`
 - Web 启动后验证：start/stop/delete run、日志实时流、manual/strategy history、wiki edit。
 - Docker 验证：`docker compose up` 默认只启动 API，不循环执行有限任务。
+
+## 自改进执行协议
+
+本节用于约束 Codex 后续“自己测试、自己改进”的工作方式。目标不是无限制重写，而是形成可回放、可验证、可停止的工程闭环。
+
+### 固定循环
+
+每一轮只处理一个明确问题，必须按下面顺序执行：
+
+| 步骤 | 动作 | 输出物 | 不允许的做法 |
+| --- | --- | --- | --- |
+| 1 | 从本文件选择一个未完成或需复核的问题 | 轮次标题、涉及模块、预期行为 | 同时处理多个无关模块 |
+| 2 | 阅读相关代码和既有测试 | 问题定位、影响边界 | 先改代码再定位 |
+| 3 | 写最小复现或失败测试 | 新测试、现有测试调整、或明确的手工复现脚本 | 只靠人工观察判断修复成功 |
+| 4 | 做最小实现修改 | 小范围 patch | 顺手重构无关代码 |
+| 5 | 跑目标测试 | 具体命令和结果 | 只说“应该可以” |
+| 6 | 跑必要的回归测试 | 按 `verification_matrix.md` 选择层级 | 跳过共享模块回归 |
+| 7 | 更新文档 | `regression_log.md` 记录本轮；必要时更新本文件状态 | 修完不记录 |
+| 8 | 标注剩余风险 | 外部依赖、手工验证、未覆盖路径 | 把未验证项描述成已完成 |
+
+### 验证层级
+
+后续每轮自改进必须选择至少一个验证层级。共享代码、API 契约、策略计算、运行生命周期改动必须使用多层级验证。
+
+| 层级 | 名称 | 用途 | 典型命令 |
+| --- | --- | --- | --- |
+| L0 | 静态检查 | 文档、配置、轻量语法检查 | `git diff --check` |
+| L1 | Python 编译检查 | 快速发现语法和导入级问题 | `python -m py_compile api.py manager.py main.py tui.py` |
+| L2 | 目标单测 | 复现一个具体问题 | `pytest -q tests/unit/test_api_contract.py -k stop` |
+| L3 | 模块单测 | 覆盖一个子系统 | `pytest -q tests/unit/test_strategy_correctness.py` |
+| L4 | 全量 hermetic unit | 回归核心行为 | `pytest -q tests/unit` |
+| L5 | 集成/前端/打包 | 验证跨边界行为 | `pytest -q tests/integration`、`cd frontend && npm run build` |
+| L6 | 手工真实环境 | 验证外部服务和 UI 实时行为 | Web/TUI start、stop、delete、日志流、RiceQuant smoke |
+
+### 停止条件
+
+遇到下面情况必须停止并记录，不应继续自行猜测：
+
+| 停止条件 | 原因 | 正确动作 |
+| --- | --- | --- |
+| 业务语义不明确 | 例如策略评分、负 IC 方向、组合权重取舍存在多种合理实现 | 写出选项和影响，等待决策 |
+| 可能破坏历史数据 | 例如删除、迁移、覆盖 DB/schema/manifest | 先写 dry-run、backup、migration plan |
+| 外部依赖不可用 | RiceQuant、LLM provider、Qlib 下载失败 | 标记为外部阻塞，保留 hermetic 测试 |
+| 测试失败来源不明 | 改动范围外的失败可能是环境或历史脏状态 | 记录命令、错误、隔离假设 |
+| 修改范围失控 | 一个问题牵出多个架构层变更 | 拆分新任务，不在同一轮混改 |
+
+### 优先级队列
+
+当前后续自改进建议按下面顺序推进。已完成项仍保留在上文，下面队列只记录下一阶段需要复核、补测或增强的事项。
+
+| 优先级 | 项目 | 当前风险 | 建议第一步 | 验证入口 |
+| --- | --- | --- | --- | --- |
+| P0 | Swarm run lifecycle 真实环境复核 | 单测已覆盖大部分 API 重启和状态恢复，但真实进程树、uvicorn shutdown、WebSocket 日志仍需端到端验证 | 写一个本地 smoke 脚本或手工 runbook，覆盖 start/stop/delete/status/logs | `verification_matrix.md` 的 `runtime-api`、`frontend-run-control` |
+| P0 | Stop run 前端到后端链路复核 | 用户曾反馈 stop 无效，需要确认当前 UI、API、worker 三层状态是否一致 | 从 Web 点击 Stop，记录网络请求、manifest 状态、进程状态、日志 terminal event | `regression_log.md` 新增真实环境记录 |
+| P1 | 策略回测 golden sample | 策略核心已有单测，但需要固定一组小型 panel 作为跨语言/Rust 化基准 | 构造 3 天 x 4 标的信号和标签，固定 positions/turnover/net_returns 预期值 | `tests/unit/test_strategy_correctness.py` |
+| P1 | Manual factor chart 前端验收 | 文档和前端已有图表改动，但需要确认空 returns、dict returns、长序列渲染都稳定 | 增加或补充前端层的 chart data contract 测试/手工验收 | `frontend` build + Web manual smoke |
+| P1 | Wiki lint/migrate 操作闭环 | API 和前端操作存在，但应验证 dirty guard 与迁移 dry-run 不会误写 | 用测试 vault 执行 lint/migrate dry-run | `tests/unit` + 手工 Wiki 页 |
+| P2 | Rust 化边界设计 | 已有 `polars_plugins` 和 Tauri sidecar，但缺少正式迁移边界 | 写 Rust migration RFC，先锁定 Python/Rust 数据协议 | 单独文档，不直接改运行代码 |
+| P2 | CI 与 packaging 长期稳定性 | 当前 CI 策略已改善，但外部/native job 仍依赖环境 | 定期跑 native/external 手工 job，记录失败原因 | `verification_matrix.md` 的 `ci-packaging` |
+
+### 文档联动规则
+
+三个文件的职责必须保持清晰：
+
+| 文件 | 职责 | 更新时机 |
+| --- | --- | --- |
+| `improvement_plan.md` | 记录问题、优先级、决策、落地状态、下一阶段队列 | 新增改进项、改变优先级、完成或废弃任务 |
+| `verification_matrix.md` | 记录模块到测试命令的映射，以及改动触发哪些验证 | 新增模块、测试命令变化、CI 策略变化 |
+| `regression_log.md` | 记录每轮执行、测试结果、失败、剩余风险 | 每一轮自改进结束时必须更新 |
+
+### 每轮记录格式
+
+每轮结束时必须在 `regression_log.md` 追加一条记录，至少包含：
+
+| 字段 | 要求 |
+| --- | --- |
+| 日期/轮次 | 使用本地日期，必要时写时间 |
+| 目标 | 一句话说明本轮修什么 |
+| 复现 | 写明失败测试、手工步骤或为何只能做文档/静态验证 |
+| 修改 | 只列用户需要理解的关键文件和行为 |
+| 验证 | 写完整命令和结果 |
+| 剩余风险 | 外部依赖、手工未验、性能风险、迁移风险 |
+| 下一步 | 如果还有后续，明确下一轮入口 |

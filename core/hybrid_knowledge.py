@@ -15,6 +15,7 @@ class HybridKnowledge:
         llm_provider: str = None,
         llm_model: str = None,
         llm_base_url: str = None,
+        llm_reasoning_effort: str = None,
     ):
         self.rag = RAGModule(
             rebuild=rebuild_rag, embedding_provider=embedding_provider, use_gpu=use_gpu
@@ -24,6 +25,7 @@ class HybridKnowledge:
         self.llm_provider = llm_provider
         self.llm_model = llm_model
         self.llm_base_url = llm_base_url
+        self.llm_reasoning_effort = llm_reasoning_effort
 
     def bootstrap_wiki(self, force: bool = False):
         """Manually trigger the Wiki-ification process from RAG docs."""
@@ -35,6 +37,7 @@ class HybridKnowledge:
             provider=self.llm_provider,
             model=self.llm_model,
             base_url=self.llm_base_url,
+            reasoning_effort=self.llm_reasoning_effort,
         )
         bootstrapper.run(force=force)
 

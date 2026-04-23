@@ -79,12 +79,19 @@ class StrategyCritic:
     Returns a state delta — never mutates the input state directly.
     """
 
-    def __init__(self, provider: str = None, model: str = None, base_url: str = None):
+    def __init__(
+        self,
+        provider: str = None,
+        model: str = None,
+        base_url: str = None,
+        reasoning_effort: str = None,
+    ):
         self.llm = get_llm(
             temperature=0.3,
             provider=provider,
             model_name=model,
             base_url=base_url,
+            reasoning_effort=reasoning_effort,
         )
 
     def __call__(self, state: AlphaMinerState) -> Dict[str, Any]:

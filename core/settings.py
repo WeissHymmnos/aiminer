@@ -21,7 +21,9 @@ SUPPORTED_LLM_PROVIDERS = (
     "ollama",
     "vllm",
     "lmstudio",
+    "codex",
 )
+SUPPORTED_LLM_REASONING_EFFORTS = ("low", "medium", "high", "xhigh")
 
 SUPPORTED_EVALUATION_MODES = ("qlib", "ricequant")
 SUPPORTED_DATA_BACKENDS = ("qlib", "ricequant", "local")
@@ -76,6 +78,7 @@ class AiminerSettings(BaseModel):
     llm_provider: str | None = None
     llm_model: str | None = None
     llm_base_url: str | None = None
+    llm_reasoning_effort: str | None = None
     embedding_provider: str | None = None
     market_mode: str = "single"
     market_profile: str = "cn_stock"
@@ -111,6 +114,13 @@ class AiminerSettings(BaseModel):
                 f"Unsupported llm_provider '{self.llm_provider}'. "
                 f"Expected one of: {', '.join(SUPPORTED_LLM_PROVIDERS)}"
             )
+        if self.llm_reasoning_effort:
+            self.llm_reasoning_effort = self.llm_reasoning_effort.strip().lower()
+            if self.llm_reasoning_effort not in SUPPORTED_LLM_REASONING_EFFORTS:
+                raise ValueError(
+                    "llm_reasoning_effort must be one of: "
+                    f"{', '.join(SUPPORTED_LLM_REASONING_EFFORTS)}"
+                )
         if self.embedding_provider and (
             self.embedding_provider != "local"
             and self.embedding_provider not in SUPPORTED_LLM_PROVIDERS
@@ -119,6 +129,8 @@ class AiminerSettings(BaseModel):
                 f"Unsupported embedding_provider '{self.embedding_provider}'. "
                 "Expected 'local' or a supported LLM provider."
             )
+        if self.embedding_provider == "codex":
+            raise ValueError("embedding_provider='codex' is not supported; use local or an embedding API provider.")
         if self.market_mode not in SUPPORTED_MARKET_MODES:
             raise ValueError(
                 f"market_mode must be one of: {', '.join(SUPPORTED_MARKET_MODES)}"
@@ -212,11 +224,17 @@ def provider_api_key(provider: str | None) -> str | None:
         return "vllm"
     if provider == "lmstudio":
         return "lm-studio"
+    if provider == "codex":
+        from core.codex_llm import is_codex_available
+
+        return "codex" if is_codex_available() else None
     return None
 
 
 def detect_llm_provider() -> str | None:
     for provider in SUPPORTED_LLM_PROVIDERS:
+        if provider == "codex":
+            continue
         api_key = provider_api_key(provider)
         if api_key and api_key not in {"ollama", "vllm", "lm-studio"}:
             return provider
@@ -254,6 +272,9 @@ def build_settings(overrides: Mapping[str, Any] | None = None) -> AiminerSetting
         "llm_base_url": _normalize_str(overrides.get("llm_base_url"))
         or _normalize_str(os.getenv("LLM_BASE_URL"))
         or _normalize_str(os.getenv("OPENAI_BASE_URL")),
+        "llm_reasoning_effort": _normalize_str(overrides.get("llm_reasoning_effort"))
+        or _normalize_str(os.getenv("AIMINER_CODEX_REASONING_EFFORT"))
+        or _normalize_str(os.getenv("AIMINER_LLM_REASONING_EFFORT")),
         "embedding_provider": embedding_provider,
         "market_mode": _normalize_str(overrides.get("market_mode")) or "single",
         "market_profile": market_profile,

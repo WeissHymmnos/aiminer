@@ -17,6 +17,7 @@ class WikiBootstrapper:
         provider: str = None,
         model: str = None,
         base_url: str = None,
+        reasoning_effort: str = None,
     ):
         self.wiki = wiki
         self.rag = rag
@@ -25,6 +26,7 @@ class WikiBootstrapper:
             provider=provider,
             model_name=model,
             base_url=base_url,
+            reasoning_effort=reasoning_effort,
         )
 
     def run(self, force: bool = False):

@@ -147,15 +147,47 @@ def main():
     parser.add_argument(
         "--llm-provider",
         type=str,
-        choices=["kimi", "qwen", "claude", "glm", "openai", "deepseek", "openrouter", "groq", "ollama", "vllm", "lmstudio"],
+        choices=[
+            "kimi",
+            "qwen",
+            "claude",
+            "glm",
+            "openai",
+            "deepseek",
+            "openrouter",
+            "groq",
+            "ollama",
+            "vllm",
+            "lmstudio",
+            "codex",
+        ],
         help="LLM provider",
     )
     parser.add_argument("--llm-model", type=str, help="Specific LLM model name")
     parser.add_argument("--llm-base-url", type=str, help="Override OpenAI-compatible base URL")
     parser.add_argument(
+        "--llm-reasoning-effort",
+        type=str,
+        choices=["low", "medium", "high", "xhigh"],
+        help="Codex reasoning effort",
+    )
+    parser.add_argument(
         "--embedding-provider",
         type=str,
-        choices=["local", "kimi", "qwen", "claude", "glm", "openai", "deepseek", "openrouter", "groq", "ollama", "vllm", "lmstudio"],
+        choices=[
+            "local",
+            "kimi",
+            "qwen",
+            "claude",
+            "glm",
+            "openai",
+            "deepseek",
+            "openrouter",
+            "groq",
+            "ollama",
+            "vllm",
+            "lmstudio",
+        ],
         help="Embedding provider for RAG",
     )
     parser.add_argument(
@@ -209,6 +241,7 @@ def main():
             "llm_provider": args.llm_provider,
             "llm_model": args.llm_model,
             "llm_base_url": args.llm_base_url,
+            "llm_reasoning_effort": args.llm_reasoning_effort,
             "embedding_provider": args.embedding_provider,
             "market_mode": args.market_mode,
             "market_profile": args.market_profile,
@@ -275,6 +308,7 @@ def main():
             llm_provider=settings.llm_provider,
             llm_model=settings.llm_model,
             llm_base_url=settings.llm_base_url,
+            llm_reasoning_effort=settings.llm_reasoning_effort,
         )
         knowledge.bootstrap_wiki(force=False)
 
@@ -289,6 +323,10 @@ def main():
         "market_profiles": settings.market_profiles,
         "local_data_path": settings.local_data_path,
         "local_data_layout": settings.local_data_layout,
+        "llm_provider": settings.llm_provider,
+        "llm_model": settings.llm_model,
+        "llm_base_url": settings.llm_base_url,
+        "llm_reasoning_effort": settings.llm_reasoning_effort,
         "market_analysis_start_date": settings.market_start,
         "market_analysis_end_date": settings.market_end,
         "market_analysis_lookback_days": settings.market_lookback,
@@ -322,6 +360,7 @@ def main():
                 summary_agent = SummaryAgent(
                     provider=args.llm_provider,
                     model=args.llm_model,
+                    reasoning_effort=settings.llm_reasoning_effort,
                     settings=settings,
                 )
                 factor_id = final_state.get("hypothesis_name", f"factor_{datetime.now().strftime('%Y%m%d_%H%M%S')}")

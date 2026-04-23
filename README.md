@@ -27,6 +27,29 @@ python manager.py --iterations 5 --mode ricequant \
 --parallel
 ```
 
+### 使用本地 Codex 作为 LLM Provider
+
+如果本机已经安装并登录 `codex` CLI，可以把它作为文本生成 LLM 的替代选项：
+
+```bash
+python manager.py --iterations 3 --mode ricequant \
+  --llm-provider codex --llm-model gpt-5.4 \
+  --llm-reasoning-effort xhigh \
+  --embedding-provider local \
+  --roles "专注量价反转的专家" \
+  --parallel
+```
+
+Web Run Launcher 中也可以填写：
+
+- `LLM Provider`: `codex`
+- `LLM Model`: 例如 `gpt-5.4`
+- `Reasoning Effort`: `low`、`medium`、`high`、`xhigh`，留空则使用 Codex 默认配置
+- `Embedding Provider`: `local` 或现有 embedding API provider
+
+Codex provider 通过 `codex exec` 调用本地 CLI，默认使用只读、临时会话边界；它只替代文本生成 LLM，不提供 embedding。可用 `AIMINER_CODEX_CMD` 指定 Codex CLI 路径，用 `AIMINER_CODEX_TIMEOUT_SECONDS` 调整单次调用超时。
+可用 `AIMINER_CODEX_REASONING_EFFORT` 设置默认思考强度，也可以通过 `--llm-reasoning-effort` 或 Web/TUI 表单覆盖。
+
 ### 启动 Web 工作台
 开发模式：
 

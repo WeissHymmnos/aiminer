@@ -49,12 +49,19 @@ def candidate_to_strategy_config(
 
 
 class StrategyAgent:
-    def __init__(self, provider: str = None, model: str = None, base_url: str = None):
+    def __init__(
+        self,
+        provider: str = None,
+        model: str = None,
+        base_url: str = None,
+        reasoning_effort: str = None,
+    ):
         self.llm = get_llm(
             temperature=0.2,
             provider=provider,
             model_name=model,
             base_url=base_url,
+            reasoning_effort=reasoning_effort,
         )
 
     @staticmethod

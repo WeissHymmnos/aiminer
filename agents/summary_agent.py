@@ -20,6 +20,7 @@ class SummaryAgent:
         provider: str = None,
         model: str = None,
         base_url: str = None,
+        reasoning_effort: str = None,
         settings: AiminerSettings | None = None,
         results_dir: str | os.PathLike[str] | None = None,
     ):
@@ -33,6 +34,7 @@ class SummaryAgent:
             provider=provider,
             model_name=model,
             base_url=base_url,
+            reasoning_effort=reasoning_effort,
         )
         self.report_dir.mkdir(parents=True, exist_ok=True)
         self.chart_dir.mkdir(parents=True, exist_ok=True)

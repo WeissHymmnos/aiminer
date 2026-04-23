@@ -74,8 +74,13 @@ class TUIApp(App):
         self.swarm_run_id = None
         self.swarm_log_offset = 0
         self.swarm_poll_task = None
-        self.swarm_api_base_url = os.getenv("AIMINER_API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
         self.swarm_api_token = os.getenv("AIMINER_AUTH_TOKEN", "")
+        self.swarm_api_base_url_explicit = bool(os.getenv("AIMINER_API_BASE_URL"))
+        self.swarm_api_base_url = (
+            os.getenv("AIMINER_API_BASE_URL")
+            or self._detect_swarm_api_base_url()
+            or "http://127.0.0.1:8000"
+        ).rstrip("/")
         self.swarm_poll_interval = self._to_positive_float(
             os.getenv("AIMINER_TUI_SWARM_POLL_INTERVAL", "0.8"), 0.8
         )
@@ -127,12 +132,68 @@ class TUIApp(App):
             headers["X-API-Key"] = self.swarm_api_token
         return headers
 
+    @staticmethod
+    def _api_port_candidates() -> list[int]:
+        raw = os.getenv("AIMINER_TUI_API_PORTS", "").strip()
+        if raw:
+            ports = []
+            for item in raw.split(","):
+                item = item.strip()
+                if not item:
+                    continue
+                if "-" in item:
+                    start, end = item.split("-", 1)
+                    ports.extend(range(int(start), int(end) + 1))
+                else:
+                    ports.append(int(item))
+            return list(dict.fromkeys(ports))
+        return list(range(8000, 8021))
+
+    def _is_swarm_api_reachable(self, base_url: str, timeout: float = 0.25) -> bool:
+        url = f"{base_url.rstrip('/')}/api/swarm/status"
+        req = urllib.request.Request(url, method="GET", headers=self._swarm_api_headers())
+        try:
+            with urllib.request.urlopen(req, timeout=timeout):
+                return True
+        except urllib.error.HTTPError as exc:
+            # 401/403 means the API is alive but auth is misconfigured.
+            return exc.code in {401, 403}
+        except Exception:
+            return False
+
+    def _detect_swarm_api_base_url(self) -> str | None:
+        for port in self._api_port_candidates():
+            base_url = f"http://127.0.0.1:{port}"
+            if self._is_swarm_api_reachable(base_url):
+                return base_url
+        return None
+
+    def _ensure_swarm_api_base_url(self) -> bool:
+        if self.swarm_api_base_url_explicit:
+            return True
+        if self._is_swarm_api_reachable(self.swarm_api_base_url):
+            return True
+        detected = self._detect_swarm_api_base_url()
+        if detected:
+            self.swarm_api_base_url = detected.rstrip("/")
+            return True
+        return False
+
+    def _api_unreachable_hint(self) -> str:
+        return (
+            "No responsive AIMiner API found. Start ./start_web.sh, or set "
+            "AIMINER_API_BASE_URL=http://127.0.0.1:<port>. If start_web.sh "
+            "auto-switched ports because 8000 was occupied, TUI must use that port."
+        )
+
     async def _swarm_api_request(
         self, method: str, path: str, payload: dict | None = None, params: dict | None = None
     ) -> dict:
         return await asyncio.to_thread(self._swarm_api_request_sync, method, path, payload, params)
 
     def _swarm_api_request_sync(self, method: str, path: str, payload: dict | None, params: dict | None) -> dict:
+        if not self._ensure_swarm_api_base_url():
+            raise RuntimeError(self._api_unreachable_hint())
         url = self._swarm_api_url(path)
         if params:
             url = f"{url}?{urllib.parse.urlencode(params)}"
@@ -153,6 +214,10 @@ class TUIApp(App):
             raise RuntimeError(f"Swarm API {method} {url} failed: {exc.code} {detail}") from exc
         except urllib.error.URLError as exc:
             raise RuntimeError(f"Swarm API {method} {url} unreachable: {exc}") from exc
+        except TimeoutError as exc:
+            raise RuntimeError(
+                f"Swarm API {method} {url} timed out. {self._api_unreachable_hint()}"
+            ) from exc
         except Exception as exc:
             raise RuntimeError(f"Swarm API {method} {url} error: {exc}") from exc
 
@@ -214,6 +279,9 @@ class TUIApp(App):
                         
                         yield Label("LLM Model:")
                         yield Input(value="kimi-k2-turbo-preview", id="swarm-model")
+
+                        yield Label("LLM Reasoning Effort (low/medium/high/xhigh, Codex only):")
+                        yield Input(value="", id="swarm-reasoning-effort")
 
                         yield Label("LLM Base URL:")
                         yield Input(value="", id="swarm-base-url")
@@ -1067,6 +1135,7 @@ RRE: {(metrics.get('rre') or 0.0):.4f}
         engine = self.query_one("#swarm-engine", Input).value
         provider = self.query_one("#swarm-provider", Input).value
         model = self.query_one("#swarm-model", Input).value
+        reasoning_effort = self.query_one("#swarm-reasoning-effort", Input).value
         base_url = self.query_one("#swarm-base-url", Input).value
         embed = self.query_one("#swarm-embed", Input).value
         market_mode = self.query_one("#swarm-market-mode", Input).value
@@ -1096,6 +1165,7 @@ RRE: {(metrics.get('rre') or 0.0):.4f}
             "market_end": end,
             "llm_provider": provider,
             "llm_model": model,
+            "llm_reasoning_effort": reasoning_effort or None,
             "llm_base_url": base_url or None,
             "embedding_provider": embed or None,
             "market_mode": market_mode,
@@ -1107,6 +1177,12 @@ RRE: {(metrics.get('rre') or 0.0):.4f}
         }
 
         self.swarm_running = True
+        before_api_base_url = self.swarm_api_base_url
+        self._ensure_swarm_api_base_url()
+        if self.swarm_api_base_url != before_api_base_url:
+            self._append_swarm_log_lines(
+                [f"[bold yellow]Auto-detected Swarm API: {self.swarm_api_base_url}[/bold yellow]"]
+            )
         self._append_swarm_log_lines(["[bold blue]Submitting Swarm request to API...[/bold blue]"])
         try:
             resp = await self._swarm_api_request("POST", "/api/swarm/runs", payload=payload)

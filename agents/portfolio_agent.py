@@ -20,12 +20,19 @@ class PortfolioAgent:
     correlation matrix to dynamically recommend the optimal portfolio weighting scheme.
     """
 
-    def __init__(self, provider: str = None, model: str = None, base_url: str = None):
+    def __init__(
+        self,
+        provider: str = None,
+        model: str = None,
+        base_url: str = None,
+        reasoning_effort: str = None,
+    ):
         self.llm = get_llm(
             temperature=0.1,
             provider=provider,
             model_name=model,
             base_url=base_url,
+            reasoning_effort=reasoning_effort,
         ).with_structured_output(PortfolioDecision)
 
     def select_method(self, factors: List[Dict[str, Any]], returns_df: pd.DataFrame) -> PortfolioDecision:

@@ -32,6 +32,7 @@ def get_llm(
     model_name: str = None,
     provider: str = None,
     base_url: str = None,
+    reasoning_effort: str = None,
 ) -> BaseChatModel:
     """
     Returns a configured LangChain Chat model.
@@ -47,6 +48,18 @@ def get_llm(
 
     provider = cfg["provider"]
     api_key = cfg["api_key"]
+
+    if provider == "codex":
+        if base_url:
+            logger.warning("llm_base_url is ignored when llm_provider='codex'.")
+        from core.codex_llm import CodexChatModel
+
+        logger.info(f"Using LLM Provider: codex, Model: {model_name or 'gpt-5.4'}")
+        return CodexChatModel(
+            model_name=model_name or "gpt-5.4",
+            temperature=temperature,
+            reasoning_effort=reasoning_effort,
+        )
 
     if not api_key and provider == "openai" and base_url:
         api_key = "openai-compatible"

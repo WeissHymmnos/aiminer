@@ -1399,9 +1399,10 @@ sequenceDiagram
 关键实现块：
 
 - Provider 解析块
-  同时兼容 `kimi`、`glm`、`openai`、`claude`、`ollama`、`lmstudio` 等
+  同时兼容 `kimi`、`glm`、`openai`、`claude`、`ollama`、`lmstudio`、`codex` 等。
+  `codex` 是显式 provider，不参与自动探测，避免没有 API key 时意外拉起本地 Codex CLI。
 - 约束校验块
-  在进入运行前阻止不一致配置流入评估器
+  在进入运行前阻止不一致配置流入评估器。`embedding_provider="codex"` 会被拒绝，因为 Codex provider 只负责文本生成，不负责向量 embedding。
 
 ### 7.2 `core/runtime.py`
 
@@ -1497,6 +1498,67 @@ sequenceDiagram
   基于 provider/model/base_url 生成客户端配置。
 - `get_llm`
   返回实际 LLM 对象。
+
+关键实现块：
+
+- OpenAI-compatible provider 块
+  `kimi`、`qwen`、`glm`、`openai`、`deepseek`、`openrouter`、`groq`、`ollama`、`vllm`、`lmstudio`、`claude` 最终都返回 `ChatOpenAI` 兼容对象。
+- Codex provider 块
+  当 `llm_provider="codex"` 时，`get_llm()` 返回 `CodexChatModel`，不使用 `llm_base_url`，也不要求 API key。
+  默认模型为 `gpt-5.4`，可通过 `--llm-model` 或 API payload 的 `llm_model` 覆盖。
+  思考强度可通过 `llm_reasoning_effort` 设置，允许值为 `low`、`medium`、`high`、`xhigh`。
+  该 provider 设计成“本地 LLM 替代选项”，不是执行项目改写的 Agent。
+
+### 7.6.1 `core/codex_llm.py`
+
+文件说明：
+
+- 本地 Codex CLI 的 LangChain chat wrapper
+- 通过 `codex exec` 把本机 Codex 能力接入现有 Agent 调用链
+- 默认使用只读、临时会话，降低 Swarm 调用时误改工作区的风险
+
+函数：
+
+- `codex_command`
+  解析 `AIMINER_CODEX_CMD` 或默认 `codex`，并检查可执行文件是否存在。
+- `is_codex_available`
+  返回本机 Codex CLI 是否可用。
+
+类：
+
+- `CodexChatModel`
+  继承 LangChain `BaseChatModel`，实现 `_generate()`。
+  会把 LangChain messages 渲染成 prompt，通过 stdin 传给 `codex exec`。
+  输出优先读取 `--output-last-message` 文件；如果文件为空，则回退读取 stdout 最后一行。
+
+运行边界：
+
+```text
+LangChain Agent
+  -> core.llm.get_llm(provider="codex", reasoning_effort="xhigh")
+  -> CodexChatModel._generate()
+  -> codex exec -c model_reasoning_effort="xhigh" --ephemeral --sandbox read-only --output-last-message <tmp> -m <model> -C <cwd> -
+  -> AIMessage(content=<last message>)
+```
+
+配置项：
+
+| 配置 | 作用 |
+| --- | --- |
+| `llm_provider=codex` | 显式启用本地 Codex provider |
+| `llm_model=gpt-5.4` | 传给 `codex exec -m` 的模型名 |
+| `llm_reasoning_effort=xhigh` | 传给 `codex exec -c model_reasoning_effort="xhigh"` 的思考强度 |
+| `AIMINER_CODEX_CMD` | Codex CLI 路径或命令，默认 `codex` |
+| `AIMINER_CODEX_TIMEOUT_SECONDS` | 单次 Codex 调用超时，默认 180 秒 |
+| `AIMINER_CODEX_REASONING_EFFORT` | Codex 默认思考强度，允许 `low/medium/high/xhigh` |
+| `embedding_provider=local` | 推荐与 Codex 搭配使用的 embedding 选项 |
+
+注意事项：
+
+- Codex provider 不会被 `detect_llm_provider()` 自动选中，必须显式配置。
+- Codex provider 不支持 embedding，`embedding_provider=codex` 会在 settings/API 边界被拒绝。
+- 当前允许并发调用；Swarm 并行时可能同时启动多个 `codex exec` 进程。
+- 如果后续发现本地资源争用，应增加 `AIMINER_CODEX_MAX_CONCURRENT` 或改为串行锁。
 
 ### 7.7 `core/rag.py`
 

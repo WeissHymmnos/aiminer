@@ -8,6 +8,7 @@ class AlphaMinerState(TypedDict, total=False):
     llm_provider: Optional[str]
     llm_model: Optional[str]
     llm_base_url: Optional[str]
+    llm_reasoning_effort: Optional[str]
 
     # Core tracking
     iteration: int

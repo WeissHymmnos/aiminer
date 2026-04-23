@@ -31,6 +31,7 @@ from core.settings import (
     SUPPORTED_DATA_BACKENDS,
     SUPPORTED_EVALUATION_MODES,
     SUPPORTED_LLM_PROVIDERS,
+    SUPPORTED_LLM_REASONING_EFFORTS,
     SUPPORTED_LOCAL_DATA_LAYOUTS,
     SUPPORTED_MARKET_MODES,
     SUPPORTED_MARKET_PROFILES,
@@ -921,6 +922,7 @@ def _swarm_process_target(run_id: str, config: Dict[str, Any], queue: Any) -> No
             llm_provider=config.get("llm_provider"),
             llm_model=config.get("llm_model"),
             llm_base_url=config.get("llm_base_url"),
+            llm_reasoning_effort=config.get("llm_reasoning_effort"),
             embedding_provider=config.get("embedding_provider"),
             market_mode=config.get("market_mode"),
             market_profile=config.get("market_profile"),
@@ -1375,6 +1377,20 @@ class RuntimeRequestModel(BaseModel):
             )
         return provider
 
+    @field_validator("llm_reasoning_effort", mode="before", check_fields=False)
+    @classmethod
+    def _validate_llm_reasoning_effort(cls, value: Any) -> Optional[str]:
+        effort = _normalize_text(value)
+        if effort is None:
+            return None
+        effort = effort.lower()
+        if effort not in SUPPORTED_LLM_REASONING_EFFORTS:
+            raise ValueError(
+                "llm_reasoning_effort must be one of: "
+                f"{', '.join(SUPPORTED_LLM_REASONING_EFFORTS)}"
+            )
+        return effort
+
     @field_validator("embedding_provider", mode="before", check_fields=False)
     @classmethod
     def _validate_embedding_provider(cls, value: Any) -> Optional[str]:
@@ -1386,6 +1402,8 @@ class RuntimeRequestModel(BaseModel):
             raise ValueError(
                 f"embedding_provider must be 'local' or one of: {', '.join(SUPPORTED_LLM_PROVIDERS)}"
             )
+        if provider == "codex":
+            raise ValueError("embedding_provider='codex' is not supported")
         return provider
 
     @field_validator("llm_base_url", "local_data_path", mode="before", check_fields=False)
@@ -1424,6 +1442,7 @@ class SwarmConfig(RuntimeRequestModel):
     llm_provider: str = "kimi"
     llm_model: str = "kimi-k2-turbo-preview"
     llm_base_url: Optional[str] = None
+    llm_reasoning_effort: Optional[str] = None
     embedding_provider: Optional[str] = None
     market_mode: str = "single"
     market_profile: str = "cn_stock"

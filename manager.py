@@ -263,6 +263,7 @@ class PortfolioManager:
         self.kwargs.setdefault("llm_provider", self.settings.llm_provider)
         self.kwargs.setdefault("llm_model", self.settings.llm_model)
         self.kwargs.setdefault("llm_base_url", self.settings.llm_base_url)
+        self.kwargs.setdefault("llm_reasoning_effort", self.settings.llm_reasoning_effort)
         self.kwargs.setdefault("embedding_provider", self.settings.embedding_provider)
         self.kwargs.setdefault("evaluation_mode", self.settings.evaluation_mode)
         self.kwargs.setdefault("evaluation_engine", self.settings.evaluation_engine)
@@ -295,6 +296,7 @@ class PortfolioManager:
             provider=self.settings.llm_provider,
             model=self.settings.llm_model,
             base_url=self.settings.llm_base_url,
+            reasoning_effort=self.settings.llm_reasoning_effort,
             settings=self.settings,
         )
         self._init_db()
@@ -617,6 +619,7 @@ class PortfolioManager:
                 knowledge = HybridKnowledge(
                     llm_provider=self.kwargs.get("llm_provider"),
                     llm_model=self.kwargs.get("llm_model"),
+                    llm_reasoning_effort=self.kwargs.get("llm_reasoning_effort"),
                     embedding_provider=self.kwargs.get("embedding_provider"),
                     llm_base_url=self.kwargs.get("llm_base_url"),
                 )
@@ -867,7 +870,8 @@ class PortfolioManager:
                     portfolio_agent = PortfolioAgent(
                         provider=self.kwargs.get("llm_provider"),
                         model=self.kwargs.get("llm_model"),
-                        base_url=self.kwargs.get("llm_base_url")
+                        base_url=self.kwargs.get("llm_base_url"),
+                        reasoning_effort=self.kwargs.get("llm_reasoning_effort"),
                     )
                     returns_dict = {}
                     factors_for_portfolio = []
@@ -1199,6 +1203,12 @@ if __name__ == "__main__":
     parser.add_argument("--llm-model", type=str, help="Specific LLM model name")
     parser.add_argument("--llm-base-url", type=str, help="Override OpenAI-compatible base URL")
     parser.add_argument(
+        "--llm-reasoning-effort",
+        type=str,
+        choices=["low", "medium", "high", "xhigh"],
+        help="Codex reasoning effort",
+    )
+    parser.add_argument(
         "--embedding-provider", type=str, help="Embedding provider for RAG"
     )
     parser.add_argument(
@@ -1269,6 +1279,7 @@ if __name__ == "__main__":
         llm_provider=args.llm_provider,
         llm_model=args.llm_model,
         llm_base_url=args.llm_base_url,
+        llm_reasoning_effort=args.llm_reasoning_effort,
         embedding_provider=args.embedding_provider,
         market_mode=args.market_mode,
         market_profile=args.market_profile,

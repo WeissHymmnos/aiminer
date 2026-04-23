@@ -508,6 +508,54 @@ def test_runtime_request_models_normalize_compatible_aliases():
     assert config.local_data_layout == "instrument_files"
 
 
+def test_swarm_config_accepts_codex_llm_provider():
+    mod = _module()
+
+    config = mod.SwarmConfig.model_validate(
+        {
+            "iterations": 1,
+            "roles": ["researcher"],
+            "llm_provider": "codex",
+            "llm_model": "gpt-5.4",
+            "llm_reasoning_effort": "XHIGH",
+            "embedding_provider": "local",
+        }
+    )
+
+    assert config.llm_provider == "codex"
+    assert config.llm_model == "gpt-5.4"
+    assert config.llm_reasoning_effort == "xhigh"
+    assert config.embedding_provider == "local"
+
+
+def test_swarm_config_rejects_codex_embedding_provider():
+    mod = _module()
+
+    with pytest.raises(ValueError):
+        mod.SwarmConfig.model_validate(
+            {
+                "iterations": 1,
+                "roles": ["researcher"],
+                "llm_provider": "codex",
+                "embedding_provider": "codex",
+            }
+        )
+
+
+def test_swarm_config_rejects_invalid_reasoning_effort():
+    mod = _module()
+
+    with pytest.raises(ValueError):
+        mod.SwarmConfig.model_validate(
+            {
+                "iterations": 1,
+                "roles": ["researcher"],
+                "llm_provider": "codex",
+                "llm_reasoning_effort": "extreme",
+            }
+        )
+
+
 def test_delete_strategy_handles_missing_strategy_table(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     db_path = _prepare_db(tmp_path)

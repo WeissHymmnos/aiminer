@@ -10,6 +10,7 @@ const backendOptions = ["ricequant", "qlib", "local"];
 const engineOptions = ["polars", "pandas"];
 const marketModeOptions = ["single", "multi"];
 const localDataLayoutOptions = ["auto", "qlib", "contracts", "dominant"];
+const reasoningEffortOptions = ["", "low", "medium", "high", "xhigh"];
 const RUNS_PAGE_SIZE = 20;
 
 const defaultRoles = [
@@ -37,6 +38,7 @@ export function SwarmRunsPage() {
     llm_provider: "kimi",
     llm_model: "kimi-k2-turbo-preview",
     llm_base_url: "",
+    llm_reasoning_effort: "",
     embedding_provider: "openai",
     market_mode: "single",
     market_profile: "cn_stock",
@@ -98,6 +100,7 @@ export function SwarmRunsPage() {
       llm_provider: form.llm_provider,
       llm_model: form.llm_model,
       llm_base_url: form.llm_base_url || null,
+      llm_reasoning_effort: form.llm_reasoning_effort || null,
       embedding_provider: form.embedding_provider || null,
       market_mode: form.market_mode,
       market_profile: form.market_profile,
@@ -222,6 +225,19 @@ export function SwarmRunsPage() {
               value={form.llm_base_url}
               onChange={(event) => setForm({ ...form, llm_base_url: event.target.value })}
             />
+          </label>
+          <label className="field">
+            Reasoning Effort
+            <select
+              value={form.llm_reasoning_effort}
+              onChange={(event) => setForm({ ...form, llm_reasoning_effort: event.target.value })}
+            >
+              {reasoningEffortOptions.map((option) => (
+                <option key={option || "default"} value={option}>
+                  {option || "provider default"}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="field">
             Embedding Provider

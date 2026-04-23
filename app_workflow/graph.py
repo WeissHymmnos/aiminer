@@ -221,6 +221,7 @@ def build_workflow(
     rebuild_rag: bool = False,
     llm_provider: str = None,
     llm_model: str = None,
+    llm_reasoning_effort: str = None,
     embedding_provider: str = None,
     use_gpu: bool = False,
 ):
@@ -229,6 +230,7 @@ def build_workflow(
             "rebuild_rag": rebuild_rag,
             "llm_provider": llm_provider,
             "llm_model": llm_model,
+            "llm_reasoning_effort": llm_reasoning_effort,
             "embedding_provider": embedding_provider,
             "use_gpu": use_gpu,
         }
@@ -242,6 +244,7 @@ def build_workflow(
         llm_provider=settings.llm_provider,
         llm_model=settings.llm_model,
         llm_base_url=settings.llm_base_url,
+        llm_reasoning_effort=settings.llm_reasoning_effort,
     )
 
     # Initialize agents
@@ -250,22 +253,26 @@ def build_workflow(
         provider=settings.llm_provider,
         model=settings.llm_model,
         base_url=settings.llm_base_url,
+        reasoning_effort=settings.llm_reasoning_effort,
     )
     factor_agent = FactorAgent(
         provider=settings.llm_provider,
         model=settings.llm_model,
         base_url=settings.llm_base_url,
+        reasoning_effort=settings.llm_reasoning_effort,
     )
     eval_agent = EvalAgent(
         knowledge,
         provider=settings.llm_provider,
         model=settings.llm_model,
         base_url=settings.llm_base_url,
+        reasoning_effort=settings.llm_reasoning_effort,
     )
     strategy_agent = StrategyAgent(
         provider=settings.llm_provider,
         model=settings.llm_model,
         base_url=settings.llm_base_url,
+        reasoning_effort=settings.llm_reasoning_effort,
     )
 
     # Define Graph
@@ -421,6 +428,7 @@ def build_workflow(
         provider=settings.llm_provider,
         model=settings.llm_model,
         base_url=settings.llm_base_url,
+        reasoning_effort=settings.llm_reasoning_effort,
     )
     workflow.add_node("strategy_critic", strategy_critic)
 

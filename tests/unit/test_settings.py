@@ -54,3 +54,28 @@ class TestSettings(unittest.TestCase):
     @patch.dict(os.environ, {}, clear=True)
     def test_provider_api_key_uses_lmstudio_sentinel(self):
         self.assertEqual(provider_api_key("lmstudio"), "lm-studio")
+
+    @patch("shutil.which", return_value="/usr/bin/codex")
+    @patch.dict(os.environ, {}, clear=True)
+    def test_codex_provider_is_explicit_only(self, _which):
+        settings = build_settings({"llm_provider": "codex"})
+
+        self.assertEqual(settings.llm_provider, "codex")
+        self.assertEqual(provider_api_key("codex"), "codex")
+        self.assertIsNone(detect_llm_provider())
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_codex_is_not_supported_for_embeddings(self):
+        with self.assertRaises(ValueError):
+            build_settings({"embedding_provider": "codex"})
+
+    @patch.dict(os.environ, {"AIMINER_CODEX_REASONING_EFFORT": "XHIGH"}, clear=True)
+    def test_reasoning_effort_from_environment_is_normalized(self):
+        settings = build_settings()
+
+        self.assertEqual(settings.llm_reasoning_effort, "xhigh")
+
+    @patch.dict(os.environ, {}, clear=True)
+    def test_invalid_reasoning_effort_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            build_settings({"llm_reasoning_effort": "extreme"})
