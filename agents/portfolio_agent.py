@@ -27,13 +27,19 @@ class PortfolioAgent:
         base_url: str = None,
         reasoning_effort: str = None,
     ):
-        self.llm = get_llm(
-            temperature=0.1,
-            provider=provider,
-            model_name=model,
-            base_url=base_url,
-            reasoning_effort=reasoning_effort,
-        ).with_structured_output(PortfolioDecision)
+        self._llm_args = {
+            "temperature": 0.1,
+            "provider": provider,
+            "model_name": model,
+            "base_url": base_url,
+            "reasoning_effort": reasoning_effort,
+        }
+        self.llm = None
+
+    def _decision_llm(self):
+        if self.llm is None:
+            self.llm = get_llm(**self._llm_args).with_structured_output(PortfolioDecision)
+        return self.llm
 
     def select_method(self, factors: List[Dict[str, Any]], returns_df: pd.DataFrame) -> PortfolioDecision:
         """
@@ -78,7 +84,7 @@ Provide your decision and a concise rationale.
         
         try:
             logger.info("[PortfolioAgent] Consulting LLM for portfolio construction method...")
-            decision = self.llm.invoke(prompt_text)
+            decision = self._decision_llm().invoke(prompt_text)
             
             # Validate method
             if decision.method not in ["equal", "inverse_vol", "risk_parity"]:
