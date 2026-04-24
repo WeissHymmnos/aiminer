@@ -23,7 +23,12 @@ class WeightCalculator:
         import qlib
         from qlib.data import D
 
-        qlib_data_path = os.getenv("QLIB_DATA_PATH", "~/.qlib/qlib_data/cn_data")
+        qlib_data_path = (
+            os.getenv("QLIB_CN_DATA_PATH")
+            or os.getenv("QLIB_DATA_PATH")
+            or "~/.qlib/qlib_data/cn_data"
+        )
+        qlib_data_path = os.path.expanduser(qlib_data_path)
         qlib.init(provider_uri=qlib_data_path, region="cn")
 
         if instruments is not None:

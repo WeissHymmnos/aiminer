@@ -106,6 +106,7 @@ jobs:
         with:
           name: frontend-dist
           path: frontend/dist
+          if-no-files-found: error
           retention-days: 7
 
   # ============================================================
@@ -117,8 +118,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
+          - platform: macos-15-intel
+            target: x86_64-apple-darwin
             ext: ''
           - platform: macos-latest
             target: aarch64-apple-darwin
@@ -129,19 +130,6 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
-
-      # 释放 Runner 磁盘空间 (PyInstaller onefile 打包 torch+qlib 栈需要 20GB+)
-      - name: Free disk space (Linux)
-        if: matrix.platform == 'ubuntu-22.04'
-        uses: jlumbroso/free-disk-space@main
-        with:
-          tool-cache: false
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: true
-          swap-storage: true
 
       - name: Free disk space (Windows)
         if: matrix.platform == 'windows-latest'
@@ -232,6 +220,7 @@ jobs:
         with:
           name: sidecar-${{ matrix.target }}
           path: sidecar-out/*
+          if-no-files-found: error
           retention-days: 7
 
   # ============================================================
@@ -243,8 +232,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
+          - platform: macos-15-intel
+            target: x86_64-apple-darwin
           - platform: macos-latest
             target: aarch64-apple-darwin
           - platform: windows-latest
@@ -252,6 +241,19 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Free disk space (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force "C:\Program Files\dotnet" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\Program Files (x86)\Android" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\Program Files\MongoDB" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\Program Files\Google" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "C:\Program Files\Firefox" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "$env:AGENT_TOOLSDIRECTORY\Ruby" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "$env:AGENT_TOOLSDIRECTORY\go" -ErrorAction SilentlyContinue
+          Get-PSDrive
 
       - uses: actions/setup-node@v4
         with:
@@ -269,12 +271,6 @@ jobs:
           path: src-tauri/target
           key: tauri-${{ matrix.target }}-${{ hashFiles('src-tauri/Cargo.lock') }}
 
-      - name: Linux 系统依赖
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
-
       - name: 下载前端产物
         uses: actions/download-artifact@v4
         with:
@@ -290,6 +286,42 @@ jobs:
       - name: 设置 sidecar 可执行权限 (Unix)
         if: matrix.platform != 'windows-latest'
         run: chmod +x src-tauri/binaries/aiminer-backend-*
+
+      - name: Cache packaged market data
+        uses: actions/cache@v4
+        with:
+          path: ~/.qlib/qlib_data
+          key: qlib-market-data-v1-${{ runner.os }}-20260424
+          restore-keys: |
+            qlib-market-data-v1-${{ runner.os }}-
+
+      - name: 准备随包市场数据
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if ! python scripts/download_qlib_data.py cn --validate-only; then
+            rm -rf "$HOME/.qlib/qlib_data/cn_data"
+            python scripts/download_qlib_data.py cn
+          fi
+          if ! python scripts/download_qlib_data.py us --validate-only; then
+            rm -rf "$HOME/.qlib/qlib_data/us_data"
+            python scripts/download_qlib_data.py us
+          fi
+
+          rm -rf src-tauri/resources/market_data
+          mkdir -p src-tauri/resources/market_data/qlib
+          cp -a "$HOME/.qlib/qlib_data/cn_data" src-tauri/resources/market_data/qlib/cn_data
+          cp -a "$HOME/.qlib/qlib_data/us_data" src-tauri/resources/market_data/qlib/us_data
+
+          if [ -d data/local_futures ]; then
+            cp -a data/local_futures src-tauri/resources/market_data/local_futures
+          fi
+
+          python scripts/download_qlib_data.py cn --target-dir src-tauri/resources/market_data/qlib/cn_data --validate-only
+          python scripts/download_qlib_data.py us --target-dir src-tauri/resources/market_data/qlib/us_data --validate-only
+          test -f src-tauri/resources/market_data/qlib/cn_data/calendars/day.txt
+          test -f src-tauri/resources/market_data/qlib/us_data/calendars/day.txt
+          du -sh src-tauri/resources/market_data
 
       - name: 安装前端依赖 (Tauri 需要)
         working-directory: frontend
@@ -311,17 +343,22 @@ jobs:
           if [ -d "$BUNDLE_DIR" ]; then
             find "$BUNDLE_DIR" -type f \( \
               -name "*.dmg" -o -name "*.app.tar.gz" -o \
-              -name "*.msi" -o -name "*.exe" -o \
-              -name "*.deb" -o -name "*.rpm" -o -name "*.AppImage" \
+              -name "*.msi" -o -name "*.exe" \
             \) -exec cp {} installers/ \;
           fi
           ls -lh installers/
+          COUNT=$(find installers -type f | wc -l | tr -d ' ')
+          if [ "$COUNT" -eq 0 ]; then
+            echo "No installer artifacts were produced under $BUNDLE_DIR" >&2
+            exit 1
+          fi
 
       - name: Upload installers
         uses: actions/upload-artifact@v4
         with:
           name: installers-${{ matrix.target }}
           path: installers/*
+          if-no-files-found: error
           retention-days: 30
 
   # ============================================================
@@ -344,7 +381,13 @@ jobs:
           merge-multiple: true
 
       - name: 列出待发布文件
-        run: ls -lh release-assets/
+        run: |
+          ls -lh release-assets/
+          COUNT=$(find release-assets -type f | wc -l | tr -d ' ')
+          if [ "$COUNT" -eq 0 ]; then
+            echo "No release assets were downloaded" >&2
+            exit 1
+          fi
 
       - name: 创建 / 更新 GitHub Release
         uses: softprops/action-gh-release@v2

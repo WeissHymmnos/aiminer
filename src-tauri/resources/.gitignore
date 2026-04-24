@@ -1,0 +1,4 @@
+*
+!.gitignore
+!market_data/
+!market_data/.gitkeep

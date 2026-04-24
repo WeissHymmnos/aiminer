@@ -18,6 +18,19 @@ def zscore(df: pd.DataFrame) -> pd.DataFrame:
     return df.sub(means, axis="columns").div(stds, axis="columns")
 
 
+def resolve_qlib_data_path(region: str, explicit_path: str | None = None) -> str:
+    default_data_path = (
+        "~/.qlib/qlib_data/us_data" if region == "us" else "~/.qlib/qlib_data/cn_data"
+    )
+    region_env = "QLIB_US_DATA_PATH" if region == "us" else "QLIB_CN_DATA_PATH"
+    return (
+        explicit_path
+        or os.getenv(region_env)
+        or os.getenv("QLIB_DATA_PATH")
+        or default_data_path
+    )
+
+
 class AlphaEval:
     def __init__(
         self,
@@ -47,10 +60,7 @@ class AlphaEval:
         self.market_profile = market_profile
 
         region = qlib_region or ("us" if market_profile == "us_stock" else "cn")
-        default_data_path = (
-            "~/.qlib/qlib_data/us_data" if region == "us" else "~/.qlib/qlib_data/cn_data"
-        )
-        qlib_data_path = qlib_data_path or os.getenv("QLIB_DATA_PATH", default_data_path)
+        qlib_data_path = resolve_qlib_data_path(region, qlib_data_path)
         expanded_path = os.path.expanduser(qlib_data_path)
 
         if not os.path.exists(expanded_path):

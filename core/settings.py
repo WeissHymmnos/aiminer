@@ -279,7 +279,9 @@ def build_settings(overrides: Mapping[str, Any] | None = None) -> AiminerSetting
         "market_mode": _normalize_str(overrides.get("market_mode")) or "single",
         "market_profile": market_profile,
         "market_profiles": market_profiles,
-        "local_data_path": _normalize_str(overrides.get("local_data_path")),
+        "local_data_path": _normalize_str(overrides.get("local_data_path"))
+        or _normalize_str(os.getenv("AIMINER_LOCAL_DATA_PATH"))
+        or _normalize_str(os.getenv("AIMINER_LOCAL_FUTURES_PATH")),
         "local_data_layout": _normalize_str(overrides.get("local_data_layout")) or "auto",
         "market_start": _normalize_str(overrides.get("market_start")),
         "market_end": _normalize_str(overrides.get("market_end")),
