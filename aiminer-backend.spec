@@ -27,6 +27,7 @@ datas = [
     ('data/rag_docs/templates', 'data/rag_docs/templates'),
     ('.env.example', '.'),
 ]
+datas += collect_data_files('rfc3987_syntax')
 
 # Rust 插件: 先尝试从 site-packages 收集 (CI 中通过 pip install wheel 安装),
 # 失败再回退到本地 maturin 构建产物

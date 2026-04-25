@@ -234,10 +234,13 @@ jobs:
         include:
           - platform: macos-15-intel
             target: x86_64-apple-darwin
+            bundles: app,dmg
           - platform: macos-latest
             target: aarch64-apple-darwin
+            bundles: app,dmg
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
+            bundles: nsis
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -332,7 +335,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: --target ${{ matrix.target }}
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
           # 不在这里建 release, 留给 Stage 4 统一处理
 
       - name: 收集安装包
