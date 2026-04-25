@@ -36,15 +36,19 @@ jobs:
     steps:
       - id: v
         shell: bash
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version || '' }}
+          INPUT_PUBLISH_RELEASE: ${{ github.event.inputs.publish_release || 'false' }}
         run: |
+          set -euo pipefail
           if [[ "${{ github.event_name }}" == "push" ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
             VERSION="${TAG#v}"
             SHOULD_RELEASE="true"
-          elif [[ -n "${{ inputs.version }}" ]]; then
-            TAG="${{ inputs.version }}"
+          elif [[ -n "$INPUT_VERSION" ]]; then
+            TAG="$INPUT_VERSION"
             VERSION="${TAG#v}"
-            SHOULD_RELEASE="${{ inputs.publish_release }}"
+            SHOULD_RELEASE="$INPUT_PUBLISH_RELEASE"
           else
             TAG="dev-${GITHUB_SHA::7}"
             VERSION="0.0.0-${GITHUB_SHA::7}"
