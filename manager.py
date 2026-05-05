@@ -1,8 +1,12 @@
 import os
+
+os.environ.setdefault("MPLBACKEND", "Agg")
+
 import argparse
 import pandas as pd
 from loguru import logger
 import concurrent.futures
+from concurrent.futures.process import BrokenProcessPool
 from dotenv import load_dotenv
 import multiprocessing
 import threading
@@ -16,6 +20,10 @@ import uuid
 from sub_agent import AlphaResearcher
 from agents.summary_agent import SummaryAgent
 from agents.portfolio_agent import PortfolioAgent
+from core.agent_checkpoint import (
+    ensure_agent_checkpoint_table,
+    load_agent_checkpoints,
+)
 from core.portfolio import construct_portfolio
 from core.alphaeval.rq_eval import init_rq_auth
 from core.runtime import log_context, new_agent_id, new_run_id
@@ -108,6 +116,40 @@ def _configured_timeout(explicit_value, env_name: str, default: float | None = N
     return value if value > 0 else None
 
 
+def _configured_positive_int(explicit_value, env_name: str, default: int) -> int:
+    raw = explicit_value if explicit_value is not None else os.getenv(env_name)
+    if raw in (None, ""):
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        logger.warning(f"[Config] Ignoring invalid {env_name}={raw!r}")
+        return default
+    if value <= 0:
+        logger.warning(f"[Config] Ignoring non-positive {env_name}={raw!r}")
+        return default
+    return value
+
+
+def _configured_swarm_executor(explicit_value) -> str:
+    raw = explicit_value if explicit_value is not None else os.getenv("AIMINER_SWARM_EXECUTOR")
+    value = str(raw or "process").strip().lower()
+    aliases = {
+        "processes": "process",
+        "multiprocess": "process",
+        "multi-process": "process",
+        "threads": "thread",
+        "threaded": "thread",
+    }
+    value = aliases.get(value, value)
+    if value not in {"process", "thread"}:
+        logger.warning(
+            f"[Parallel] Ignoring invalid AIMINER_SWARM_EXECUTOR={raw!r}; using 'process'."
+        )
+        return "process"
+    return value
+
+
 def _terminate_process_pool(executor) -> None:
     terminate_workers = getattr(executor, "terminate_workers", None)
     if callable(terminate_workers):
@@ -127,6 +169,28 @@ def _terminate_process_pool(executor) -> None:
                 terminate()
             except Exception as exc:
                 logger.debug(f"[Parallel] process terminate failed: {exc}")
+
+
+def _is_broken_process_pool_error(exc: BaseException) -> bool:
+    if isinstance(exc, BrokenProcessPool):
+        return True
+    message = str(exc).lower()
+    exc_name = type(exc).__name__.lower()
+    return (
+        "brokenprocesspool" in exc_name
+        or "process pool was terminated abruptly" in message
+        or "process pool is not usable anymore" in message
+    )
+
+
+def _cancel_pending_futures(futures, completed) -> int:
+    pending = set(futures) - set(completed)
+    for future in pending:
+        try:
+            future.cancel()
+        except Exception as exc:
+            logger.debug(f"[Parallel] future cancel failed: {exc}")
+    return len(pending)
 
 
 def _bounded_worker_count(task_count: int, configured_limit=None) -> int:
@@ -212,6 +276,21 @@ def _invert_returns(returns):
         return returns
 
 
+def _is_simulated_factor(factor: dict) -> bool:
+    metrics = factor.get("metrics") or {}
+    return bool(factor.get("is_simulated") or metrics.get("_simulated"))
+
+
+def _atomic_write_json(path, payload) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    with tmp_path.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=4, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, path)
+
+
 def _orient_negative_ic_factor(factor: dict, threshold: float) -> dict:
     perf = float(factor.get("perf_metric", 0.0) or 0.0)
     if perf >= -threshold:
@@ -278,6 +357,7 @@ class PortfolioManager:
         self.kwargs.setdefault("use_gpu", self.settings.use_gpu)
         self.kwargs.setdefault("rebuild_rag", self.settings.rebuild_rag)
         self.kwargs.setdefault("wiki_bootstrap", self.settings.wiki_bootstrap)
+        self.kwargs.setdefault("disable_early_stop", self.settings.disable_early_stop)
         self.run_id = kwargs.get("run_id") or new_run_id()
         self.max_swarm_workers = _configured_worker_limit(
             kwargs.get("max_swarm_workers"),
@@ -287,10 +367,21 @@ class PortfolioManager:
             kwargs.get("max_strategy_workers"),
             "AIMINER_MAX_STRATEGY_WORKERS",
         )
+        self.kwargs.pop("swarm_global_timeout_seconds", None)
         self.swarm_global_timeout = _configured_timeout(
-            kwargs.get("swarm_global_timeout_seconds"),
+            kwargs.pop("swarm_global_timeout_seconds", None),
             "AIMINER_SWARM_GLOBAL_TIMEOUT_SECONDS",
             600.0,
+        )
+        self.kwargs.pop("swarm_executor", None)
+        self.swarm_executor = _configured_swarm_executor(
+            kwargs.pop("swarm_executor", None)
+        )
+        self.kwargs.pop("crossover_iterations", None)
+        self.crossover_iterations = _configured_positive_int(
+            kwargs.pop("crossover_iterations", None),
+            "AIMINER_CROSSOVER_ITERATIONS",
+            1,
         )
         self.summary_agent = SummaryAgent(
             provider=self.settings.llm_provider,
@@ -394,6 +485,7 @@ class PortfolioManager:
             """)
             conn.commit()
         ensure_strategy_table(self.db_path)
+        ensure_agent_checkpoint_table(self.db_path)
         self._backfill_from_json()
 
     def _backfill_from_json(self):
@@ -451,6 +543,45 @@ class PortfolioManager:
                 )
             conn.commit()
 
+    def _write_alpha_pool_json_backup(self):
+        """Mirror SQLite alpha_pool into the legacy JSON file atomically.
+
+        SQLite is the source of truth. Keeping the JSON backup as a full DB
+        mirror avoids stale current-run-only snapshots being mistaken for the
+        complete alpha pool.
+        """
+        output_path = self.settings.results_path / "alpha_pool.json"
+        if not os.path.exists(self.db_path):
+            _atomic_write_json(output_path, [])
+            return
+
+        records = []
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            try:
+                rows = conn.execute(
+                    "SELECT * FROM alpha_pool ORDER BY timestamp DESC"
+                ).fetchall()
+            except sqlite3.OperationalError as exc:
+                logger.warning(f"[JSON Backup] Failed to read alpha_pool: {exc}")
+                return
+
+        for row in rows:
+            item = dict(row)
+            for source, target in (
+                ("metrics_json", "metrics"),
+                ("returns_json", "returns"),
+                ("best_strategy_metrics_json", "best_strategy_metrics"),
+            ):
+                raw = item.pop(source, None)
+                try:
+                    item[target] = json.loads(raw) if raw else {}
+                except Exception:
+                    item[target] = {}
+            records.append(item)
+
+        _atomic_write_json(output_path, records)
+
     def dispatch_tasks(self, log_queue=None):
         """Prepare kwargs for sub-agents to allow pickling in ProcessPoolExecutor."""
         self.researchers = []
@@ -488,6 +619,12 @@ class PortfolioManager:
             if res.get("error"):
                 logger.warning(
                     f"[Rejected:error] {res['role'][:30]}... failed with error: {res['error']}"
+                )
+                continue
+            if _is_simulated_factor(res):
+                label = str(res.get("role") or res.get("hypothesis") or "?")
+                logger.warning(
+                    f"[Rejected:simulated] {label[:30]}... used simulated metrics and will not enter Alpha Pool."
                 )
                 continue
 
@@ -550,6 +687,47 @@ class PortfolioManager:
             reverse=True,
         )
         return self.alpha_pool
+
+    def _recover_checkpoint_results(
+        self,
+        current_results: list[dict],
+        *,
+        reason: str = "parallel interruption",
+    ) -> list[dict]:
+        """Recover best per-agent snapshots after an interrupted parallel swarm."""
+        try:
+            checkpoints = load_agent_checkpoints(self.db_path, self.run_id)
+        except Exception as exc:
+            logger.warning(f"[Checkpoint] Failed to load agent checkpoints: {exc}")
+            return current_results
+
+        if not checkpoints:
+            return current_results
+
+        by_agent = {
+            item.get("agent_id") or f"completed_{idx}": item
+            for idx, item in enumerate(current_results)
+        }
+        recovered = 0
+        for item in checkpoints:
+            agent_id = item.get("agent_id")
+            if not agent_id:
+                continue
+            existing = by_agent.get(agent_id)
+            if existing is not None:
+                if existing.get("error") and not item.get("error"):
+                    by_agent[agent_id] = item
+                    recovered += 1
+                continue
+            by_agent[agent_id] = item
+            recovered += 1
+
+        if recovered:
+            logger.warning(
+                f"[Checkpoint] Recovered {recovered} best agent result(s) "
+                f"from checkpoint after {reason}."
+            )
+        return list(by_agent.values())
 
     def _dedupe_alpha_pool_by_returns(self, *, stage: str) -> None:
         if len(self.alpha_pool) < 2:
@@ -629,7 +807,7 @@ class PortfolioManager:
             worker_log_queue = None
             worker_log_thread = None
             dispatch_log_queue = log_queue
-            if parallel and log_queue is not None:
+            if parallel and self.swarm_executor == "process" and log_queue is not None:
                 worker_log_manager = multiprocessing.Manager()
                 worker_log_queue = worker_log_manager.Queue()
                 worker_log_thread = threading.Thread(
@@ -640,30 +818,35 @@ class PortfolioManager:
                 worker_log_thread.start()
                 dispatch_log_queue = worker_log_queue
 
-            task_log_queue = None if parallel else dispatch_log_queue
+            task_log_queue = (
+                None
+                if parallel and self.swarm_executor == "process"
+                else dispatch_log_queue
+            )
             self.dispatch_tasks(log_queue=task_log_queue)
 
             all_results = []
             try:
                 if parallel:
-                    logger.info("Running sub-agents in PARALLEL mode (Multi-Process)...")
-                    try:
-                        max_workers = _bounded_worker_count(
-                            len(self.researchers),
-                            self.max_swarm_workers,
+                    max_workers = _bounded_worker_count(
+                        len(self.researchers),
+                        self.max_swarm_workers,
+                    )
+                    if self.swarm_executor == "thread":
+                        logger.info(
+                            "Running sub-agents in PARALLEL mode (ThreadPool)..."
                         )
-                        executor = concurrent.futures.ProcessPoolExecutor(
-                            max_workers=max_workers,
-                            initializer=_init_worker_context,
-                            initargs=(dispatch_log_queue,),
+                        executor = concurrent.futures.ThreadPoolExecutor(
+                            max_workers=max_workers
                         )
                         timed_out = False
+                        futures = {}
+                        completed = set()
                         try:
                             futures = {
                                 executor.submit(run_agent_task, kwargs): kwargs
                                 for kwargs in self.researchers
                             }
-                            completed = set()
                             for future in concurrent.futures.as_completed(
                                 futures,
                                 timeout=self.swarm_global_timeout,
@@ -676,26 +859,122 @@ class PortfolioManager:
                                     logger.error(f"Agent generated an exception: {exc}")
                         except concurrent.futures.TimeoutError:
                             timed_out = True
-                            pending = set(futures) - completed
-                            for future in pending:
-                                future.cancel()
-                            _terminate_process_pool(executor)
+                            pending_count = _cancel_pending_futures(futures, completed)
                             logger.error(
                                 f"Parallel agent swarm exceeded global timeout "
-                                f"{self.swarm_global_timeout}s; cancelled {len(pending)} pending agent(s)."
+                                f"{self.swarm_global_timeout}s; cancelled {pending_count} pending agent(s)."
+                            )
+                            all_results = self._recover_checkpoint_results(
+                                all_results,
+                                reason="parallel timeout",
                             )
                         finally:
-                            shutdown = getattr(executor, "shutdown", None)
-                            if shutdown is not None:
-                                try:
-                                    shutdown(wait=not timed_out, cancel_futures=timed_out)
-                                except TypeError:
-                                    shutdown(wait=not timed_out)
-                    except KeyboardInterrupt:
-                        logger.warning(
-                            "KeyboardInterrupt received – shutting down sub-agents gracefully"
+                            try:
+                                executor.shutdown(
+                                    wait=not timed_out,
+                                    cancel_futures=timed_out,
+                                )
+                            except TypeError:
+                                executor.shutdown(wait=not timed_out)
+                    else:
+                        logger.info(
+                            "Running sub-agents in PARALLEL mode (Multi-Process)..."
                         )
-                        raise
+                        try:
+                            executor = concurrent.futures.ProcessPoolExecutor(
+                                max_workers=max_workers,
+                                initializer=_init_worker_context,
+                                initargs=(dispatch_log_queue,),
+                            )
+                            timed_out = False
+                            pool_broken = False
+                            futures = {}
+                            completed = set()
+                            try:
+                                futures = {
+                                    executor.submit(run_agent_task, kwargs): kwargs
+                                    for kwargs in self.researchers
+                                }
+                                for future in concurrent.futures.as_completed(
+                                    futures,
+                                    timeout=self.swarm_global_timeout,
+                                ):
+                                    completed.add(future)
+                                    try:
+                                        result = future.result()
+                                        all_results.append(result)
+                                    except Exception as exc:
+                                        if _is_broken_process_pool_error(exc):
+                                            pool_broken = True
+                                            role = str(
+                                                futures.get(future, {}).get(
+                                                    "role_prompt", "unknown"
+                                                )
+                                            )
+                                            pending_count = _cancel_pending_futures(
+                                                futures,
+                                                completed,
+                                            )
+                                            _terminate_process_pool(executor)
+                                            logger.error(
+                                                "[Parallel] Process pool broke while "
+                                                f"collecting role {role[:40]!r}: {exc}; "
+                                                f"cancelled {pending_count} pending agent(s)."
+                                            )
+                                            all_results = self._recover_checkpoint_results(
+                                                all_results,
+                                                reason="parallel worker failure",
+                                            )
+                                            break
+                                        logger.error(
+                                            f"Agent generated an exception: {exc}"
+                                        )
+                            except concurrent.futures.TimeoutError:
+                                timed_out = True
+                                pending_count = _cancel_pending_futures(
+                                    futures, completed
+                                )
+                                _terminate_process_pool(executor)
+                                logger.error(
+                                    f"Parallel agent swarm exceeded global timeout "
+                                    f"{self.swarm_global_timeout}s; cancelled {pending_count} pending agent(s)."
+                                )
+                                all_results = self._recover_checkpoint_results(
+                                    all_results,
+                                    reason="parallel timeout",
+                                )
+                            except Exception as exc:
+                                if not _is_broken_process_pool_error(exc):
+                                    raise
+                                pool_broken = True
+                                pending_count = _cancel_pending_futures(
+                                    futures, completed
+                                )
+                                _terminate_process_pool(executor)
+                                logger.error(
+                                    "[Parallel] Process pool broke while waiting for "
+                                    f"agent futures: {exc}; cancelled {pending_count} pending agent(s)."
+                                )
+                                all_results = self._recover_checkpoint_results(
+                                    all_results,
+                                    reason="parallel worker failure",
+                                )
+                            finally:
+                                shutdown = getattr(executor, "shutdown", None)
+                                if shutdown is not None:
+                                    cancel_futures = timed_out or pool_broken
+                                    try:
+                                        shutdown(
+                                            wait=not cancel_futures,
+                                            cancel_futures=cancel_futures,
+                                        )
+                                    except TypeError:
+                                        shutdown(wait=not cancel_futures)
+                        except KeyboardInterrupt:
+                            logger.warning(
+                                "KeyboardInterrupt received – shutting down sub-agents gracefully"
+                            )
+                            raise
                 else:
                     logger.info("Running sub-agents in SERIAL mode...")
                     for kwargs in self.researchers:
@@ -713,6 +992,7 @@ class PortfolioManager:
                     worker_log_manager.shutdown()
 
             # Manager evaluates all
+            all_results = self._recover_checkpoint_results(all_results)
             self.evaluate_and_combine(all_results)
             self.evaluate_strategies()
 
@@ -740,10 +1020,12 @@ class PortfolioManager:
                 crossover_kwargs["role_prompt"] = crossover_role
                 crossover_kwargs["run_id"] = self.run_id
                 crossover_kwargs["agent_id"] = "agent_crossover"
+                crossover_kwargs["max_iterations"] = self.crossover_iterations
                 crossover_result = run_agent_task(crossover_kwargs)
 
                 if (
                     not crossover_result.get("error")
+                    and not _is_simulated_factor(crossover_result)
                     and crossover_result.get("perf_metric", 0.0) > 0.01
                 ):
                     is_redundant = False
@@ -838,18 +1120,12 @@ class PortfolioManager:
                             )
                 # with-block exits here → single fsync for all inserts.
 
-            # Legacy JSON Backup (SQLite is the source of truth; this file
-            # is kept for convenience / debugging.)
-                output_path = self.settings.results_path / "alpha_pool.json"
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                serializable_pool = []
-                for factor in self.alpha_pool:
-                    f_copy = factor.copy()
-                    f_copy["returns"] = _serialize_returns(f_copy.get("returns"))
-                    serializable_pool.append(f_copy)
-                with output_path.open("w", encoding="utf-8") as f:
-                    json.dump(serializable_pool, f, indent=4, ensure_ascii=False)
-                logger.success(f"Final Alpha Pool saved to {output_path} and SQLite.")
+                # Legacy JSON Backup (SQLite is the source of truth; this file
+                # is kept for convenience / debugging.)
+                self._write_alpha_pool_json_backup()
+                logger.success(
+                    f"Final Alpha Pool saved to {self.settings.results_path / 'alpha_pool.json'} and SQLite."
+                )
 
             if self.strategy_pool:
                 logger.info(
@@ -1199,6 +1475,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--roles", type=str, nargs="+", help="Specific roles to assign to sub-agents"
     )
+    parser.add_argument("--run-id", type=str, help="Stable run id for checkpoint resume")
     parser.add_argument("--llm-provider", type=str, help="LLM provider")
     parser.add_argument("--llm-model", type=str, help="Specific LLM model name")
     parser.add_argument("--llm-base-url", type=str, help="Override OpenAI-compatible base URL")
@@ -1222,8 +1499,8 @@ if __name__ == "__main__":
         "--market-profile",
         type=str,
         choices=["cn_stock", "us_stock", "futures"],
-        default="cn_stock",
-        help="Market profile for this run",
+        default=None,
+        help="Market profile for this run (auto-detects futures for bundled local futures data)",
     )
     parser.add_argument(
         "--market-profiles",
@@ -1249,6 +1526,40 @@ if __name__ == "__main__":
     )
     parser.add_argument("--rebuild-rag", action="store_true", help="Force rebuild RAG")
     parser.add_argument(
+        "--swarm-global-timeout-seconds",
+        type=float,
+        default=None,
+        help="Global timeout (seconds) for the entire parallel swarm (default: 600). "
+        "Set higher for slow LLMs or many iterations. "
+        "Also settable via AIMINER_SWARM_GLOBAL_TIMEOUT_SECONDS env var.",
+    )
+    parser.add_argument(
+        "--swarm-executor",
+        type=str,
+        choices=["process", "thread"],
+        default=None,
+        help=(
+            "Parallel executor backend for --parallel (default: process). "
+            "Use thread when native libraries are unsafe across processes. "
+            "Also settable via AIMINER_SWARM_EXECUTOR."
+        ),
+    )
+    parser.add_argument(
+        "--crossover-iterations",
+        type=int,
+        default=None,
+        help="Iterations for the final genetic crossover agent (default: 1). "
+        "Also settable via AIMINER_CROSSOVER_ITERATIONS env var.",
+    )
+    parser.add_argument(
+        "--disable-early-stop",
+        action="store_true",
+        help=(
+            "Continue until --iterations even when high IC or patience early-stop "
+            "criteria are met. Also settable via AIMINER_DISABLE_EARLY_STOP=1."
+        ),
+    )
+    parser.add_argument(
         "--reset",
         action="append",
         choices=("pool", "memory", "rag", "runs", "all"),
@@ -1272,6 +1583,7 @@ if __name__ == "__main__":
 
     manager = PortfolioManager(
         roles=args.roles,
+        run_id=args.run_id,
         max_iterations=args.iterations,
         evaluation_mode=args.mode,
         data_backend=args.data_backend,
@@ -1291,5 +1603,9 @@ if __name__ == "__main__":
         use_gpu=args.use_gpu,
         rebuild_rag=args.rebuild_rag,
         wiki_bootstrap=args.wiki_bootstrap,
+        disable_early_stop=args.disable_early_stop,
+        swarm_global_timeout_seconds=args.swarm_global_timeout_seconds,
+        swarm_executor=args.swarm_executor,
+        crossover_iterations=args.crossover_iterations,
     )
     manager.run_swarm(parallel=args.parallel)

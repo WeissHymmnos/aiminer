@@ -1,5 +1,6 @@
-from typing import Dict
-from pydantic import BaseModel, Field
+import math
+from typing import Any, Dict
+from pydantic import BaseModel, Field, field_validator
 
 
 class HypothesisOutput(BaseModel):
@@ -52,19 +53,70 @@ class ReflexiveReviewOutput(BaseModel):
     )
 
 
+def _is_numeric_dict_value(value) -> bool:
+    if isinstance(value, bool):
+        return True
+    if isinstance(value, (int, float)):
+        return math.isfinite(float(value))
+    if isinstance(value, str):
+        try:
+            return math.isfinite(float(value))
+        except ValueError:
+            return False
+    return False
+
+
 class StrategyCandidateOutput(BaseModel):
     """Structured output for a single strategy proposal."""
 
     template_name: str = Field(description="Closest built-in template name or generated strategy family label.")
     strategy_mode: str = Field(description="cross_sectional or time_series")
     direction: str = Field(description="long_only, long_short, or long_flat")
-    selection_rule: str = Field(description="top_n, bottom_n, top_bottom_n, or threshold")
+    selection_rule: str | Dict[str, Any] = Field(description="top_n, bottom_n, top_bottom_n, or threshold")
     rebalance_freq: str = Field(description="daily, weekly, or monthly")
     thresholds: Dict[str, float] = Field(default_factory=dict)
-    counts: Dict[str, int] = Field(default_factory=dict)
+    counts: Dict[str, int | float] = Field(default_factory=dict)
     holding_constraints: Dict[str, float | int] = Field(default_factory=dict)
     cost_model: Dict[str, float] = Field(default_factory=dict)
     rationale: str = Field(description="Why this execution style matches the factor.")
+
+    @field_validator(
+        "template_name",
+        "strategy_mode",
+        "direction",
+        "selection_rule",
+        "rebalance_freq",
+        "rationale",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_scalar_text(cls, value):
+        if value is None:
+            return value
+        if isinstance(value, (str, int, float, bool)):
+            return str(value)
+        return value
+
+    @field_validator(
+        "thresholds",
+        "counts",
+        "holding_constraints",
+        "cost_model",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_optional_dict(cls, value):
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            return {
+                key: item
+                for key, item in value.items()
+                if item is not None
+                and not isinstance(item, (dict, list, tuple, set))
+                and _is_numeric_dict_value(item)
+            }
+        return value
 
 
 class StrategyProposalBatchOutput(BaseModel):

@@ -40,6 +40,80 @@ class EvalAgent:
             text = re.sub(r"\s*```$", "", text)
         return text.strip()
 
+    @classmethod
+    def _fallback_review_result(
+        cls,
+        *,
+        metrics: Dict[str, Any],
+    ) -> ReflexiveReviewOutput:
+        ic = cls._float_metric(metrics.get("information_coefficient", 0.0))
+        rank_ic = cls._float_metric(metrics.get("rank_ic", 0.0))
+        sharpe = cls._float_metric(metrics.get("sharpe", 0.0))
+        max_drawdown = cls._float_metric(metrics.get("max_drawdown", 0.0))
+        is_effective = ic > 0.02 and rank_ic > 0.02
+        threshold_text = (
+            "passes"
+            if is_effective
+            else "does not pass"
+        )
+        return ReflexiveReviewOutput(
+            review_summary=(
+                "LLM review unavailable; using deterministic metric review. "
+                f"IC={ic:.4f}, Rank IC={rank_ic:.4f}, Sharpe={sharpe:.4f}, "
+                f"Max Drawdown={max_drawdown:.4f}. The factor {threshold_text} "
+                "the positive IC and Rank IC effectiveness threshold."
+            ),
+            is_effective=is_effective,
+            suggested_improvements=(
+                "Retry review generation later; for the next iteration, refine the "
+                "formula to improve both positive IC and Rank IC while monitoring "
+                "drawdown and turnover sensitivity."
+            ),
+        )
+
+    def _review_backtest(
+        self,
+        *,
+        hypothesis_desc: str,
+        code: str,
+        metrics: Dict[str, Any],
+    ) -> ReflexiveReviewOutput:
+        review_prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "You are a quantitative research director reviewing factor backtest results. "
+                    "Analyze the evaluation metrics (IC, Rank IC, RRE, PFS, Diversity, LLM Score) against the original hypothesis. "
+                    "Determine if the factor is effective (e.g., IC > 0.02, good Rank IC) and suggest actionable improvements. "
+                    "You MUST respond with valid JSON only, no markdown, no explanations.",
+                ),
+                (
+                    "user",
+                    "Hypothesis: {hypothesis}\nCode: {code}\nMetrics: {metrics}\n\n"
+                    "Return ONLY valid JSON matching this exact schema:\n"
+                    '{{"review_summary": "string", "is_effective": boolean, "suggested_improvements": "string"}}\n\n'
+                    "Do not include markdown code blocks or any other text.",
+                ),
+            ]
+        )
+        try:
+            review_chain = review_prompt | self.llm
+            raw_review_response = review_chain.invoke(
+                {"hypothesis": hypothesis_desc, "code": code, "metrics": str(metrics)}
+            )
+            cleaned_review_json = self._strip_markdown_json(
+                getattr(raw_review_response, "content", "") or ""
+            )
+            if not cleaned_review_json:
+                raise ValueError("empty LLM review response")
+            return ReflexiveReviewOutput.model_validate_json(cleaned_review_json)
+        except Exception as exc:
+            logger.warning(
+                "[EvalAgent] Review LLM failed; using deterministic fallback review: "
+                f"{exc}"
+            )
+            return self._fallback_review_result(metrics=metrics)
+
     @staticmethod
     def _simulated_metrics(code: str) -> Dict[str, Any]:
         seed = int(hashlib.md5(code.encode()).hexdigest()[:8], 16)
@@ -56,6 +130,20 @@ class EvalAgent:
             "daily_returns": {},
             "plot_paths": {},
             "_simulated": True,
+        }
+
+    @staticmethod
+    def _failed_metrics(error: Exception | str) -> Dict[str, Any]:
+        return {
+            "information_coefficient": 0.0,
+            "rank_ic": 0.0,
+            "rre": None,
+            "sharpe": 0.0,
+            "max_drawdown": 0.0,
+            "daily_returns": {},
+            "plot_paths": {},
+            "_evaluation_failed": True,
+            "evaluation_error": str(error),
         }
 
     @staticmethod
@@ -187,12 +275,12 @@ class EvalAgent:
             evaluator.run()
         except (FileNotFoundError, ValueError, ImportError) as e:
             logger.error(f"RiceQuant evaluation failed: {e}")
-            logger.info("Falling back to simulated metrics.")
-            return self._add_ic_direction(self._simulated_metrics(code))
+            logger.info("Returning failed real-evaluation metrics; no simulated fallback.")
+            return self._add_ic_direction(self._failed_metrics(e))
         except Exception as e:
             logger.warning(f"RiceQuant backtest unexpected failure: {e}")
-            logger.info("Falling back to simulated metrics.")
-            return self._add_ic_direction(self._simulated_metrics(code))
+            logger.info("Returning failed real-evaluation metrics; no simulated fallback.")
+            return self._add_ic_direction(self._failed_metrics(e))
 
         metrics = self._collect_evaluator_metrics(evaluator)
         robustness_fn = getattr(evaluator, "run_robustness_test", None)
@@ -235,62 +323,63 @@ class EvalAgent:
 
         try:
             # 1. Backtesting Module
-            metrics = self._execute_alphaeval_backtest(
-                code,
-                mode=mode,
-                engine=engine,
-                test_start_date=test_start,
-                test_end_date=test_end,
-            )
+            if not state.get("is_valid_syntax", True):
+                syntax_error = state.get("syntax_error") or (
+                    "Factor expression failed syntax validation before evaluation."
+                )
+                logger.warning(
+                    "[EvalAgent] Skipping backend evaluation because factor syntax "
+                    f"is invalid: {syntax_error}"
+                )
+                metrics = self._failed_metrics(syntax_error)
+            else:
+                metrics = self._execute_alphaeval_backtest(
+                    code,
+                    mode=mode,
+                    engine=engine,
+                    test_start_date=test_start,
+                    test_end_date=test_end,
+                )
             is_simulated = metrics.get("_simulated", False)
+            evaluation_failed = metrics.get("_evaluation_failed", False)
             daily_returns = metrics.get("daily_returns", {})
             plot_paths = metrics.get("plot_paths", {})
             metrics = {
                 k: v
                 for k, v in metrics.items()
-                if k not in ("_simulated", "daily_returns", "plot_paths")
+                if k
+                not in (
+                    "_simulated",
+                    "_evaluation_failed",
+                    "daily_returns",
+                    "plot_paths",
+                )
             }
             metrics = self._add_ic_direction(metrics)
             if is_simulated:
                 logger.warning(
                     "[EvalAgent] Using SIMULATED metrics — results are not real backtest data."
                 )
+            if evaluation_failed:
+                logger.warning(
+                    "[EvalAgent] Real evaluation failed; using zero metrics for this iteration."
+                )
             logger.info(
-                f"[EvalAgent] Backtest Metrics (simulated={is_simulated}): {metrics}"
+                "[EvalAgent] Backtest Metrics "
+                f"(simulated={is_simulated}, evaluation_failed={evaluation_failed}): {metrics}"
             )
 
             # 2. Reflexive Review Module
-            review_prompt = ChatPromptTemplate.from_messages(
-                [
-                    (
-                        "system",
-                        "You are a quantitative research director reviewing factor backtest results. "
-                        "Analyze the evaluation metrics (IC, Rank IC, RRE, PFS, Diversity, LLM Score) against the original hypothesis. "
-                        "Determine if the factor is effective (e.g., IC > 0.02, good Rank IC) and suggest actionable improvements. "
-                        "You MUST respond with valid JSON only, no markdown, no explanations.",
-                    ),
-                    (
-                        "user",
-                        "Hypothesis: {hypothesis}\nCode: {code}\nMetrics: {metrics}\n\n"
-                        "Return ONLY valid JSON matching this exact schema:\n"
-                        '{{"review_summary": "string", "is_effective": boolean, "suggested_improvements": "string"}}\n\n'
-                        "Do not include markdown code blocks or any other text.",
-                    ),
-                ]
-            )
-            review_chain = review_prompt | self.llm
-            raw_review_response = review_chain.invoke(
-                {"hypothesis": hypothesis_desc, "code": code, "metrics": str(metrics)}
-            )
-            cleaned_review_json = self._strip_markdown_json(raw_review_response.content)
-            review_result = ReflexiveReviewOutput.model_validate_json(
-                cleaned_review_json
+            review_result = self._review_backtest(
+                hypothesis_desc=hypothesis_desc,
+                code=code,
+                metrics=metrics,
             )
 
             logger.info(f"[EvalAgent] Review Summary: {review_result.review_summary}")
 
             # 3. Save experience to RAG (Vector fallback) - ONLY if it's real data
-            if not is_simulated:
+            if not is_simulated and not evaluation_failed:
                 self.knowledge.rag.add_experience(
                     hypothesis=hypothesis_desc,
                     code=code,
@@ -300,7 +389,7 @@ class EvalAgent:
                 )
             else:
                 logger.warning(
-                    "[EvalAgent] Skipping RAG update: Metrics are simulated."
+                    "[EvalAgent] Skipping RAG update: Metrics are simulated or evaluation failed."
                 )
 
             # 4. Update Early Stopping Metrics
@@ -322,6 +411,15 @@ class EvalAgent:
                 new_best_ic = best_ic
                 new_best_ic_abs = best_ic_abs
                 new_patience_counter = patience_counter
+                new_best_code = state.get("best_code_expression")
+                new_best_snapshot = best_snapshot
+            elif evaluation_failed:
+                logger.warning(
+                    "[EvalAgent] Evaluation failure counted as an unproductive iteration."
+                )
+                new_best_ic = best_ic
+                new_best_ic_abs = best_ic_abs
+                new_patience_counter = patience_counter + 1
                 new_best_code = state.get("best_code_expression")
                 new_best_snapshot = best_snapshot
             elif current_ic_abs > best_ic_abs:
@@ -357,6 +455,8 @@ class EvalAgent:
                 "is_effective": review_result.is_effective,
                 "factor_is_effective": review_result.is_effective,
                 "is_simulated": is_simulated,
+                "evaluation_failed": evaluation_failed,
+                "evaluation_error": metrics.get("evaluation_error"),
                 "suggested_improvements": review_result.suggested_improvements,
                 "best_ic": new_best_ic,
                 "best_ic_abs": new_best_ic_abs,

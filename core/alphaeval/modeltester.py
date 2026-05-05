@@ -1,7 +1,6 @@
 import os
 import numpy as np
 import pandas as pd
-from openai import OpenAI
 import re
 import json
 from typing import List, Optional
@@ -71,6 +70,9 @@ class AlphaEval:
             )
         else:
             auto_init(provider_uri=expanded_path, region=region)
+            from core.qlib_custom_ops import register_custom_ops
+
+            register_custom_ops()
 
         if instruments is not None:
             self.instruments = instruments
@@ -269,12 +271,12 @@ class AlphaEval:
 
     def LLM_scores(
         self,
-        model: str = "claude-opus-4-6",
+        model: str | None = None,
         temperature: float = 0.2,
     ) -> None:
-        client = OpenAI(
-            api_key=os.getenv("ClaudeCode_KEY"), base_url="https://api.gptsapi.net/v1"
-        )
+        from core.llm import get_llm
+
+        llm = get_llm(temperature=temperature, model_name=model)
 
         prompt = (
             "Below is a set of quantitative factor expressions designed using qlib syntax. "
@@ -289,14 +291,8 @@ class AlphaEval:
             "  - explanation: a brief logical explanation\n"
         )
 
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=temperature,
-            max_tokens=1000,
-        )
-
-        text = resp.choices[0].message.content.strip()
+        resp = llm.invoke(prompt)
+        text = resp.content.strip()
 
         if text.startswith("```"):
             text = re.sub(r"^```(?:json)?\s*", "", text)

@@ -92,6 +92,15 @@ class LocalDataEval(RiceQuantEval):
             .sort_index()
         )
 
+    def run_robustness_test(self):
+        """Local data runs should not fall back to RiceQuant network robustness."""
+        if not hasattr(self, "ic"):
+            self.run()
+        self.rre = None
+        logger.info(
+            "Skipping RiceQuant robustness test for LocalDataEval; preserving local main metrics."
+        )
+
     def get_market_regime(
         self,
         start_date: Optional[str] = None,

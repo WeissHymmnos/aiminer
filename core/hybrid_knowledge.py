@@ -91,6 +91,18 @@ class HybridKnowledge:
         evaluation mode and the sub-agent's role so lint/index/backlink
         audits can group related cards later.
         """
+        metrics = state.get("backtest_metrics") or {}
+        if (
+            state.get("evaluation_failed")
+            or state.get("_evaluation_failed")
+            or metrics.get("evaluation_failed")
+            or metrics.get("_evaluation_failed")
+        ):
+            logger.warning(
+                "[HybridKnowledge] Skipping Wiki update: evaluation failed."
+            )
+            return {}
+
         is_simulated = state.get("is_simulated", False)
         if is_simulated:
             logger.warning(
@@ -110,7 +122,6 @@ class HybridKnowledge:
 
             title = state.get("hypothesis_name", "Unnamed Factor")
 
-            metrics = state.get("backtest_metrics") or {}
             ic = float(metrics.get("information_coefficient", 0.0) or 0.0)
             rank_ic = float(metrics.get("rank_ic", 0.0) or 0.0)
             is_effective = bool(state.get("is_effective", False))

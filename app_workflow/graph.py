@@ -12,11 +12,22 @@ from agents.strategy_critic import (
     StrategyCritic,
     _improvement_satisfied,
 )
+from core.agent_checkpoint import persist_agent_checkpoint
 from core.hybrid_knowledge import HybridKnowledge
 from core.settings import AiminerSettings, build_settings
 
 
 # Routing Functions
+def _state_has_evaluation_failure(state: AlphaMinerState) -> bool:
+    metrics = state.get("backtest_metrics", {}) or {}
+    return bool(
+        state.get("evaluation_failed")
+        or state.get("_evaluation_failed")
+        or metrics.get("evaluation_failed")
+        or metrics.get("_evaluation_failed")
+    )
+
+
 def route_after_idea(state: AlphaMinerState) -> str:
     if state.get("error"):
         return "end"
@@ -108,6 +119,7 @@ def route_after_strategy_critic(state: AlphaMinerState) -> str:
 def route_after_wiki(state: AlphaMinerState) -> str:
     iteration = state.get("iteration", 1)
     max_iterations = state.get("max_iterations", 1)
+    disable_early_stop = bool(state.get("disable_early_stop", False))
 
     metrics = state.get("backtest_metrics", {})
     current_ic = metrics.get("information_coefficient", 0.0)
@@ -115,9 +127,14 @@ def route_after_wiki(state: AlphaMinerState) -> str:
 
     # 1. Early Stopping: High IC achieved — only on real (non-simulated) data
     is_simulated = state.get("is_simulated", False)
-    if current_ic >= 0.05 and not is_simulated:
+    if current_ic >= 0.05 and not is_simulated and not disable_early_stop:
         logger.success(f"[Early Stop] Exceptional IC reached: {current_ic:.4f}")
         return "end"
+    if current_ic >= 0.05 and not is_simulated and disable_early_stop:
+        logger.info(
+            f"[Router] IC={current_ic:.4f} reached early-stop threshold, "
+            "but disable_early_stop=True; continuing."
+        )
     if current_ic >= 0.05 and is_simulated:
         logger.warning(
             f"[Router] IC={current_ic:.4f} looks exceptional but metrics are SIMULATED — "
@@ -126,9 +143,14 @@ def route_after_wiki(state: AlphaMinerState) -> str:
 
     # 2. Early Stopping: Patience exhausted
     patience = state.get("patience_counter", 0)
-    if patience >= 4:
+    if patience >= 4 and not disable_early_stop:
         logger.info("[Early Stop] No IC improvement for 4 consecutive iterations.")
         return "end"
+    if patience >= 4 and disable_early_stop:
+        logger.info(
+            f"[Router] Patience counter={patience} reached early-stop threshold, "
+            "but disable_early_stop=True; continuing."
+        )
 
     if iteration < max_iterations:
         return "increment"
@@ -152,6 +174,7 @@ def increment_iteration(state: AlphaMinerState):
         "hypothesis_description": None,
         "rationale": None,
         "code_expression": None,
+        "syntax_error": None,
         "math_formula": None,
         "variables_defined": None,
         "backtest_metrics": None,
@@ -162,6 +185,8 @@ def increment_iteration(state: AlphaMinerState):
         "is_effective": None,
         "factor_is_effective": None,
         "is_simulated": False,
+        "evaluation_failed": False,
+        "evaluation_error": None,
         "ic_direction": None,
         "ic_direction_label": None,
         "suggested_improvements": None,
@@ -434,8 +459,15 @@ def build_workflow(
 
     # Wiki update node
     def wiki_update_node(state: AlphaMinerState):
-        logger.info("[Workflow] Updating LLM Wiki with results...")
-        knowledge.update_wiki_after_eval(state)
+        if _state_has_evaluation_failure(state):
+            logger.warning("[Workflow] Skipping Wiki update: evaluation failed.")
+        else:
+            logger.info("[Workflow] Updating LLM Wiki with results...")
+            knowledge.update_wiki_after_eval(state)
+        try:
+            persist_agent_checkpoint(settings.db_path, state, settings=settings)
+        except Exception as exc:
+            logger.warning(f"[Workflow] Failed to persist agent checkpoint: {exc}")
         # Also refresh wiki context for next iteration retrieval
         query = f"Alpha factor ideas related to {state.get('role_prompt') or 'quantitative trading factors'}"
         return {"wiki_context": knowledge.wiki.retrieve(query)}

@@ -6,7 +6,10 @@ from typing import Any, Dict, List
 
 from loguru import logger
 
-from agents.strategy_agent import candidate_to_strategy_config
+from agents.strategy_agent import (
+    candidate_to_strategy_config,
+    normalize_strategy_candidate_payload,
+)
 from core.llm import get_llm
 from schemas.messages import RefinementProposalOutput
 from app_workflow.state import AlphaMinerState
@@ -140,7 +143,9 @@ class StrategyCritic:
         seen_signatures: set[tuple] = {current_signature}
         normalized: List[Dict[str, Any]] = []
         for item in proposal.proposals[:MAX_PROPOSALS_PER_ROUND]:
-            payload = item.model_dump(mode="json")
+            payload = normalize_strategy_candidate_payload(
+                item.model_dump(mode="json"), state
+            )
             try:
                 config = candidate_to_strategy_config(payload, state)
             except Exception as cfg_exc:
@@ -257,7 +262,14 @@ class StrategyCritic:
             f"Refinement history (most recent first): "
             f"{json.dumps(history_snippet, ensure_ascii=False, default=str)}\n\n"
             "Return JSON with keys: failure_modes (List[str]), proposals (List of strategy candidates "
-            "matching the StrategyCandidateOutput schema), should_continue (bool), rationale (str)."
+            "each with: template_name (str), strategy_mode (cross_sectional|time_series), "
+            "direction (long_only|long_short|long_flat), selection_rule (top_n|bottom_n|top_bottom_n|threshold), "
+            "rebalance_freq (daily|weekly|monthly), "
+            "thresholds (dict e.g. {\"long_threshold\":0.8,\"short_threshold\":0.2}), "
+            "counts (dict e.g. {\"top_n\":100,\"bottom_n\":50}), "
+            "holding_constraints (dict e.g. {\"max_positions\":200}), "
+            "cost_model (dict e.g. {\"commission_bps\":5.0}), rationale (str)), "
+            "should_continue (bool), rationale (str)."
         )
 
         # Invoke the LLM directly — building a ChatPromptTemplate would treat

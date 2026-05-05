@@ -228,11 +228,11 @@ class TestStrategyCritic(unittest.TestCase):
             "rationale": "one invalid one valid",
             "proposals": [
                 {
-                    # Invalid: time_series + top_n is forbidden by StrategyConfig
+                    # Invalid: unknown enum values should still be rejected.
                     "template_name": "broken_ts",
-                    "strategy_mode": "time_series",
-                    "direction": "long_flat",
-                    "selection_rule": "top_n",
+                    "strategy_mode": "unsupported_mode",
+                    "direction": "sideways",
+                    "selection_rule": "unsupported_rule",
                     "rebalance_freq": "daily",
                     "thresholds": {},
                     "counts": {"top_n": 10},

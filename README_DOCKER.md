@@ -9,18 +9,18 @@ This project supports containerized execution via Docker, ensuring a consistent 
 ## Quick Start (with Docker Compose)
 
 1. **Setup Environment**:
-   Ensure your `.env` file is present in the root directory with the necessary API keys (OpenAI, RiceQuant, etc.).
+   Export the required API keys in your shell or copy `.env.example` into your own environment manager. Compose no longer bind-mounts a root `.env` file, so a stray `.env` directory will not break container startup.
 
 2. **Build and Start**:
    ```bash
    docker-compose up --build -d
    ```
-   This will build the image (compiling the Rust Polars plugins) and start both the researcher app and the API.
+   This will build the image (compiling the Rust Polars plugins) and start the API.
 
 3. **Run a Task**:
    To run a manual mining iteration:
    ```bash
-   docker exec -it aiminer_app python main.py --iterations 3
+   docker compose --profile research run --rm worker
    ```
 
 4. **Access the API**:
@@ -55,7 +55,8 @@ Notes:
      -v $(pwd)/data:/app/data \
      -v $(pwd)/results:/app/results \
      -v $(pwd)/logs:/app/logs \
-     --env-file .env \
+     -e KIMI_API_KEY \
+     -e RQ_TOKEN \
      aiminer:latest python main.py --iterations 1
    ```
 

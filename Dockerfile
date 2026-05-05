@@ -34,9 +34,9 @@ WORKDIR /build
 # Install Python build tools
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel maturin
 
-# Copy requirements and install dependencies to a temporary location
-COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+# Copy locked requirements and install dependencies to a temporary location
+COPY requirements.txt requirements.lock.txt ./
+RUN pip install --no-cache-dir --prefix=/install -r requirements.lock.txt
 
 # Copy and build the Polars Rust plugin
 COPY polars_plugins/ ./polars_plugins/

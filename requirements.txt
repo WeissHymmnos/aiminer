@@ -23,3 +23,7 @@ uvicorn
 matplotlib
 cvxpy>=1.4.0
 scipy
+psutil
+textual
+textual-plotext
+openai

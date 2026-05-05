@@ -11,11 +11,35 @@ services:
       - ./data:/app/data
       - ./results:/app/results
       - ./logs:/app/logs
-      - ./.env:/app/.env:ro
     command: uvicorn api:app --host 0.0.0.0 --port 8000
     environment:
       - PYTHONUNBUFFERED=1
+      - AIMINER_DATA_DIR=/app/data
+      - AIMINER_RESULTS_DIR=/app/results
+      - AIMINER_LOGS_DIR=/app/logs
+      - AIMINER_MAX_CONCURRENT_SWARMS=${AIMINER_MAX_CONCURRENT_SWARMS:-1}
+      - AIMINER_SWARM_RUN_TIMEOUT_SECONDS=${AIMINER_SWARM_RUN_TIMEOUT_SECONDS:-3600}
+      - AIMINER_MANUAL_BACKTEST_TIMEOUT_SECONDS=${AIMINER_MANUAL_BACKTEST_TIMEOUT_SECONDS:-600}
+      - AIMINER_STRATEGY_BACKTEST_TIMEOUT_SECONDS=${AIMINER_STRATEGY_BACKTEST_TIMEOUT_SECONDS:-900}
+      - USE_LOCAL_EMBEDDING=${USE_LOCAL_EMBEDDING:-false}
+      - KIMI_API_KEY=${KIMI_API_KEY:-}
+      - QWEN_API_KEY=${QWEN_API_KEY:-}
+      - ZHIPU_API_KEY=${ZHIPU_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - MIMO_API_KEY=${MIMO_API_KEY:-}
+      - MIMO_BASE_URL=${MIMO_BASE_URL:-}
+      - OpenAI_KEY=${OpenAI_KEY:-}
+      - ClaudeCode_KEY=${ClaudeCode_KEY:-}
+      - RQ_USER=${RQ_USER:-}
+      - RQ_PASS=${RQ_PASS:-}
+      - RQ_TOKEN=${RQ_TOKEN:-}
       - AIMINER_CORS_ORIGINS=http://localhost:8000,http://127.0.0.1:8000,http://localhost:5173,http://127.0.0.1:5173
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).read()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
   worker:
@@ -30,11 +54,24 @@ services:
       - ./data:/app/data
       - ./results:/app/results
       - ./logs:/app/logs
-      - ./.env:/app/.env:ro
     command: python manager.py --iterations ${AIMINER_ITERATIONS:-5}
     environment:
       - PYTHONUNBUFFERED=1
-      - USE_LOCAL_EMBEDDING=false
+      - AIMINER_DATA_DIR=/app/data
+      - AIMINER_RESULTS_DIR=/app/results
+      - AIMINER_LOGS_DIR=/app/logs
+      - USE_LOCAL_EMBEDDING=${USE_LOCAL_EMBEDDING:-false}
+      - KIMI_API_KEY=${KIMI_API_KEY:-}
+      - QWEN_API_KEY=${QWEN_API_KEY:-}
+      - ZHIPU_API_KEY=${ZHIPU_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - MIMO_API_KEY=${MIMO_API_KEY:-}
+      - MIMO_BASE_URL=${MIMO_BASE_URL:-}
+      - OpenAI_KEY=${OpenAI_KEY:-}
+      - ClaudeCode_KEY=${ClaudeCode_KEY:-}
+      - RQ_USER=${RQ_USER:-}
+      - RQ_PASS=${RQ_PASS:-}
+      - RQ_TOKEN=${RQ_TOKEN:-}
     restart: "no"
 
   tui:
@@ -49,11 +86,24 @@ services:
       - ./data:/app/data
       - ./results:/app/results
       - ./logs:/app/logs
-      - ./.env:/app/.env:ro
     command: python tui.py
     environment:
       - PYTHONUNBUFFERED=1
-      - USE_LOCAL_EMBEDDING=false
+      - AIMINER_DATA_DIR=/app/data
+      - AIMINER_RESULTS_DIR=/app/results
+      - AIMINER_LOGS_DIR=/app/logs
+      - USE_LOCAL_EMBEDDING=${USE_LOCAL_EMBEDDING:-false}
+      - KIMI_API_KEY=${KIMI_API_KEY:-}
+      - QWEN_API_KEY=${QWEN_API_KEY:-}
+      - ZHIPU_API_KEY=${ZHIPU_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - MIMO_API_KEY=${MIMO_API_KEY:-}
+      - MIMO_BASE_URL=${MIMO_BASE_URL:-}
+      - OpenAI_KEY=${OpenAI_KEY:-}
+      - ClaudeCode_KEY=${ClaudeCode_KEY:-}
+      - RQ_USER=${RQ_USER:-}
+      - RQ_PASS=${RQ_PASS:-}
+      - RQ_TOKEN=${RQ_TOKEN:-}
     stdin_open: true
     tty: true
     restart: "no"

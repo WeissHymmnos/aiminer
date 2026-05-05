@@ -2,9 +2,15 @@ import os
 import json
 import glob
 import uuid
+import shutil
+import subprocess
+import sys
+from datetime import datetime
 from typing import List, Dict
 import chromadb
+import sqlite3
 from loguru import logger
+from core.chroma_lock import chroma_process_lock
 from core.llm import get_llm_config
 from dotenv import load_dotenv
 
@@ -15,6 +21,72 @@ load_dotenv()
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 os.environ["OPENAI_TIMEOUT"] = "60"
 os.environ["HTTP_TIMEOUT"] = "60"
+
+
+def resolve_embedding_model_tag(embedding_provider: str = None, *, use_gpu: bool = False) -> str:
+    """Resolve the Chroma subdirectory tag without initializing embeddings."""
+    use_local = (embedding_provider == "local") or (
+        os.getenv("USE_LOCAL_EMBEDDING", "false").lower() == "true"
+    )
+    if use_local:
+        return "Qwen_Qwen3-Embedding-4B"
+
+    embedding_defaults = {
+        "kimi": "embedding-2",
+        "qwen": "text-embedding-v3",
+        "claude": "text-embedding-3-small",
+        "glm": "embedding-3",
+        "openai": "text-embedding-3-large",
+        "ollama": "nomic-embed-text",
+        "vllm": "BAAI_bge-large-zh-v1.5",
+    }
+    try:
+        cfg = get_llm_config(provider=embedding_provider)
+        provider = cfg["provider"]
+        model_name = embedding_defaults[provider]
+        return f"{provider}_{model_name.replace('/', '_')}"
+    except (ValueError, KeyError):
+        return "bge-large"
+
+
+def chroma_sqlite_summary(db_root: str, model_tag: str) -> Dict[str, object]:
+    db_dir = os.path.join(db_root, model_tag)
+    sqlite_path = os.path.join(db_dir, "chroma.sqlite3")
+    summary: Dict[str, object] = {
+        "model_tag": model_tag,
+        "db_dir": db_dir,
+        "sqlite_path": sqlite_path,
+        "exists": os.path.exists(sqlite_path),
+        "collections": 0,
+        "embeddings": 0,
+        "ready": False,
+    }
+    if not summary["exists"]:
+        return summary
+    try:
+        conn = sqlite3.connect(f"file:{sqlite_path}?mode=ro", uri=True)
+        try:
+            tables = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            if "collections" in tables:
+                summary["collections"] = int(
+                    conn.execute("SELECT COUNT(*) FROM collections").fetchone()[0]
+                )
+            if "embeddings" in tables:
+                summary["embeddings"] = int(
+                    conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
+                )
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        summary["error"] = str(exc)
+        return summary
+    summary["ready"] = int(summary["embeddings"]) > 0
+    return summary
 
 
 class RAGModule:
@@ -34,13 +106,29 @@ class RAGModule:
         self.docs_dir = docs_dir
         self.rebuild = rebuild
         os.makedirs(self.docs_dir, exist_ok=True)
+        self.knowledge_cache = []
+        self.experience_cache = []
+        self.disable_chroma = os.getenv("AIMINER_DISABLE_CHROMA", "").lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if self.disable_chroma:
+            logger.warning(
+                "ChromaDB is disabled via AIMINER_DISABLE_CHROMA; using lexical RAG fallback."
+            )
+            self.embedding_fn = None
+            self.db_dir = os.path.join(db_dir, "disabled")
+            os.makedirs(self.db_dir, exist_ok=True)
+            self._init_knowledge_cache()
+            return
 
         # Check if local embedding is forced
         use_local = (embedding_provider == "local") or (
             os.getenv("USE_LOCAL_EMBEDDING", "false").lower() == "true"
         )
 
-        model_tag = "api"
         if use_local:
             model_name = "Qwen/Qwen3-Embedding-4B"
             model_tag = model_name.replace("/", "_")  # Safe for filesystem
@@ -123,21 +211,134 @@ class RAGModule:
         self.db_dir = os.path.join(db_dir, model_tag)
         os.makedirs(self.db_dir, exist_ok=True)
 
-        # Initialize ChromaDB
-        self.client = chromadb.PersistentClient(path=self.db_dir)
+        with chroma_process_lock("rag init"):
+            if not self.rebuild:
+                self._repair_unhealthy_chroma_collections(
+                    ("knowledge_base", "experiences")
+                )
 
-        # Get or create collections with the embedding function
-        self.experiences_col = self.client.get_or_create_collection(
-            "experiences", embedding_function=self.embedding_fn
+            # Initialize ChromaDB
+            self.client = chromadb.PersistentClient(path=self.db_dir)
+
+            # Get or create collections with the embedding function
+            self.experiences_col = self.client.get_or_create_collection(
+                "experiences", embedding_function=self.embedding_fn
+            )
+            self.knowledge_col = self.client.get_or_create_collection(
+                "knowledge_base", embedding_function=self.embedding_fn
+            )
+
+            self._init_knowledge_base()
+
+    def _probe_collection_health(self, collection_name: str, timeout: int = 20) -> bool:
+        """Probe a persisted collection in a child process.
+
+        ChromaDB 1.5.x can segfault in native Rust bindings when a persisted
+        HNSW collection is corrupt. A Python try/except cannot catch that, so
+        the probe runs out-of-process and treats any non-zero exit as unsafe.
+        """
+        probe_code = """
+import sys
+import chromadb
+
+client = chromadb.PersistentClient(path=sys.argv[1])
+names = {collection.name for collection in client.list_collections()}
+if sys.argv[2] not in names:
+    raise SystemExit(0)
+collection = client.get_collection(sys.argv[2])
+collection.get(limit=1, include=["documents"])
+collection.count()
+"""
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", probe_code, self.db_dir, collection_name],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                f"ChromaDB collection health probe timed out: {collection_name}"
+            )
+            return False
+
+        if result.returncode == 0:
+            return True
+
+        stderr_tail = result.stderr.strip().splitlines()[-3:]
+        logger.warning(
+            "ChromaDB collection health probe failed for "
+            f"{collection_name} with exit code {result.returncode}: "
+            + " | ".join(stderr_tail)
         )
-        self.knowledge_col = self.client.get_or_create_collection(
-            "knowledge_base", embedding_function=self.embedding_fn
+        return False
+
+    def _delete_collection_out_of_process(
+        self, collection_name: str, timeout: int = 20
+    ) -> bool:
+        delete_code = """
+import sys
+import chromadb
+
+client = chromadb.PersistentClient(path=sys.argv[1])
+names = {collection.name for collection in client.list_collections()}
+if sys.argv[2] in names:
+    client.delete_collection(sys.argv[2])
+"""
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", delete_code, self.db_dir, collection_name],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning(f"Timed out deleting ChromaDB collection: {collection_name}")
+            return False
+
+        if result.returncode == 0:
+            return True
+
+        stderr_tail = result.stderr.strip().splitlines()[-3:]
+        logger.warning(
+            "Failed to delete unhealthy ChromaDB collection "
+            f"{collection_name} with exit code {result.returncode}: "
+            + " | ".join(stderr_tail)
         )
+        return False
 
-        # Local cache for keyword search fallback
-        self.knowledge_cache = []
+    def _quarantine_chroma_dir(self):
+        if not os.path.exists(self.db_dir):
+            os.makedirs(self.db_dir, exist_ok=True)
+            return
 
-        self._init_knowledge_base()
+        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+        quarantine_dir = f"{self.db_dir}.corrupt.{timestamp}"
+        logger.warning(
+            f"Quarantining unhealthy ChromaDB directory {self.db_dir} -> {quarantine_dir}"
+        )
+        shutil.move(self.db_dir, quarantine_dir)
+        os.makedirs(self.db_dir, exist_ok=True)
+
+    def _repair_unhealthy_chroma_collections(self, collection_names):
+        sqlite_path = os.path.join(self.db_dir, "chroma.sqlite3")
+        if not os.path.exists(sqlite_path):
+            return
+
+        for collection_name in collection_names:
+            if self._probe_collection_health(collection_name):
+                continue
+
+            logger.warning(
+                f"Recreating unhealthy ChromaDB collection: {collection_name}"
+            )
+            if self._delete_collection_out_of_process(collection_name):
+                continue
+
+            self._quarantine_chroma_dir()
+            return
 
     def _chunk_text(
         self, text: str, chunk_size: int = 1500, overlap: int = 200
@@ -165,6 +366,65 @@ class RAGModule:
 
         return chunks
 
+    def _iter_doc_files(self):
+        doc_files = []
+        for ext in ("*.md", "*.rst", "*.txt"):
+            doc_files.extend(
+                glob.glob(os.path.join(self.docs_dir, "**", ext), recursive=True)
+            )
+        return doc_files
+
+    def _init_knowledge_cache(self):
+        self.knowledge_cache = []
+        for file_path in self._iter_doc_files():
+            try:
+                rel_path = os.path.relpath(file_path, self.docs_dir)
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+                for chunk in self._chunk_text(content):
+                    if chunk.strip():
+                        self.knowledge_cache.append(
+                            {"document": chunk, "source": rel_path}
+                        )
+            except Exception as exc:
+                logger.error(f"Failed to load lexical RAG document {file_path}: {exc}")
+        logger.info(
+            f"Lexical RAG cache initialized with {len(self.knowledge_cache)} chunks."
+        )
+
+    @staticmethod
+    def _lexical_score(query: str, text: str) -> int:
+        terms = [
+            term
+            for term in query.lower().replace("_", " ").split()
+            if len(term) > 1
+        ]
+        text_lower = text.lower()
+        return sum(text_lower.count(term) for term in terms)
+
+    def _retrieve_from_cache(self, query: str, n_results: int = 2) -> str:
+        scored = []
+        for item in self.knowledge_cache:
+            score = self._lexical_score(query, item["document"])
+            if score > 0:
+                scored.append((score, item["document"]))
+        scored.sort(key=lambda item: item[0], reverse=True)
+
+        context_parts = ["=== KNOWLEDGE BASE ==="]
+        if scored:
+            for _, doc in scored[:n_results]:
+                context_parts.append(f"- {doc}")
+        else:
+            context_parts.append("No relevant knowledge found.")
+
+        context_parts.append("\n=== PAST EXPERIENCES ===")
+        if self.experience_cache:
+            for doc in self.experience_cache[-n_results:]:
+                context_parts.append(f"- {doc}")
+        else:
+            context_parts.append("No relevant past experiences found.")
+        return "\n".join(context_parts)
+
     def _init_knowledge_base(self):
         # Loads actual markdown/rst/txt docs from data/rag_docs into ChromaDB.
         if self.rebuild and self.knowledge_col.count() > 0:
@@ -182,11 +442,7 @@ class RAGModule:
 
         logger.info(f"Scanning {self.docs_dir} for knowledge base documents...")
 
-        doc_files = []
-        for ext in ("*.md", "*.rst", "*.txt"):
-            doc_files.extend(
-                glob.glob(os.path.join(self.docs_dir, "**", ext), recursive=True)
-            )
+        doc_files = self._iter_doc_files()
 
         if not doc_files:
             logger.warning(f"No documents found in {self.docs_dir}.")
@@ -249,29 +505,21 @@ class RAGModule:
                 logger.error(f"Failed to populate knowledge base: {e}")
 
     def _safe_query(self, collection, query: str, n_results: int, max_retries: int = 3):
-        # Query a collection safely with retry logic, backoff, and file-level lock protection.
+        # Query a collection safely with retry logic, backoff, and process-level lock protection.
         import time
-        import fcntl
         last_error = None
-        
-        lock_file = os.path.join(self.db_dir, "rag_read.lock")
-        
+
         for attempt in range(max_retries):
             try:
-                # Use shared lock for reading
-                with open(lock_file, "a+") as lf:
-                    fcntl.flock(lf, fcntl.LOCK_SH)
-                    try:
-                        count = collection.count()
-                        if count == 0:
-                            return None
-                        actual_n = min(n_results, count)
-                        
-                        # Executing the query with potential timeout
-                        return collection.query(query_texts=[query], n_results=actual_n)
-                    finally:
-                        fcntl.flock(lf, fcntl.LOCK_UN)
-                
+                with chroma_process_lock("rag query"):
+                    count = collection.count()
+                    if count == 0:
+                        return None
+                    actual_n = min(n_results, count)
+
+                    # Executing the query with potential timeout
+                    return collection.query(query_texts=[query], n_results=actual_n)
+
             except Exception as e:
                 last_error = e
                 err_msg = str(e).lower()
@@ -295,6 +543,9 @@ class RAGModule:
 
     def retrieve(self, query: str, n_results: int = 2) -> str:
         # Retrieve relevant context from knowledge and experiences based on query.
+        if self.disable_chroma:
+            return self._retrieve_from_cache(query, n_results)
+
         try:
             # Retrieve knowledge
             k_results = self._safe_query(self.knowledge_col, query, n_results)
@@ -340,39 +591,31 @@ class RAGModule:
         review: str,
     ):
         """Embed and store backtesting experience into ChromaDB."""
-        import fcntl
+        document = (
+            f"Hypothesis: {hypothesis}\n"
+            f"Code: {code}\n"
+            f"Metrics: {json.dumps(metrics)}\n"
+            f"Effective: {is_effective}\n"
+            f"Review: {review}"
+        )
+
+        if self.disable_chroma:
+            self.experience_cache.append(document)
+            return
 
         try:
-            lock_file = os.path.join(self.db_dir, "rag_write.lock")
-            with open(lock_file, "w") as lf:
-                fcntl.flock(lf, fcntl.LOCK_EX)
-                try:
-                    exp_id = f"exp_{uuid.uuid4().hex}"
+            with chroma_process_lock("rag add_experience"):
+                exp_id = f"exp_{uuid.uuid4().hex}"
 
-                    # Create a rich document representation
-                    document = (
-                        f"Hypothesis: {hypothesis}\n"
-                        f"Code: {code}\n"
-                        f"Metrics: {json.dumps(metrics)}\n"
-                        f"Effective: {is_effective}\n"
-                        f"Review: {review}"
-                    )
+                metadata = {
+                    "is_effective": is_effective,
+                    "ic": metrics.get("information_coefficient", 0.0),
+                    "rank_ic": metrics.get("rank_ic", 0.0),
+                }
 
-                    metadata = {
-                        "is_effective": is_effective,
-                        "ic": metrics.get("information_coefficient", 0.0),
-                        "rank_ic": metrics.get("rank_ic", 0.0),
-                    }
-
-                    self.experiences_col.add(
-                        documents=[document], metadatas=[metadata], ids=[exp_id]
-                    )
-                    logger.info(f"Added experience {exp_id} to ChromaDB.")
-                finally:
-                    fcntl.flock(lf, fcntl.LOCK_UN)
-            try:
-                os.unlink(lock_file)
-            except OSError:
-                pass
+                self.experiences_col.add(
+                    documents=[document], metadatas=[metadata], ids=[exp_id]
+                )
+                logger.info(f"Added experience {exp_id} to ChromaDB.")
         except Exception as e:
             logger.error(f"Failed to add experience to RAG: {e}")

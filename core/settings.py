@@ -10,12 +10,13 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 
 SUPPORTED_LLM_PROVIDERS = (
+    "deepseek",
+    "mimo",
     "kimi",
     "qwen",
     "claude",
     "glm",
     "openai",
-    "deepseek",
     "openrouter",
     "groq",
     "ollama",
@@ -30,6 +31,21 @@ SUPPORTED_DATA_BACKENDS = ("qlib", "ricequant", "local")
 SUPPORTED_MARKET_MODES = ("single", "batch", "mixed")
 SUPPORTED_LOCAL_DATA_LAYOUTS = ("auto", "panel", "instrument_files")
 SUPPORTED_MARKET_PROFILES = ("cn_stock", "us_stock", "futures")
+
+PROVIDER_API_KEY_ENV = {
+    "kimi": ("LLM_KEY", "KIMI_API_KEY"),
+    "qwen": ("QWEN_API_KEY",),
+    "claude": ("ClaudeCode_KEY", "ANTHROPIC_API_KEY"),
+    "glm": ("GLM_KEY", "ZHIPU_API_KEY"),
+    "openai": ("OpenAI_KEY", "OPENAI_API_KEY"),
+    "deepseek": ("DEEPSEEK_API_KEY",),
+    "mimo": ("MIMO_API_KEY", "XIAOMI_API_KEY", "XIAOMIMIMO_API_KEY"),
+    "openrouter": ("OPENROUTER_API_KEY",),
+    "groq": ("GROQ_API_KEY",),
+    "ollama": ("OLLAMA_API_KEY",),
+    "vllm": ("VLLM_API_KEY",),
+    "lmstudio": ("LMSTUDIO_API_KEY", "LM_STUDIO_API_KEY"),
+}
 
 
 def _normalize_str(value: Any) -> str | None:
@@ -68,6 +84,54 @@ def _coerce_list(value: Any) -> list[str] | None:
     return items or None
 
 
+def _contains_local_data_files(path: Path) -> bool:
+    if path.is_file():
+        return path.suffix.lower() in {".csv", ".parquet", ".pq"}
+    if not path.is_dir():
+        return False
+    return any(
+        child.is_file() and child.suffix.lower() in {".csv", ".parquet", ".pq"}
+        for child in path.iterdir()
+    )
+
+
+def _default_local_data_path(data_dir: str, market_profile: str) -> str | None:
+    data_root = Path(data_dir)
+    candidates: list[Path] = []
+    if market_profile == "futures":
+        candidates.extend(
+            [
+                Path("../llm/data/local_futures/dominant/1d"),
+                Path("../llm/data/local_futures/contracts/1d"),
+                data_root / "local_futures" / "dominant" / "1d",
+                data_root / "local_futures" / "contracts" / "1d",
+                Path("src-tauri/resources/market_data/local_futures/dominant/1d"),
+                Path("src-tauri/resources/market_data/local_futures/contracts/1d"),
+                Path(
+                    "local-dist/AIMiner.AppDir/usr/lib/app/market_data/"
+                    "local_futures/dominant/1d"
+                ),
+                Path(
+                    "local-dist/AIMiner.AppDir/usr/lib/app/market_data/"
+                    "local_futures/contracts/1d"
+                ),
+            ]
+        )
+    else:
+        candidates.extend(
+            [
+                data_root / f"local_{market_profile}",
+                data_root / market_profile,
+            ]
+        )
+
+    for candidate in candidates:
+        expanded = candidate.expanduser()
+        if _contains_local_data_files(expanded):
+            return str(expanded)
+    return None
+
+
 class AiminerSettings(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -91,6 +155,7 @@ class AiminerSettings(BaseModel):
     use_gpu: bool = False
     rebuild_rag: bool = False
     wiki_bootstrap: bool = False
+    disable_early_stop: bool = False
     verbose: bool = False
     roles: list[str] | None = None
     data_dir: str = "data"
@@ -108,6 +173,12 @@ class AiminerSettings(BaseModel):
         if self.data_backend not in SUPPORTED_DATA_BACKENDS:
             raise ValueError(
                 f"data_backend must be one of: {', '.join(SUPPORTED_DATA_BACKENDS)}"
+            )
+        if self.data_backend == "qlib" and self.evaluation_mode != "qlib":
+            raise ValueError("data_backend='qlib' requires evaluation_mode='qlib'")
+        if self.data_backend in {"ricequant", "local"} and self.evaluation_mode != "ricequant":
+            raise ValueError(
+                f"data_backend='{self.data_backend}' requires evaluation_mode='ricequant'"
             )
         if self.llm_provider and self.llm_provider not in SUPPORTED_LLM_PROVIDERS:
             raise ValueError(
@@ -149,6 +220,16 @@ class AiminerSettings(BaseModel):
             self.market_profiles = [self.market_profile]
         elif self.market_profile not in self.market_profiles:
             self.market_profiles = [self.market_profile] + self.market_profiles
+        if self.data_backend == "ricequant":
+            if self.market_mode == "mixed":
+                raise ValueError("ricequant backend does not support market_mode='mixed'")
+            if any(profile != "cn_stock" for profile in self.market_profiles):
+                raise ValueError("ricequant backend currently supports cn_stock only")
+        if self.data_backend == "qlib":
+            if self.market_mode == "mixed":
+                raise ValueError("qlib backend does not support market_mode='mixed'")
+            if any(profile == "futures" for profile in self.market_profiles):
+                raise ValueError("qlib backend does not support futures market_profile")
         if self.local_data_layout not in SUPPORTED_LOCAL_DATA_LAYOUTS:
             raise ValueError(
                 f"local_data_layout must be one of: {', '.join(SUPPORTED_LOCAL_DATA_LAYOUTS)}"
@@ -199,23 +280,14 @@ class AiminerSettings(BaseModel):
 
 
 def provider_api_key(provider: str | None) -> str | None:
-    provider_env = {
-        "kimi": ("LLM_KEY", "KIMI_API_KEY"),
-        "qwen": ("QWEN_API_KEY",),
-        "claude": ("ClaudeCode_KEY", "ANTHROPIC_API_KEY"),
-        "glm": ("GLM_KEY", "ZHIPU_API_KEY"),
-        "openai": ("OpenAI_KEY", "OPENAI_API_KEY"),
-        "deepseek": ("DEEPSEEK_API_KEY",),
-        "openrouter": ("OPENROUTER_API_KEY",),
-        "groq": ("GROQ_API_KEY",),
-        "ollama": ("OLLAMA_API_KEY",),
-        "vllm": ("VLLM_API_KEY",),
-        "lmstudio": ("LMSTUDIO_API_KEY", "LM_STUDIO_API_KEY"),
-    }
     if not provider:
         return None
-    for env_name in provider_env.get(provider, ()):
+    for env_name in PROVIDER_API_KEY_ENV.get(provider, ()):
         value = _normalize_str(os.getenv(env_name))
+        if value:
+            return value
+    if provider == "mimo":
+        value = _claudecode_mimo_token()
         if value:
             return value
     if provider == "ollama":
@@ -231,11 +303,27 @@ def provider_api_key(provider: str | None) -> str | None:
     return None
 
 
+def _claudecode_mimo_token() -> str | None:
+    settings_path = Path.home() / ".claude" / "settings.json"
+    try:
+        payload = json.loads(settings_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    env = payload.get("env") if isinstance(payload, dict) else None
+    if not isinstance(env, dict):
+        return None
+    return _normalize_str(env.get("ANTHROPIC_AUTH_TOKEN"))
+
+
 def detect_llm_provider() -> str | None:
     for provider in SUPPORTED_LLM_PROVIDERS:
         if provider == "codex":
             continue
-        api_key = provider_api_key(provider)
+        api_key = None
+        for env_name in PROVIDER_API_KEY_ENV.get(provider, ()):
+            api_key = _normalize_str(os.getenv(env_name))
+            if api_key:
+                break
         if api_key and api_key not in {"ollama", "vllm", "lm-studio"}:
             return provider
     return None
@@ -247,14 +335,34 @@ def build_settings(overrides: Mapping[str, Any] | None = None) -> AiminerSetting
 
     provider = _normalize_str(overrides.get("llm_provider")) or detect_llm_provider()
     embedding_provider = _normalize_str(overrides.get("embedding_provider"))
-    market_profile = _normalize_str(overrides.get("market_profile")) or "cn_stock"
-    market_profiles = _coerce_list(overrides.get("market_profiles")) or [market_profile]
     data_backend = _normalize_str(overrides.get("data_backend"))
     if not data_backend:
         data_backend = (
             _normalize_str(overrides.get("evaluation_mode", overrides.get("mode")))
             or "ricequant"
         )
+    data_dir = (
+        _normalize_str(overrides.get("data_dir"))
+        or _normalize_str(os.getenv("AIMINER_DATA_DIR"))
+        or "data"
+    )
+    explicit_market_profile = _normalize_str(overrides.get("market_profile"))
+    market_profile = explicit_market_profile or "cn_stock"
+    local_data_path = (
+        _normalize_str(overrides.get("local_data_path"))
+        or _normalize_str(os.getenv("AIMINER_LOCAL_DATA_PATH"))
+        or _normalize_str(os.getenv("AIMINER_LOCAL_FUTURES_PATH"))
+    )
+    if data_backend == "local" and not local_data_path:
+        if explicit_market_profile:
+            local_data_path = _default_local_data_path(data_dir, explicit_market_profile)
+        else:
+            for candidate_profile in ("futures", "cn_stock", "us_stock"):
+                local_data_path = _default_local_data_path(data_dir, candidate_profile)
+                if local_data_path:
+                    market_profile = candidate_profile
+                    break
+    market_profiles = _coerce_list(overrides.get("market_profiles")) or [market_profile]
 
     payload = {
         "max_iterations": overrides.get("max_iterations", overrides.get("iterations", 1)),
@@ -279,9 +387,7 @@ def build_settings(overrides: Mapping[str, Any] | None = None) -> AiminerSetting
         "market_mode": _normalize_str(overrides.get("market_mode")) or "single",
         "market_profile": market_profile,
         "market_profiles": market_profiles,
-        "local_data_path": _normalize_str(overrides.get("local_data_path"))
-        or _normalize_str(os.getenv("AIMINER_LOCAL_DATA_PATH"))
-        or _normalize_str(os.getenv("AIMINER_LOCAL_FUTURES_PATH")),
+        "local_data_path": local_data_path,
         "local_data_layout": _normalize_str(overrides.get("local_data_layout")) or "auto",
         "market_start": _normalize_str(overrides.get("market_start")),
         "market_end": _normalize_str(overrides.get("market_end")),
@@ -289,11 +395,14 @@ def build_settings(overrides: Mapping[str, Any] | None = None) -> AiminerSetting
         "use_gpu": _coerce_bool(overrides.get("use_gpu"), default=False),
         "rebuild_rag": _coerce_bool(overrides.get("rebuild_rag"), default=False),
         "wiki_bootstrap": _coerce_bool(overrides.get("wiki_bootstrap"), default=False),
+        "disable_early_stop": _coerce_bool(
+            overrides.get("disable_early_stop")
+            or os.getenv("AIMINER_DISABLE_EARLY_STOP"),
+            default=False,
+        ),
         "verbose": _coerce_bool(overrides.get("verbose"), default=False),
         "roles": overrides.get("roles"),
-        "data_dir": _normalize_str(overrides.get("data_dir"))
-        or _normalize_str(os.getenv("AIMINER_DATA_DIR"))
-        or "data",
+        "data_dir": data_dir,
         "results_dir": _normalize_str(overrides.get("results_dir"))
         or _normalize_str(os.getenv("AIMINER_RESULTS_DIR"))
         or "results",

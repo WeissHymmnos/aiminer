@@ -6,6 +6,26 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from core.settings import detect_llm_provider, provider_api_key
 
 
+def _normalize_mimo_model(model_name: str | None) -> str:
+    if not model_name:
+        return "mimo-v2.5-pro"
+
+    raw = model_name.strip()
+    normalized = raw.lower().replace("_", "-")
+    compact = normalized.replace(" ", "-")
+    aliases = {
+        "mimo-v2.5pro": "mimo-v2.5-pro",
+        "mimo-v2.5-pro": "mimo-v2.5-pro",
+        "mimo-v2.5": "mimo-v2.5",
+        "mimo-v25pro": "mimo-v2.5-pro",
+        "mimo-v25-pro": "mimo-v2.5-pro",
+        "mimo-v25": "mimo-v2.5",
+        "xiaomi/mimo-v2.5-pro": "mimo-v2.5-pro",
+        "xiaomi/mimo-v2.5": "mimo-v2.5",
+    }
+    return aliases.get(compact, raw)
+
+
 def get_llm_config(provider: str = None) -> Dict[str, str]:
     """
     Returns LLM provider configuration based on available API keys.
@@ -87,7 +107,14 @@ def get_llm(
     elif provider == "deepseek":
         resolved_base_url = base_url or "https://api.deepseek.com/v1"
         if not model_name:
-            model_name = "deepseek-reasoner"
+            model_name = "deepseek-v4-flash"
+    elif provider == "mimo":
+        resolved_base_url = (
+            base_url
+            or os.getenv("MIMO_BASE_URL")
+            or "https://token-plan-cn.xiaomimimo.com/v1"
+        )
+        model_name = _normalize_mimo_model(model_name)
     elif provider == "openrouter":
         resolved_base_url = base_url or "https://openrouter.ai/api/v1"
         if not model_name:
@@ -128,5 +155,5 @@ def get_llm(
         api_key=api_key,
         base_url=resolved_base_url,
         max_retries=3,
-        request_timeout=60,
+        request_timeout=180,
     )

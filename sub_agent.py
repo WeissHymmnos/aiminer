@@ -1,105 +1,12 @@
-import pandas as pd
 from loguru import logger
 from app_workflow.graph import build_workflow
+from core.agent_result import (
+    factor_result_view as _factor_result_view,
+    state_to_agent_result,
+)
+from core.agent_checkpoint import load_agent_checkpoints
 from core.runtime import log_context
 from core.settings import AiminerSettings, build_settings
-
-
-def _compact_returns(daily_returns_dict) -> dict:
-    if not daily_returns_dict:
-        return {}
-
-    series = pd.Series(daily_returns_dict)
-    if series.empty:
-        return {}
-
-    series.index = pd.to_datetime(series.index, errors="coerce")
-    series = pd.to_numeric(series, errors="coerce")
-    valid_mask = series.index.notna() & series.notna()
-    if not valid_mask.any():
-        return {}
-
-    series = series[valid_mask].sort_index()
-    compact = {}
-    for idx, value in series.items():
-        key = idx.isoformat() if hasattr(idx, "isoformat") else str(idx)
-        compact[key] = float(value)
-    return compact
-
-
-def _factor_result_view(final_state: dict) -> dict:
-    snapshot = final_state.get("best_factor_snapshot") or {}
-    if not snapshot:
-        snapshot = {
-            "iteration": final_state.get("iteration"),
-            "hypothesis": final_state.get("hypothesis_name"),
-            "hypothesis_name": final_state.get("hypothesis_name"),
-            "hypothesis_description": final_state.get("hypothesis_description"),
-            "code": final_state.get("code_expression"),
-            "code_expression": final_state.get("code_expression"),
-            "metrics": final_state.get("backtest_metrics", {}) or {},
-            "returns": final_state.get("daily_returns", {}) or {},
-            "daily_returns": final_state.get("daily_returns", {}) or {},
-            "plot_paths": final_state.get("plot_paths", {}) or {},
-            "is_effective": final_state.get("is_effective", False),
-            "is_simulated": final_state.get("is_simulated", False),
-            "ic_direction": final_state.get("ic_direction"),
-            "ic_direction_label": final_state.get("ic_direction_label"),
-        }
-
-    return {
-        "iteration": snapshot.get("iteration", final_state.get("iteration")),
-        "hypothesis": snapshot.get("hypothesis") or snapshot.get("hypothesis_name"),
-        "code": snapshot.get("code") or snapshot.get("code_expression"),
-        "metrics": snapshot.get("metrics")
-        or snapshot.get("backtest_metrics")
-        or final_state.get("backtest_metrics", {})
-        or {},
-        "returns": snapshot.get("returns")
-        or snapshot.get("daily_returns")
-        or final_state.get("daily_returns", {})
-        or {},
-        "plot_paths": snapshot.get("plot_paths")
-        or final_state.get("plot_paths", {})
-        or {},
-        "strategy_candidates": snapshot.get(
-            "strategy_candidates", final_state.get("strategy_candidates", [])
-        ),
-        "strategy_results": snapshot.get(
-            "strategy_results", final_state.get("strategy_results", [])
-        ),
-        "best_strategy_result": snapshot.get(
-            "best_strategy_result", final_state.get("best_strategy_result")
-        ),
-        "best_strategy_config": snapshot.get(
-            "best_strategy_config", final_state.get("best_strategy_config")
-        ),
-        "best_strategy_metrics": snapshot.get(
-            "best_strategy_metrics", final_state.get("best_strategy_metrics")
-        ),
-        "best_strategy_id": snapshot.get(
-            "best_strategy_id", final_state.get("best_strategy_id")
-        ),
-        "strategy_daily_returns": snapshot.get(
-            "strategy_daily_returns", final_state.get("strategy_daily_returns", {})
-        ),
-        "selection_score": snapshot.get(
-            "selection_score", final_state.get("selection_score", 0.0)
-        ),
-        "execution_style": snapshot.get(
-            "execution_style", final_state.get("execution_style")
-        ),
-        "strategy_failure_reason": snapshot.get(
-            "strategy_failure_reason", final_state.get("strategy_failure_reason")
-        ),
-        "is_effective": snapshot.get("is_effective", final_state.get("is_effective", False)),
-        "is_simulated": snapshot.get("is_simulated", final_state.get("is_simulated", False)),
-        "ic_direction": snapshot.get("ic_direction", final_state.get("ic_direction")),
-        "ic_direction_label": snapshot.get(
-            "ic_direction_label", final_state.get("ic_direction_label")
-        ),
-    }
-
 
 class AlphaResearcher:
     def __init__(
@@ -127,6 +34,7 @@ class AlphaResearcher:
         log_queue=None,
         run_id: str = None,
         agent_id: str = None,
+        disable_early_stop: bool = False,
     ):
         self.settings = build_settings(
             {
@@ -149,6 +57,7 @@ class AlphaResearcher:
                 "market_profiles": market_profiles,
                 "local_data_path": local_data_path,
                 "local_data_layout": local_data_layout,
+                "disable_early_stop": disable_early_stop,
             }
         )
         self.role_prompt = role_prompt
@@ -191,6 +100,7 @@ class AlphaResearcher:
             "llm_reasoning_effort": self.settings.llm_reasoning_effort,
             "iteration": 1,
             "max_iterations": self.max_iterations,
+            "disable_early_stop": self.settings.disable_early_stop,
             "role_prompt": self.role_prompt,
             "evaluation_mode": self.evaluation_mode,
             "evaluation_engine": self.evaluation_engine,
@@ -212,6 +122,21 @@ class AlphaResearcher:
         final_state = initial_state
         logger.info(f"[Sub-Agent] Starting run with role '{self.role_prompt}'")
 
+        checkpoint = self._load_resume_checkpoint()
+        if checkpoint:
+            iteration = int(checkpoint.get("iteration") or 0)
+            if iteration >= self.max_iterations:
+                logger.info(
+                    f"[Sub-Agent] Checkpoint already reached max_iterations={self.max_iterations}; "
+                    "returning recovered result."
+                )
+                return checkpoint
+            initial_state.update(self._checkpoint_to_initial_state(checkpoint))
+            logger.info(
+                f"[Sub-Agent] Resuming from checkpoint at iteration {iteration}; "
+                f"next iteration {initial_state['iteration']}."
+            )
+
         try:
             with logger.contextualize(
                 **log_context(run_id=self.run_id, agent_id=self.agent_id)
@@ -230,49 +155,65 @@ class AlphaResearcher:
             logger.error(f"[Sub-Agent] Workflow execution failed: {e}")
             final_state["error"] = f"Workflow exception: {e}"
 
-        factor_view = _factor_result_view(final_state)
-        metrics = factor_view["metrics"]
-        daily_returns_dict = factor_view["returns"]
+        return state_to_agent_result(
+            final_state,
+            settings=self.settings,
+            role_prompt=self.role_prompt,
+            run_id=self.run_id,
+            agent_id=self.agent_id,
+            max_iterations=self.max_iterations,
+        )
 
-        # Always use IC as the primary selection metric; the manager's
-        # threshold (0.01) is calibrated for IC scale, not Sharpe.
-        perf_metric = float(metrics.get("information_coefficient", 0.0) or 0.0)
-        compact_returns = _compact_returns(daily_returns_dict)
+    def _load_resume_checkpoint(self) -> dict | None:
+        if not self.run_id or not self.agent_id:
+            return None
+        try:
+            checkpoints = load_agent_checkpoints(self.settings.db_path, self.run_id)
+        except Exception as exc:
+            logger.warning(f"[Sub-Agent] Failed to load checkpoint: {exc}")
+            return None
+        for checkpoint in checkpoints:
+            if checkpoint.get("agent_id") == self.agent_id and not checkpoint.get("error"):
+                return checkpoint
+        return None
 
-        return {
-            "run_id": self.run_id,
-            "agent_id": self.agent_id,
-            "iteration": factor_view.get("iteration", final_state.get("iteration", self.max_iterations)),
-            "evaluation_mode": self.evaluation_mode,
-            "evaluation_engine": self.evaluation_engine,
-            "llm_provider": self.settings.llm_provider,
-            "llm_model": self.settings.llm_model,
-            "llm_base_url": self.settings.llm_base_url,
-            "llm_reasoning_effort": self.settings.llm_reasoning_effort,
-            "data_backend": self.settings.data_backend,
-            "market_mode": self.settings.market_mode,
-            "market_profile": self.settings.market_profile,
-            "market_profiles": self.settings.market_profiles,
-            "role": self.role_prompt,
-            "hypothesis": factor_view.get("hypothesis"),
-            "code": factor_view.get("code"),
+    def _checkpoint_to_initial_state(self, checkpoint: dict) -> dict:
+        metrics = checkpoint.get("metrics") or {}
+        ic = float(metrics.get("information_coefficient", 0.0) or 0.0)
+        iteration = int(checkpoint.get("iteration") or 0)
+        snapshot = {
+            "iteration": iteration,
+            "hypothesis": checkpoint.get("hypothesis"),
+            "hypothesis_name": checkpoint.get("hypothesis"),
+            "code": checkpoint.get("code"),
+            "code_expression": checkpoint.get("code"),
             "metrics": metrics,
-            "perf_metric": perf_metric,
-            "returns": compact_returns,
-            "plot_paths": factor_view.get("plot_paths", {}),
-            "strategy_candidates": factor_view.get("strategy_candidates", []),
-            "strategy_results": factor_view.get("strategy_results", []),
-            "best_strategy_result": factor_view.get("best_strategy_result"),
-            "best_strategy_config": factor_view.get("best_strategy_config"),
-            "best_strategy_metrics": factor_view.get("best_strategy_metrics"),
-            "best_strategy_id": factor_view.get("best_strategy_id"),
-            "strategy_daily_returns": factor_view.get("strategy_daily_returns", {}),
-            "selection_score": factor_view.get("selection_score", 0.0),
-            "execution_style": factor_view.get("execution_style"),
-            "strategy_failure_reason": factor_view.get("strategy_failure_reason"),
-            "is_effective": factor_view.get("is_effective", False),
-            "is_simulated": factor_view.get("is_simulated", False),
-            "ic_direction": factor_view.get("ic_direction"),
-            "ic_direction_label": factor_view.get("ic_direction_label"),
-            "error": final_state.get("error"),
+            "returns": checkpoint.get("returns") or {},
+            "daily_returns": checkpoint.get("returns") or {},
+            "plot_paths": checkpoint.get("plot_paths") or {},
+            "strategy_candidates": checkpoint.get("strategy_candidates") or [],
+            "strategy_results": checkpoint.get("strategy_results") or [],
+            "best_strategy_result": checkpoint.get("best_strategy_result"),
+            "best_strategy_config": checkpoint.get("best_strategy_config"),
+            "best_strategy_metrics": checkpoint.get("best_strategy_metrics"),
+            "best_strategy_id": checkpoint.get("best_strategy_id"),
+            "strategy_daily_returns": checkpoint.get("strategy_daily_returns") or {},
+            "selection_score": checkpoint.get("selection_score", 0.0),
+            "execution_style": checkpoint.get("execution_style"),
+            "strategy_failure_reason": checkpoint.get("strategy_failure_reason"),
+            "is_effective": checkpoint.get("is_effective", False),
+            "is_simulated": checkpoint.get("is_simulated", False),
+            "ic_direction": checkpoint.get("ic_direction"),
+            "ic_direction_label": checkpoint.get("ic_direction_label"),
+        }
+        return {
+            "iteration": min(iteration + 1, self.max_iterations),
+            "best_ic": ic,
+            "best_ic_abs": abs(ic),
+            "best_code_expression": checkpoint.get("code"),
+            "best_factor_snapshot": snapshot,
+            "messages": [
+                f"[System] Resuming SubAgent with Role: {self.role_prompt}",
+                f"[Checkpoint] Resumed after iteration {iteration}.",
+            ],
         }

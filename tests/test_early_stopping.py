@@ -48,6 +48,16 @@ class TestEarlyStopping(unittest.TestCase):
             next_node, "end", "Should stop early if IC is exceptionally high."
         )
 
+    def test_high_ic_continues_when_early_stop_disabled(self):
+        state: AlphaMinerState = {
+            "iteration": 1,
+            "max_iterations": 10,
+            "disable_early_stop": True,
+            "backtest_metrics": {"information_coefficient": 0.06},
+            "patience_counter": 0,
+        }
+        self.assertEqual(route_after_wiki(state), "increment")
+
     def test_patience_exhausted_early_stop(self):
         # 测试耐心耗尽早停 (patience >= 4)
         state: AlphaMinerState = {
@@ -60,6 +70,16 @@ class TestEarlyStopping(unittest.TestCase):
         self.assertEqual(
             next_node, "end", "Should stop early if patience is exhausted."
         )
+
+    def test_patience_exhausted_continues_when_early_stop_disabled(self):
+        state: AlphaMinerState = {
+            "iteration": 5,
+            "max_iterations": 10,
+            "disable_early_stop": True,
+            "backtest_metrics": {"information_coefficient": 0.01},
+            "patience_counter": 4,
+        }
+        self.assertEqual(route_after_wiki(state), "increment")
 
     def test_normal_increment(self):
         # 正常情况下应该进入下一轮迭代

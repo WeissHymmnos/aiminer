@@ -1,6 +1,9 @@
 import os
 from pathlib import Path
 import pandas as pd
+import matplotlib
+
+matplotlib.use("Agg", force=True)
 import matplotlib.pyplot as plt
 from typing import Dict, Any
 from loguru import logger

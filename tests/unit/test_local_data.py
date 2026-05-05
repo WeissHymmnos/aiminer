@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from core.local_data import load_local_ohlcv
 
@@ -89,3 +90,39 @@ class TestLocalDataLoader(unittest.TestCase):
                 sorted(df.index.get_level_values("instrument").unique().tolist()),
                 ["A"],
             )
+
+    def test_rejects_non_positive_ohlc_values(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "bad_panel.csv"
+            pd.DataFrame(
+                {
+                    "datetime": ["2024-01-01"],
+                    "instrument": ["A"],
+                    "open": [1.0],
+                    "high": [1.1],
+                    "low": [0.9],
+                    "close": [0.0],
+                    "volume": [100],
+                }
+            ).to_csv(path, index=False)
+
+            with pytest.raises(ValueError, match="non_positive_ohlc=1"):
+                load_local_ohlcv(path, market_profile="futures")
+
+    def test_rejects_inconsistent_high_low_bounds(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "bad_bounds.csv"
+            pd.DataFrame(
+                {
+                    "datetime": ["2024-01-01"],
+                    "instrument": ["A"],
+                    "open": [1.0],
+                    "high": [0.95],
+                    "low": [0.9],
+                    "close": [1.05],
+                    "volume": [100],
+                }
+            ).to_csv(path, index=False)
+
+            with pytest.raises(ValueError, match="bad_high_low=1"):
+                load_local_ohlcv(path, market_profile="futures")

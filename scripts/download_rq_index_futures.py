@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass
 from datetime import datetime
@@ -17,6 +18,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.alphaeval.rq_eval import init_rq_auth
+from core.local_data import ohlcv_quality_report, validate_ohlcv_quality
 from scripts.test_local_futures_data import run_suite
 
 
@@ -30,6 +32,10 @@ DEFAULT_FIELDS = [
     "total_turnover",
     "open_interest",
 ]
+
+
+def _is_deliverable_contract_id(order_book_id: str, underlying_symbol: str) -> bool:
+    return bool(re.fullmatch(rf"{re.escape(underlying_symbol.upper())}\d{{4}}", str(order_book_id).upper()))
 
 
 @dataclass(frozen=True)
@@ -147,6 +153,15 @@ def discover_contracts(
 
     df["underlying_symbol"] = df["underlying_symbol"].astype(str).str.upper()
     df = df[df["underlying_symbol"].isin([item.upper() for item in underlyings])].copy()
+    df["order_book_id"] = df["order_book_id"].astype(str).str.upper()
+    df = df[
+        df.apply(
+            lambda row: _is_deliverable_contract_id(
+                row["order_book_id"], row["underlying_symbol"]
+            ),
+            axis=1,
+        )
+    ].copy()
 
     start_ts = pd.Timestamp(start)
     end_ts = pd.Timestamp(end)
@@ -250,6 +265,7 @@ def _merge_and_write_parquet(path: Path, new_df: pd.DataFrame) -> int:
         .sort_values("datetime")
         .drop_duplicates(subset=["datetime"], keep="last")
     )
+    validate_ohlcv_quality(merged, source=str(path))
     merged.to_parquet(path, index=False)
     return len(merged)
 
@@ -319,6 +335,16 @@ def download_contract_data(
             "status": "empty",
             "rows_written": 0,
         }
+    quality = ohlcv_quality_report(frame)
+    if quality["invalid_rows"] > 0:
+        return {
+            "instrument": meta.order_book_id,
+            "frequency": frequency,
+            "path": str(path),
+            "status": "invalid_ohlcv",
+            "rows_written": 0,
+            "quality": quality,
+        }
 
     if full_refresh and path.exists():
         path.unlink()
@@ -329,6 +355,7 @@ def download_contract_data(
         "path": str(path),
         "status": "written",
         "rows_written": row_count,
+        "quality": quality,
     }
 
 
@@ -446,6 +473,7 @@ def build_dominant_data(
         .sort_values("datetime")
         .drop_duplicates(subset=["datetime"], keep="last")
     )
+    validate_ohlcv_quality(merged, source=str(path))
     path.parent.mkdir(parents=True, exist_ok=True)
     merged.to_parquet(path, index=False)
     return {
@@ -454,6 +482,7 @@ def build_dominant_data(
         "path": str(path),
         "status": "written",
         "rows_written": len(merged),
+        "quality": ohlcv_quality_report(merged),
     }
 
 
@@ -504,6 +533,9 @@ def update_manifest(
         payload["frequency_status"][frequency] = {
             "contracts_written": sum(
                 1 for item in contract_results if item.get("frequency") == frequency and item.get("status") == "written"
+            ),
+            "contracts_invalid_ohlcv": sum(
+                1 for item in contract_results if item.get("frequency") == frequency and item.get("status") == "invalid_ohlcv"
             ),
             "dominant_written": sum(
                 1 for item in dominant_results if item.get("frequency") == frequency and item.get("status") == "written"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -11,6 +12,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.local_data import load_local_ohlcv
+from core.local_data import ohlcv_quality_report, validate_ohlcv_quality
 
 
 CONTRACT_REQUIRED_COLUMNS = {
@@ -54,12 +56,15 @@ def validate_contract_file(path: Path) -> dict[str, object]:
     _assert(dt.is_monotonic_increasing, f"{path} datetime is not ascending")
     _assert(df["datetime"].nunique() == len(df), f"{path} has duplicate datetime rows")
     _assert(df["instrument"].astype(str).nunique() == 1, f"{path} contains multiple instruments")
+    validate_ohlcv_quality(df, source=str(path))
+    quality = ohlcv_quality_report(df)
     return {
         "path": str(path),
         "rows": len(df),
         "instrument": str(df["instrument"].iloc[0]),
         "start": str(dt.min()),
         "end": str(dt.max()),
+        "quality": quality,
     }
 
 
@@ -74,12 +79,15 @@ def validate_dominant_file(path: Path, underlying: str) -> dict[str, object]:
     _assert(df["instrument"].astype(str).nunique() == 1, f"{path} contains multiple instruments")
     _assert(str(df["instrument"].iloc[0]) == underlying, f"{path} instrument is not {underlying}")
     _assert(df["dominant_contract"].astype(str).str.startswith(underlying).all(), f"{path} has wrong dominant contract prefix")
+    validate_ohlcv_quality(df, source=str(path))
+    quality = ohlcv_quality_report(df)
     return {
         "path": str(path),
         "rows": len(df),
         "instrument": underlying,
         "start": str(dt.min()),
         "end": str(dt.max()),
+        "quality": quality,
     }
 
 
@@ -93,12 +101,75 @@ def validate_local_loader(contracts_dir: Path) -> dict[str, object]:
     _assert(len(df) > 0, "load_local_ohlcv returned empty dataframe")
     for column in ("open", "high", "low", "close", "volume", "vwap", "total_turnover", "market", "asset_class"):
         _assert(column in df.columns, f"load_local_ohlcv missing column: {column}")
+    quality = ohlcv_quality_report(df.reset_index())
+    _assert(quality["invalid_rows"] == 0, f"load_local_ohlcv returned invalid OHLCV rows: {quality}")
     return {
         "rows": len(df),
         "instruments": int(df.index.get_level_values("instrument").nunique()),
         "start": str(df.index.get_level_values("datetime").min()),
         "end": str(df.index.get_level_values("datetime").max()),
+        "quality": quality,
     }
+
+
+def _validate_all_contract_files(paths: list[Path]) -> list[dict[str, object]]:
+    return [validate_contract_file(path) for path in paths]
+
+
+def _load_manifest(root: Path) -> dict[str, object]:
+    manifest = root / "manifests" / "download_manifest.json"
+    if not manifest.exists():
+        return {}
+    try:
+        return json.loads(manifest.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _dominant_underlyings_for_frequency(
+    root: Path,
+    *,
+    manifest_payload: dict[str, object],
+    frequency: str,
+) -> tuple[list[str], dict[str, str]]:
+    runs = [run for run in (manifest_payload.get("runs") or []) if isinstance(run, dict)]
+    requested: list[str] = []
+    for run in reversed(runs):
+        results = [
+            item
+            for item in (run.get("dominant_results") or [])
+            if item.get("frequency") == frequency
+        ]
+        if results:
+            requested = [str(item.get("underlying")).upper() for item in results]
+            break
+    if not requested:
+        last_request = manifest_payload.get("last_request")
+        if isinstance(last_request, dict):
+            requested = [str(item).upper() for item in (last_request.get("underlyings") or [])]
+    requested = requested or list(DEFAULT_UNDERLYINGS)
+
+    statuses: dict[str, str] = {}
+    for run in reversed(runs):
+        for item in run.get("dominant_results") or []:
+            if item.get("frequency") != frequency:
+                continue
+            underlying = str(item.get("underlying")).upper()
+            statuses.setdefault(underlying, str(item.get("status")))
+    dominant_dir = root / "dominant" / frequency
+    underlyings: list[str] = []
+    skipped: dict[str, str] = {}
+    for underlying in requested:
+        path = dominant_dir / f"{underlying}.parquet"
+        status = statuses.get(underlying)
+        if status == "empty" and not path.exists():
+            skipped[underlying] = "empty"
+            continue
+        if status is None and not path.exists():
+            skipped[underlying] = "missing_without_manifest_status"
+            continue
+        underlyings.append(underlying)
+    return underlyings, skipped
 
 
 def run_suite(root: Path, *, check_1m: bool) -> dict[str, object]:
@@ -106,18 +177,25 @@ def run_suite(root: Path, *, check_1m: bool) -> dict[str, object]:
     dominant_1d = root / "dominant" / "1d"
     _assert(contracts_1d.exists(), f"Missing directory: {contracts_1d}")
     _assert(dominant_1d.exists(), f"Missing directory: {dominant_1d}")
+    manifest_payload = _load_manifest(root)
 
     summaries: dict[str, object] = {}
     contract_files_1d = sorted(contracts_1d.glob("*.parquet"))
     _assert(contract_files_1d, f"No parquet files found in {contracts_1d}")
     summaries["contracts_1d_count"] = len(contract_files_1d)
-    summaries["contracts_1d_sample"] = validate_contract_file(contract_files_1d[0])
+    summaries["contracts_1d_files"] = _validate_all_contract_files(contract_files_1d)
+    summaries["contracts_1d_sample"] = summaries["contracts_1d_files"][0]
 
     dominant_summaries = {}
-    for underlying in DEFAULT_UNDERLYINGS:
+    dominant_underlyings_1d, skipped_1d = _dominant_underlyings_for_frequency(
+        root, manifest_payload=manifest_payload, frequency="1d"
+    )
+    _assert(dominant_underlyings_1d, f"No dominant 1d files expected/found in {dominant_1d}")
+    for underlying in dominant_underlyings_1d:
         path = dominant_1d / f"{underlying}.parquet"
         dominant_summaries[underlying] = validate_dominant_file(path, underlying)
     summaries["dominant_1d"] = dominant_summaries
+    summaries["dominant_1d_skipped"] = skipped_1d
     summaries["local_loader_1d"] = validate_local_loader(contracts_1d)
 
     if check_1m:
@@ -128,12 +206,18 @@ def run_suite(root: Path, *, check_1m: bool) -> dict[str, object]:
         contract_files_1m = sorted(contracts_1m.glob("*.parquet"))
         _assert(contract_files_1m, f"No parquet files found in {contracts_1m}")
         summaries["contracts_1m_count"] = len(contract_files_1m)
-        summaries["contracts_1m_sample"] = validate_contract_file(contract_files_1m[0])
+        summaries["contracts_1m_files"] = _validate_all_contract_files(contract_files_1m)
+        summaries["contracts_1m_sample"] = summaries["contracts_1m_files"][0]
         dominant_1m_summaries = {}
-        for underlying in DEFAULT_UNDERLYINGS:
+        dominant_underlyings_1m, skipped_1m = _dominant_underlyings_for_frequency(
+            root, manifest_payload=manifest_payload, frequency="1m"
+        )
+        _assert(dominant_underlyings_1m, f"No dominant 1m files expected/found in {dominant_1m}")
+        for underlying in dominant_underlyings_1m:
             path = dominant_1m / f"{underlying}.parquet"
             dominant_1m_summaries[underlying] = validate_dominant_file(path, underlying)
         summaries["dominant_1m"] = dominant_1m_summaries
+        summaries["dominant_1m_skipped"] = skipped_1m
 
     manifest = root / "manifests" / "download_manifest.json"
     _assert(manifest.exists(), f"Missing manifest: {manifest}")

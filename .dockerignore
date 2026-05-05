@@ -5,7 +5,7 @@
 # Rust Build Artifacts
 **/target/
 polars_plugins/target/
-Cargo.lock
+# Keep Cargo.lock files in the build context for reproducible Rust plugin builds.
 
 # Python
 __pycache__/

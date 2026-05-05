@@ -30,6 +30,9 @@ class WeightCalculator:
         )
         qlib_data_path = os.path.expanduser(qlib_data_path)
         qlib.init(provider_uri=qlib_data_path, region="cn")
+        from core.qlib_custom_ops import register_custom_ops
+
+        register_custom_ops()
 
         if instruments is not None:
             self.instruments = instruments

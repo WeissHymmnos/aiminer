@@ -6,6 +6,9 @@ from typing import List, Optional
 from loguru import logger
 from dotenv import load_dotenv
 import ast
+import matplotlib
+
+matplotlib.use("Agg", force=True)
 
 # Load environment variables
 load_dotenv()
@@ -89,8 +92,8 @@ def init_rq_auth():
     raise ValueError("RiceQuant Auth Failed: No valid credentials found or accepted.")
 
 
-import matplotlib.pyplot as plt
 from matplotlib import font_manager
+import matplotlib.pyplot as plt
 from pathlib import Path
 
 class RiceQuantEval:
@@ -165,13 +168,18 @@ class RiceQuantEval:
 
     def calculate_layered_returns(self, all_data, n_groups=5):
         """Compute returns for n_groups sorted by factor value."""
+        max_cross_section = int(all_data.groupby(level="datetime").size().max())
+        effective_groups = min(n_groups, max_cross_section)
+        if effective_groups < 2:
+            return pd.DataFrame()
+        labels = [f"G{i + 1}" for i in range(effective_groups)]
+
         def assign_groups(x):
-            if len(x) < n_groups:
+            if len(x) < effective_groups:
                 return pd.Series(np.nan, index=x.index)
-            # Use qcut to split into equal sized groups
             try:
-                return pd.qcut(x.rank(method='first'), n_groups, labels=[f"G{i+1}" for i in range(n_groups)])
-            except:
+                return pd.qcut(x.rank(method="first"), effective_groups, labels=labels)
+            except ValueError:
                 return pd.Series(np.nan, index=x.index)
 
         all_data = all_data.copy()
@@ -198,16 +206,17 @@ class RiceQuantEval:
         plot_paths['equity'] = str(eq_path.resolve())
 
         # 2. Layered Returns
-        plt.figure(figsize=(10, 5))
-        layer_cum = (1 + layer_ret.fillna(0)).cumprod()
-        layer_cum.plot(title="Layered Cumulative Returns (G1-G5)")
-        plt.axvline(x=pd.to_datetime(self.oos_split_date), color='r', linestyle='--', label='OOS Split')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        lay_path = self.output_dir / f"{safe_name}_layers.png"
-        plt.savefig(lay_path, dpi=120)
-        plt.close()
-        plot_paths['layers'] = str(lay_path.resolve())
+        if not layer_ret.empty and not layer_ret.select_dtypes(include=[np.number]).empty:
+            plt.figure(figsize=(10, 5))
+            layer_cum = (1 + layer_ret.fillna(0)).cumprod()
+            layer_cum.plot(title="Layered Cumulative Returns")
+            plt.axvline(x=pd.to_datetime(self.oos_split_date), color='r', linestyle='--', label='OOS Split')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            lay_path = self.output_dir / f"{safe_name}_layers.png"
+            plt.savefig(lay_path, dpi=120)
+            plt.close()
+            plot_paths['layers'] = str(lay_path.resolve())
 
         return plot_paths
 
@@ -301,11 +310,22 @@ class RiceQuantEval:
             )
             fields["vwap"] = fields["vwap"].ffill().fillna(fields["close"])
 
+        ref_field = fields["close"]
+
+        def _ensure_df(value):
+            if isinstance(value, (int, float, np.integer, np.floating)):
+                return pd.DataFrame(
+                    float(value), index=ref_field.index, columns=ref_field.columns
+                )
+            return value
+
         # Define local helper functions for the eval engine
         def Rank(df):
+            df = _ensure_df(df)
             return df.rank(axis=1, pct=True)
 
         def Mean(df, n=None):
+            df = _ensure_df(df)
             if n is None:
                 res = df.mean(axis=1)
                 return pd.DataFrame(
@@ -316,6 +336,7 @@ class RiceQuantEval:
             return df.rolling(max(1, _get_n(n))).mean()
 
         def Std(df, n=None):
+            df = _ensure_df(df)
             if n is None:
                 res = df.std(axis=1)
                 return pd.DataFrame(
@@ -326,6 +347,7 @@ class RiceQuantEval:
             return df.rolling(max(1, _get_n(n))).std()
 
         def Median(df, n=None):
+            df = _ensure_df(df)
             if n is None:
                 res = df.median(axis=1)
                 return pd.DataFrame(
@@ -336,9 +358,11 @@ class RiceQuantEval:
             return df.rolling(max(1, _get_n(n))).median()
 
         def EMA(df, n):
+            df = _ensure_df(df)
             return df.ewm(span=max(1, _get_n(n))).mean()
 
         def Abs(df):
+            df = _ensure_df(df)
             return np.abs(df)
 
         def _get_n(n):
@@ -356,15 +380,19 @@ class RiceQuantEval:
                 return 20
 
         def Ref(df, n):
+            df = _ensure_df(df)
             return df.shift(_get_n(n))
 
         def Log(df):
+            df = _ensure_df(df)
             return np.log(df.replace(0, np.nan))
 
         def Sum(df, n):
+            df = _ensure_df(df)
             return df.rolling(max(1, _get_n(n))).sum()
 
         def If(cond, a, b):
+            cond = _ensure_df(cond)
             # If 'a' is scalar, convert to DF to match cond
             if isinstance(a, (int, float)):
                 a = pd.DataFrame(a, index=cond.index, columns=cond.columns)
@@ -389,15 +417,21 @@ class RiceQuantEval:
             return reduce(lambda a, b: a | b, args)
 
         def Delta(df, n):
+            df = _ensure_df(df)
             return df.diff(_get_n(n))
 
         def Corr(df1, df2, n):
+            df1 = _ensure_df(df1)
+            df2 = _ensure_df(df2)
             return df1.rolling(max(1, _get_n(n))).corr(df2)
 
         def Cov(df1, df2, n):
+            df1 = _ensure_df(df1)
+            df2 = _ensure_df(df2)
             return df1.rolling(max(1, _get_n(n))).cov(df2)
 
         def Ts_Rank(df, n):
+            df = _ensure_df(df)
             nn = max(1, _get_n(n))
             if nn == 1:
                 return pd.DataFrame(0.5, index=df.index, columns=df.columns)
@@ -419,12 +453,16 @@ class RiceQuantEval:
             return df.rolling(nn, min_periods=1).apply(_ts_rank_row, raw=False)
 
         def CSRank(df):
+            df = _ensure_df(df)
             return df.rank(axis=1, pct=True)
 
-        def Percentile(df, p):
+        def Percentile(df, p=50):
+            """Cross-sectional percentile rank (p parameter reserved for API compatibility)."""
+            df = _ensure_df(df)
             return df.rank(axis=1, pct=True)
 
         def Clip(df, lower, upper):
+            df = _ensure_df(df)
             return df.clip(
                 lower=lower,
                 upper=upper,
@@ -432,11 +470,13 @@ class RiceQuantEval:
             )
 
         def CSZScore(df):
+            df = _ensure_df(df)
             return df.sub(df.mean(axis=1), axis=0).div(
                 df.std(axis=1).replace(0, 1), axis=0
             )
 
         def Winsorize(df, pct=0.05):
+            df = _ensure_df(df)
             # Simple winsorization on cross-section
             return df.apply(
                 lambda x: x.clip(
@@ -446,35 +486,46 @@ class RiceQuantEval:
             )
 
         def GroupNeutral(df, group="sector"):
+            df = _ensure_df(df)
             # Simplified neutral: just subtract cross-sectional mean
             return df.sub(df.mean(axis=1), axis=0)
 
-        def Count():
-            c = fields["close"].shape[1]
-            return pd.DataFrame(
-                c, index=fields["close"].index, columns=fields["close"].columns
-            )
+        def Count(df=None, n=20):
+            if df is None:
+                c = fields["close"].shape[1]
+                return pd.DataFrame(
+                    c, index=fields["close"].index, columns=fields["close"].columns
+                )
+            df = _ensure_df(df)
+            return df.rolling(max(1, _get_n(n))).count()
 
         def Sign(df):
+            df = _ensure_df(df)
             return np.sign(df)
 
         def Sqrt(df):
+            df = _ensure_df(df)
             return np.sqrt(df.clip(lower=0))
 
         def Exp(df):
+            df = _ensure_df(df)
             return np.exp(df.clip(upper=500))  # clip to avoid overflow
 
         def Ceil(df):
+            df = _ensure_df(df)
             return np.ceil(df)
 
         def Floor(df):
+            df = _ensure_df(df)
             return np.floor(df)
 
         def Scale(df, a=1):
+            df = _ensure_df(df)
             abs_sum = df.abs().sum(axis=1).replace(0, np.nan)
             return df.div(abs_sum, axis=0) * float(a)
 
         def WMA(df, n):
+            df = _ensure_df(df)
             nn = max(1, _get_n(n))
             weights = np.arange(1, nn + 1, dtype=float)
             weights /= weights.sum()
@@ -484,6 +535,7 @@ class RiceQuantEval:
             )
 
         def Ts_ArgMax(df, n):
+            df = _ensure_df(df)
             nn = max(1, _get_n(n))
 
             # Match Rust: skip NaN, return position of max within full window
@@ -495,6 +547,7 @@ class RiceQuantEval:
             return df.rolling(nn, min_periods=1).apply(_row, raw=True)
 
         def Ts_ArgMin(df, n):
+            df = _ensure_df(df)
             nn = max(1, _get_n(n))
 
             def _row(x):
@@ -505,6 +558,7 @@ class RiceQuantEval:
             return df.rolling(nn, min_periods=1).apply(_row, raw=True)
 
         def Ts_Percentile(df, n, p=50):
+            df = _ensure_df(df)
             # Rolling percentile VALUE (p-th percentile of last n days)
             # Default p=50 (median) if not provided
             return df.rolling(max(1, _get_n(n))).apply(
@@ -649,6 +703,7 @@ class RiceQuantEval:
                 # Compile and evaluate with strictly controlled builtins
                 compiled_expr = compile(tree, filename="<ast>", mode="eval")
                 res_matrix = eval(compiled_expr, {"__builtins__": {}}, context)
+                res_matrix = _ensure_df(res_matrix)
 
                 # Stack back to multi-index
                 res_series = res_matrix.stack(dropna=False)
@@ -980,6 +1035,14 @@ class RiceQuantEval:
                     b = pd.DataFrame(b, index=cond.index, columns=cond.columns)
                 return a.where(cond, b)
 
+            # Capture reference index/columns for scalar → DataFrame broadcast
+            _ref_field = dummy_fields["close"]
+
+            def _ensure_df(x):
+                if isinstance(x, (int, float, np.integer, np.floating)):
+                    return pd.DataFrame(float(x), index=_ref_field.index, columns=_ref_field.columns)
+                return x
+
             # Robust variadic operators
             def And(*args):
                 res = args[0]
@@ -1007,7 +1070,7 @@ class RiceQuantEval:
                 "Median": lambda df, n=20: df.rolling(max(1, _get_n(n))).median(),
                 "EMA": lambda df, n=20: df.ewm(span=max(1, _get_n(n))).mean(),
                 "Abs": np.abs,
-                "Log": lambda df: np.log(df.replace(0, np.nan)),
+                "Log": lambda df: np.log(_ensure_df(df).replace(0, np.nan)),
                 "Sum": lambda df, n=20: df.rolling(max(1, _get_n(n))).sum(),
                 "Ref": lambda df, n=1: df.shift(_get_n(n)),
                 "Delta": lambda df, n=1: df.diff(_get_n(n)),
@@ -1026,14 +1089,14 @@ class RiceQuantEval:
                 "Ts_Percentile": lambda df, n=20, p=50: df.rolling(
                     max(1, _get_n(n))
                 ).apply(lambda x: np.percentile(x, float(p))),
-                "Winsorize": lambda df, pct=0.05: df.apply(
+                "Winsorize": lambda df, pct=0.05: _ensure_df(df).apply(
                     lambda x: x.clip(
                         lower=x.quantile(float(pct)), upper=x.quantile(1 - float(pct))
                     ),
                     axis=1,
                 ),
                 "Sign": np.sign,
-                "Sqrt": lambda df: np.sqrt(df.clip(lower=0)),
+                "Sqrt": lambda df: np.sqrt(_ensure_df(df).clip(lower=0)),
                 "Add": lambda a, b: a + b,
                 "Sub": lambda a, b: a - b,
                 "Mul": lambda a, b: a * b,
@@ -1058,6 +1121,26 @@ class RiceQuantEval:
                 "Not": lambda a: ~a,
                 "Ts_Max": lambda df, n: df.rolling(max(1, _get_n(n))).max(),
                 "Ts_Min": lambda df, n: df.rolling(max(1, _get_n(n))).min(),
+                "Percentile": lambda df, p=50: df.rank(axis=1, pct=True),
+                "GroupNeutral": lambda df: df.sub(df.mean(axis=1), axis=0),
+                "Scale": lambda df, a=1: df.div(df.abs().sum(axis=1), axis=0) * a,
+                "Cov": lambda df1, df2, n=20: df1.rolling(max(1, _get_n(n))).cov(df2),
+                "Ts_ArgMax": lambda df, n=20: df.rolling(max(1, _get_n(n))).apply(lambda x: len(x) - 1 - x.argmax()),
+                "Ts_ArgMin": lambda df, n=20: df.rolling(max(1, _get_n(n))).apply(lambda x: len(x) - 1 - x.argmin()),
+                "Clip": lambda df, lower, upper: _ensure_df(df).clip(lower=lower, upper=upper),
+                "Count": lambda df=None, n=20: (
+                    pd.DataFrame(
+                        _ref_field.shape[1],
+                        index=_ref_field.index,
+                        columns=_ref_field.columns,
+                    )
+                    if df is None
+                    else _ensure_df(df).rolling(max(1, _get_n(n))).count()
+                ),
+                "Exp": lambda df: np.exp(_ensure_df(df).clip(upper=50)),
+                "Ceil": lambda df: np.ceil(df),
+                "Floor": lambda df: np.floor(df),
+                "WMA": lambda df, n=20: df.rolling(max(1, _get_n(n))).apply(lambda x: np.arange(1, len(x) + 1) @ x / np.arange(1, len(x) + 1).sum()),
                 "Const": lambda x: x,
             }
 

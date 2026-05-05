@@ -176,3 +176,36 @@ def test_get_llm_passes_codex_reasoning_effort(tmp_path, monkeypatch):
 
     assert isinstance(llm, CodexChatModel)
     assert llm.reasoning_effort == "low"
+
+
+def test_get_llm_configures_mimo_provider(monkeypatch):
+    captured = {}
+
+    class FakeChatOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setenv("MIMO_API_KEY", "mimo-test-key")
+    monkeypatch.setattr("core.llm.ChatOpenAI", FakeChatOpenAI)
+
+    llm = get_llm(provider="mimo", model_name="Mimo-v2.5pro")
+
+    assert isinstance(llm, FakeChatOpenAI)
+    assert captured["model"] == "mimo-v2.5-pro"
+    assert captured["api_key"] == "mimo-test-key"
+    assert str(captured["base_url"]) == "https://token-plan-cn.xiaomimimo.com/v1"
+
+
+def test_get_llm_configures_mimo_v25_alias(monkeypatch):
+    captured = {}
+
+    class FakeChatOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setenv("MIMO_API_KEY", "mimo-test-key")
+    monkeypatch.setattr("core.llm.ChatOpenAI", FakeChatOpenAI)
+
+    get_llm(provider="mimo", model_name="mimo v2.5")
+
+    assert captured["model"] == "mimo-v2.5"

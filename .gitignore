@@ -11,6 +11,7 @@ data/wiki_vault/
 data/rag_docs/macro_news/
 data/local_futures/
 data/test_db/
+data/*.lock
 results/
 logs/
 target/
@@ -21,6 +22,7 @@ project_bundle.md
 # Environment and Secrets
 .env
 .env.local
+.local-home/
 .~lock.*#
 
 # IDEs
@@ -38,5 +40,6 @@ frontend/vite.config.d.ts
 build/
 dist/
 dist_plugins/
+local-dist/
 src-tauri/binaries/
 *.spec.bak

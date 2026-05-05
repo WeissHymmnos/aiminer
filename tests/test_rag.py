@@ -1,11 +1,40 @@
 import unittest
+import tempfile
+from unittest.mock import patch
+
 from core.rag import RAGModule
+
+
+class FakeEmbeddingFunction:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def name(self):
+        return "default"
+
+    def __call__(self, input):
+        return [[0.0, 0.0, 0.0, 0.0] for _ in input]
 
 
 class TestRAG(unittest.TestCase):
     def setUp(self):
-        # 初始化一个轻量级的RAG，尽量不触发大规模DB加载
-        self.rag = RAGModule(db_dir="data/test_db", rebuild=False)
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.embedding_patch = patch(
+            "chromadb.utils.embedding_functions.SentenceTransformerEmbeddingFunction",
+            FakeEmbeddingFunction,
+        )
+        self.embedding_patch.start()
+        # Keep Chroma writes inside an ephemeral directory; never touch tracked data/test_db.
+        self.rag = RAGModule(
+            db_dir=f"{self.tmpdir.name}/chroma",
+            docs_dir=f"{self.tmpdir.name}/docs",
+            rebuild=False,
+            embedding_provider="local",
+        )
+
+    def tearDown(self):
+        self.embedding_patch.stop()
+        self.tmpdir.cleanup()
 
     def test_chunking(self):
         text = "This is a paragraph.\n\nThis is another paragraph."

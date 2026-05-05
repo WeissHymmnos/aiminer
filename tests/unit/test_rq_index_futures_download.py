@@ -30,6 +30,13 @@ class FakeRQ:
                     "de_listed_date": "2024-06-21",
                 },
                 {
+                    "order_book_id": "IF888",
+                    "underlying_symbol": "IF",
+                    "exchange": "CFFEX",
+                    "listed_date": "2024-01-01",
+                    "de_listed_date": "2024-06-21",
+                },
+                {
                     "order_book_id": "IH2406",
                     "underlying_symbol": "IH",
                     "exchange": "CFFEX",
@@ -93,6 +100,16 @@ class TestRQIndexFuturesDownload(unittest.TestCase):
                 end="2024-12-31",
             )
         self.assertEqual([item.order_book_id for item in contracts], ["IF2406", "IH2406"])
+
+    def test_discover_contracts_excludes_synthetic_continuous_symbols(self):
+        fake = FakeRQ()
+        with patch.object(downloader, "rq", fake):
+            contracts = downloader.discover_contracts(
+                underlyings=["IF"],
+                start="2024-01-01",
+                end="2024-12-31",
+            )
+        self.assertEqual([item.order_book_id for item in contracts], ["IF2406"])
 
     def test_download_contract_data_supports_incremental_append(self):
         fake = FakeRQ()

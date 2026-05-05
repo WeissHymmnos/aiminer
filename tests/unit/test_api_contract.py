@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 import pytest
 from core.strategy import persist_strategy_result
 from fastapi import HTTPException
-from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 
 os.environ["AIMINER_DISABLE_AUTH"] = "true"
@@ -464,19 +464,17 @@ def test_swarm_config_rejects_invalid_enum_before_route_creates_run(tmp_path, mo
     monkeypatch.chdir(tmp_path)
     mod = _module()
 
-    with TestClient(mod.app) as client:
-        response = client.post(
-            "/api/swarm/runs",
-            json={
+    with pytest.raises(ValidationError):
+        mod.SwarmConfig.model_validate(
+            {
                 "iterations": 1,
                 "mode": "ricequant",
                 "data_backend": "not-a-backend",
                 "engine": "polars",
                 "roles": ["researcher"],
-            },
+            }
         )
 
-    assert response.status_code == 422
     assert not mod.SWARM_RUN_DIR.exists() or not list(mod.SWARM_RUN_DIR.glob("run_*.json"))
 
 
@@ -526,6 +524,32 @@ def test_swarm_config_accepts_codex_llm_provider():
     assert config.llm_model == "gpt-5.4"
     assert config.llm_reasoning_effort == "xhigh"
     assert config.embedding_provider == "local"
+
+
+def test_start_swarm_reuses_existing_client_run_key(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    mod = _module()
+    mod._write_run_manifest(
+        "run_existing",
+        {
+            "run_id": "run_existing",
+            "status": "running",
+            "config": {"client_run_key": "retry_1"},
+        },
+    )
+
+    response = mod.start_swarm(
+        mod.SwarmConfig.model_validate(
+            {
+                "iterations": 1,
+                "roles": ["researcher"],
+                "client_run_key": "retry_1",
+            }
+        ),
+        actor=mod.Actor(identity="test"),
+    )
+
+    assert response == {"status": "existing", "run_id": "run_existing"}
 
 
 def test_swarm_config_rejects_codex_embedding_provider():

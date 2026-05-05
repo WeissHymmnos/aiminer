@@ -13,6 +13,7 @@ class AlphaMinerState(TypedDict, total=False):
     # Core tracking
     iteration: int
     max_iterations: int
+    disable_early_stop: bool
 
     # Context
     rag_context: str
@@ -30,6 +31,7 @@ class AlphaMinerState(TypedDict, total=False):
     variables_defined: Dict[str, str]
     code_expression: str
     is_valid_syntax: bool
+    syntax_error: Optional[str]
 
     # EvalAgent
     backtest_metrics: Dict[str, Any]
@@ -43,6 +45,8 @@ class AlphaMinerState(TypedDict, total=False):
     is_simulated: bool  # True when backtest used fallback/simulated metrics
     ic_direction: int
     ic_direction_label: str
+    evaluation_failed: bool
+    evaluation_error: Optional[str]
 
     # Strategy stage
     strategy_candidates: List[Dict[str, object]]

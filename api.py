@@ -9,6 +9,7 @@ import queue as queue_module
 import re
 import sqlite3
 import threading
+import time
 import traceback
 from collections import deque
 from datetime import datetime
@@ -58,6 +59,10 @@ FRONTEND_DIST_CANDIDATES = (
 MAX_CONCURRENT_SWARMS = int(os.getenv("AIMINER_MAX_CONCURRENT_SWARMS", "2"))
 SWARM_QUEUE_MAXSIZE = int(os.getenv("AIMINER_SWARM_QUEUE_MAXSIZE", "2000"))
 STALE_STARTING_SECONDS = int(os.getenv("AIMINER_STALE_STARTING_SECONDS", "120"))
+SWARM_RUN_TIMEOUT_SECONDS = int(os.getenv("AIMINER_SWARM_RUN_TIMEOUT_SECONDS", "3600"))
+SWARM_RUN_HEARTBEAT_SECONDS = int(os.getenv("AIMINER_SWARM_RUN_HEARTBEAT_SECONDS", "15"))
+MANUAL_BACKTEST_TIMEOUT_SECONDS = int(os.getenv("AIMINER_MANUAL_BACKTEST_TIMEOUT_SECONDS", "600"))
+STRATEGY_BACKTEST_TIMEOUT_SECONDS = int(os.getenv("AIMINER_STRATEGY_BACKTEST_TIMEOUT_SECONDS", "900"))
 LOG_PAGE_LIMIT_DEFAULT = 100
 LOG_PAGE_LIMIT_MAX = 500
 LIST_PAGE_LIMIT_DEFAULT = 50
@@ -447,6 +452,31 @@ def _factor_summary_for_run(run_id: str) -> Dict[str, int]:
     }
 
 
+def _readiness_payload() -> Dict[str, Any]:
+    from core.rag import chroma_sqlite_summary, resolve_embedding_model_tag
+
+    model_tag = resolve_embedding_model_tag(SETTINGS.embedding_provider)
+    rag = chroma_sqlite_summary(str(SETTINGS.data_path / "chroma_db"), model_tag)
+    wiki = chroma_sqlite_summary(str(SETTINGS.data_path / "wiki_db"), model_tag)
+    db_ready = DB_PATH.parent.exists()
+    ready = bool(db_ready and rag.get("ready") and wiki.get("ready"))
+    return {
+        "status": "ready" if ready else "degraded",
+        "ready": ready,
+        "db": {
+            "path": str(DB_PATH),
+            "parent_exists": db_ready,
+            "exists": DB_PATH.exists(),
+        },
+        "embedding": {
+            "provider": SETTINGS.embedding_provider,
+            "model_tag": model_tag,
+        },
+        "rag": rag,
+        "wiki": wiki,
+    }
+
+
 def _safe_float(value: Any) -> Optional[float]:
     try:
         return float(value)
@@ -739,6 +769,17 @@ def _list_run_manifests(offset: int = 0, limit: int = LIST_PAGE_LIMIT_DEFAULT, s
         "limit": page_limit,
         "next_offset": end,
     }
+
+
+def _find_run_by_client_key(client_run_key: Optional[str]) -> Optional[str]:
+    if not client_run_key or not SWARM_RUN_DIR.exists():
+        return None
+    for path in sorted(SWARM_RUN_DIR.glob("run_*.json"), reverse=True):
+        manifest = _load_json(path)
+        config = manifest.get("config") if isinstance(manifest, dict) else {}
+        if isinstance(config, dict) and config.get("client_run_key") == client_run_key:
+            return str(manifest.get("run_id") or path.stem)
+    return None
 
 
 def _register_run(
@@ -1050,6 +1091,55 @@ def _wait_run_process(run_id: str, process: multiprocessing.Process, queue: Any)
     except Exception:
         pass
     _cleanup_run(run_id)
+
+
+def _watch_swarm_run(run_id: str, process: multiprocessing.Process) -> None:
+    started_monotonic = time.monotonic()
+    interval = max(1, SWARM_RUN_HEARTBEAT_SECONDS)
+    while True:
+        time.sleep(interval)
+        manifest = _load_json(_manifest_path(run_id))
+        if not manifest or manifest.get("status") in FINAL_RUN_STATUSES:
+            return
+        try:
+            if not process.is_alive():
+                return
+        except Exception:
+            return
+
+        elapsed = int(time.monotonic() - started_monotonic)
+        if SWARM_RUN_TIMEOUT_SECONDS > 0 and elapsed >= SWARM_RUN_TIMEOUT_SECONDS:
+            failure_reason = f"swarm exceeded timeout of {SWARM_RUN_TIMEOUT_SECONDS}s"
+            _write_run_manifest(
+                run_id,
+                {
+                    "status": "stopping",
+                    "last_heartbeat_at": _now_iso(),
+                    "elapsed_seconds": elapsed,
+                    "failure_reason": failure_reason,
+                },
+            )
+            event = {
+                "type": "status",
+                "run_id": run_id,
+                "event": "timeout",
+                "status": "stopping",
+                "failure_reason": failure_reason,
+                "started_at": manifest.get("started_at"),
+            }
+            _append_jsonl(_log_path(run_id), event)
+            _emit_event(event)
+            _stop_process_tree(process.pid)
+            return
+
+        _write_run_manifest(
+            run_id,
+            {
+                "last_heartbeat_at": _now_iso(),
+                "elapsed_seconds": elapsed,
+                "timeout_seconds": SWARM_RUN_TIMEOUT_SECONDS,
+            },
+        )
 
 
 def _paginate_rows(rows: list[sqlite3.Row], offset: int, limit: int) -> Dict[str, Any]:
@@ -1450,6 +1540,10 @@ class SwarmConfig(RuntimeRequestModel):
     local_data_path: Optional[str] = None
     local_data_layout: str = "auto"
     parallel: bool = True
+    client_run_key: Optional[str] = Field(
+        default=None,
+        description="Optional idempotency key. Reusing it returns the existing run instead of creating a duplicate.",
+    )
 
     @field_validator("roles", mode="before")
     @classmethod
@@ -1458,6 +1552,16 @@ class SwarmConfig(RuntimeRequestModel):
         if not roles:
             raise ValueError("roles must contain at least one role")
         return roles
+
+    @field_validator("client_run_key")
+    @classmethod
+    def _validate_client_run_key(cls, value: Optional[str]) -> Optional[str]:
+        value = _normalize_text(value)
+        if value is None:
+            return None
+        if len(value) > 80 or not SAFE_ID_RE.match(value):
+            raise ValueError("client_run_key must be 1-80 chars of letters, numbers, '_' or '-'")
+        return value
 
 
 class BacktestRequest(RuntimeRequestModel):
@@ -1599,7 +1703,13 @@ def health() -> Dict[str, Any]:
         "status": "ok",
         "auth_disabled": AUTH_DISABLED,
         "active_run_ids": state.active_run_ids(),
+        "readiness": _readiness_payload(),
     }
+
+
+@app.get("/api/readiness")
+def readiness() -> Dict[str, Any]:
+    return _readiness_payload()
 
 
 @app.get("/api/results")
@@ -1867,23 +1977,31 @@ async def backtest_run(
         cached["cached"] = True
         return cached
     try:
-        result = await asyncio.to_thread(
-            manual_runner.run_manual_backtest,
-            req.expression,
-            req.start_date,
-            req.end_date,
-            req.engine,
-            req.market,
-            req.daily_normalize,
-            req.run_robustness,
-            req.label,
-            req.skip_validation,
-            req.data_backend,
-            req.market_profile,
-            req.market_mode,
-            req.market_profiles,
-            req.local_data_path,
-            req.local_data_layout,
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                manual_runner.run_manual_backtest,
+                req.expression,
+                req.start_date,
+                req.end_date,
+                req.engine,
+                req.market,
+                req.daily_normalize,
+                req.run_robustness,
+                req.label,
+                req.skip_validation,
+                req.data_backend,
+                req.market_profile,
+                req.market_mode,
+                req.market_profiles,
+                req.local_data_path,
+                req.local_data_layout,
+            ),
+            timeout=MANUAL_BACKTEST_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=f"backtest exceeded timeout of {MANUAL_BACKTEST_TIMEOUT_SECONDS}s",
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc))
@@ -1934,16 +2052,24 @@ async def strategy_run(
 ) -> Dict[str, Any]:
     _audit(actor, "strategy.run", "manual")
     try:
-        result = await asyncio.to_thread(
-            manual_runner.run_manual_strategy_backtest,
-            req.expression,
-            req.strategy_config,
-            req.data_backend,
-            req.market_profile,
-            req.market_mode,
-            req.market_profiles,
-            req.local_data_path,
-            req.local_data_layout,
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                manual_runner.run_manual_strategy_backtest,
+                req.expression,
+                req.strategy_config,
+                req.data_backend,
+                req.market_profile,
+                req.market_mode,
+                req.market_profiles,
+                req.local_data_path,
+                req.local_data_layout,
+            ),
+            timeout=STRATEGY_BACKTEST_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=f"strategy backtest exceeded timeout of {STRATEGY_BACKTEST_TIMEOUT_SECONDS}s",
         )
     except ValueError as exc:
         raise HTTPException(400, str(exc))
@@ -2097,6 +2223,9 @@ def start_swarm(
 ) -> Dict[str, Any]:
     _audit(actor, "swarm.start", "global", {"iterations": config.iterations})
     with state.lock:
+        existing_run_id = _find_run_by_client_key(config.client_run_key)
+        if existing_run_id:
+            return {"status": "existing", "run_id": existing_run_id}
         if state.running_count() >= MAX_CONCURRENT_SWARMS:
             raise HTTPException(409, "concurrency limit reached")
         run_id = new_run_id()
@@ -2109,6 +2238,9 @@ def start_swarm(
                 "created_at": _now_iso(),
                 "started_at": _now_iso(),
                 "ended_at": None,
+                "last_heartbeat_at": _now_iso(),
+                "elapsed_seconds": 0,
+                "timeout_seconds": SWARM_RUN_TIMEOUT_SECONDS,
                 "parallel": bool(config.parallel),
                 "config": config_payload,
                 "result_counts": {"factor_count": 0, "strategy_count": 0},
@@ -2144,6 +2276,11 @@ def start_swarm(
     threading.Thread(
         target=_wait_run_process,
         args=(run_id, process, queue),
+        daemon=True,
+    ).start()
+    threading.Thread(
+        target=_watch_swarm_run,
+        args=(run_id, process),
         daemon=True,
     ).start()
     event = {

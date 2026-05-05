@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 from typing import Dict, Any
 import re
 from datetime import datetime
@@ -188,28 +189,50 @@ class IdeaAgent:
         chain = prompt | self.llm
 
         try:
-            logger.info(
-                f"[IdeaAgent] LLM ({self.llm.model_name}) is thinking deeply about hypothesis for iteration {iteration}..."
-            )
-            raw_response = chain.invoke(
-                {"context": combined_context, "iteration": iteration}
-            )
-            cleaned_json = self._strip_markdown_json(raw_response.content)
-            result = HypothesisOutput.model_validate_json(cleaned_json)
+            max_retries = 2
+            for attempt in range(max_retries + 1):
+                try:
+                    logger.info(
+                        f"[IdeaAgent] LLM ({self.llm.model_name}) is thinking deeply about hypothesis for iteration {iteration}..."
+                    )
+                    raw_response = chain.invoke(
+                        {"context": combined_context, "iteration": iteration}
+                    )
+                    content = raw_response.content if raw_response else ""
+                    if not content or not content.strip():
+                        if attempt < max_retries:
+                            logger.warning(
+                                f"[IdeaAgent] LLM returned empty response (attempt {attempt + 1}), retrying..."
+                            )
+                            continue
+                        raise ValueError("LLM returned empty response after all retries")
 
-            logger.info(f"[IdeaAgent] Hypothesis Generated: {result.hypothesis_name}")
+                    cleaned_json = self._strip_markdown_json(content)
+                    result = HypothesisOutput.model_validate_json(cleaned_json)
 
-            return {
-                "rag_context": combined_knowledge,  # Now contains both
-                "macro_news_summary": macro_context,
-                "market_regime_summary": market_regime,
-                "hypothesis_name": result.hypothesis_name,
-                "hypothesis_description": result.hypothesis_description,
-                "rationale": result.rationale,
-                "messages": [
-                    f"[IdeaAgent] Proposed: {result.hypothesis_name} - {result.hypothesis_description}"
-                ],
-            }
+                    logger.info(f"[IdeaAgent] Hypothesis Generated: {result.hypothesis_name}")
+
+                    return {
+                        "rag_context": combined_knowledge,
+                        "macro_news_summary": macro_context,
+                        "market_regime_summary": market_regime,
+                        "hypothesis_name": result.hypothesis_name,
+                        "hypothesis_description": result.hypothesis_description,
+                        "rationale": result.rationale,
+                        "messages": [
+                            f"[IdeaAgent] Proposed: {result.hypothesis_name} - {result.hypothesis_description}"
+                        ],
+                    }
+                except (ValueError, json.JSONDecodeError) as parse_err:
+                    if attempt < max_retries:
+                        logger.warning(
+                            f"[IdeaAgent] Parse/empty error (attempt {attempt + 1}): {parse_err}, retrying..."
+                        )
+                        continue
+                    raise
+
+            # Retries exhausted
+            raise RuntimeError("IdeaAgent: all retry attempts exhausted")
         except Exception as e:
             logger.error(f"[IdeaAgent] Failed to generate hypothesis: {e}")
             try:

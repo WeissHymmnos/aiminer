@@ -8,6 +8,7 @@ import pandas as pd
 
 
 DATA_FILE_SUFFIXES = (".csv", ".parquet", ".pq")
+PRICE_COLUMNS = ("open", "high", "low", "close")
 
 _COLUMN_ALIASES = {
     "date": "datetime",
@@ -45,6 +46,54 @@ def _canonicalize_columns(df: pd.DataFrame) -> pd.DataFrame:
         lower = key.lower()
         rename_map[col] = _COLUMN_ALIASES.get(lower, lower)
     return df.rename(columns=rename_map)
+
+
+def ohlcv_quality_report(df: pd.DataFrame) -> dict[str, int]:
+    """Return row-level OHLCV sanity counts for local market data."""
+    if df.empty:
+        return {
+            "rows": 0,
+            "invalid_rows": 0,
+            "missing_ohlc": 0,
+            "non_positive_ohlc": 0,
+            "bad_high_low": 0,
+            "negative_volume": 0,
+        }
+
+    price = df[list(PRICE_COLUMNS)].apply(pd.to_numeric, errors="coerce")
+    missing_ohlc = price.isna().any(axis=1)
+    non_positive_ohlc = price.le(0).any(axis=1)
+    bad_high_low = price["high"].lt(price[["open", "low", "close"]].max(axis=1)) | price[
+        "low"
+    ].gt(price[["open", "high", "close"]].min(axis=1))
+    if "volume" in df.columns:
+        volume = pd.to_numeric(df["volume"], errors="coerce")
+        negative_volume = volume.lt(0) | volume.isna()
+    else:
+        negative_volume = pd.Series(True, index=df.index)
+
+    invalid_rows = missing_ohlc | non_positive_ohlc | bad_high_low | negative_volume
+    return {
+        "rows": int(len(df)),
+        "invalid_rows": int(invalid_rows.sum()),
+        "missing_ohlc": int(missing_ohlc.sum()),
+        "non_positive_ohlc": int(non_positive_ohlc.sum()),
+        "bad_high_low": int(bad_high_low.sum()),
+        "negative_volume": int(negative_volume.sum()),
+    }
+
+
+def validate_ohlcv_quality(df: pd.DataFrame, *, source: str = "local data") -> None:
+    report = ohlcv_quality_report(df)
+    if report["invalid_rows"] == 0:
+        return
+    raise ValueError(
+        f"{source} has {report['invalid_rows']} invalid OHLCV row(s): "
+        f"missing_ohlc={report['missing_ohlc']}, "
+        f"non_positive_ohlc={report['non_positive_ohlc']}, "
+        f"bad_high_low={report['bad_high_low']}, "
+        f"negative_volume={report['negative_volume']}"
+    )
 
 
 def _ensure_schema(
@@ -93,6 +142,11 @@ def _ensure_schema(
             df["vwap"] = df["close"]
     if "total_turnover" not in df.columns:
         df["total_turnover"] = df["vwap"].fillna(df["close"]) * df["volume"].fillna(0.0)
+
+    for col in ("open", "high", "low", "close", "volume", "vwap", "total_turnover"):
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+    validate_ohlcv_quality(df, source=f"local data ({market_profile})")
 
     keep = [
         "datetime",

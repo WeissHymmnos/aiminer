@@ -1,5 +1,6 @@
 import os
 import re
+import time
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List, Tuple
 from loguru import logger
@@ -8,6 +9,7 @@ from chromadb.utils.embedding_functions import (
     OpenAIEmbeddingFunction,
     SentenceTransformerEmbeddingFunction,
 )
+from core.chroma_lock import chroma_process_lock
 from core.llm import get_llm_config
 from core.settings import AiminerSettings, build_settings
 
@@ -77,6 +79,22 @@ def _dump_frontmatter(meta: Dict[str, Any]) -> str:
 
 _WIKILINK_RE = re.compile(r"\[\[([A-Za-z0-9_\-]+)\]\]")
 
+_RETRYABLE_WIKI_ERROR_MARKERS = (
+    "503",
+    "429",
+    "timeout",
+    "timed out",
+    "rate limit",
+    "temporarily unavailable",
+    "service unavailable",
+    "database is locked",
+)
+
+
+def _is_retryable_wiki_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(marker in message for marker in _RETRYABLE_WIKI_ERROR_MARKERS)
+
 
 class LLMWiki:
     def __init__(
@@ -99,6 +117,22 @@ class LLMWiki:
         self.log_file = os.path.join(self.wiki_vault, "log.md")
         self._ensure_file(self.index_file, "# Wiki Index\n\nWelcome to the compiled knowledge base.\n")
         self._ensure_file(self.log_file, "# Wiki Maintenance Log\n\n")
+        self.disable_chroma = os.getenv("AIMINER_DISABLE_CHROMA", "").lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if getattr(self, "disable_chroma", False):
+            logger.warning(
+                "Wiki ChromaDB shadow index is disabled via AIMINER_DISABLE_CHROMA; "
+                "using markdown lexical search fallback."
+            )
+            self.embedding_fn = None
+            self.db_dir = os.path.join(db_root, "disabled")
+            self.client = None
+            self.wiki_col = None
+            return
 
         # ... (Previous embedding initialization remains for search speed) ...
         # [Existing embedding code here, truncated for replace call brevity]
@@ -161,15 +195,94 @@ class LLMWiki:
 
         self.db_dir = os.path.join(db_root, model_tag)
         os.makedirs(self.db_dir, exist_ok=True)
-        self.client = chromadb.PersistentClient(path=self.db_dir)
-        self.wiki_col = self.client.get_or_create_collection(
-            "llm_wiki", embedding_function=self.embedding_fn
-        )
+        with chroma_process_lock("wiki init"):
+            self.client = chromadb.PersistentClient(path=self.db_dir)
+            self.wiki_col = self.client.get_or_create_collection(
+                "llm_wiki", embedding_function=self.embedding_fn
+            )
+
+    def _call_chroma_with_retry(self, action: str, fn, max_retries: int = 3):
+        if getattr(self, "disable_chroma", False):
+            raise RuntimeError("Wiki ChromaDB is disabled")
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                with chroma_process_lock(f"wiki {action}"):
+                    return fn()
+            except Exception as exc:
+                last_error = exc
+                if attempt < max_retries - 1 and _is_retryable_wiki_error(exc):
+                    wait_seconds = 0.5 * (attempt + 1)
+                    logger.warning(
+                        f"Wiki {action} failed (attempt {attempt + 1}/{max_retries}); "
+                        f"retrying in {wait_seconds:.1f}s: {exc}"
+                    )
+                    time.sleep(wait_seconds)
+                    continue
+                raise last_error
+
+    def _iter_markdown_pages(
+        self, type_filter: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        pages: List[Dict[str, Any]] = []
+        for name in os.listdir(self.wiki_vault):
+            if not name.endswith(".md") or name in {"index.md", "log.md"}:
+                continue
+            slug = name[:-3]
+            path = os.path.join(self.wiki_vault, name)
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    raw = f.read()
+            except OSError:
+                continue
+            meta, body = _parse_frontmatter(raw)
+            page_type = meta.get("type", "factor_card")
+            if type_filter and page_type != type_filter:
+                continue
+            pages.append(
+                {
+                    "slug": meta.get("slug", slug),
+                    "title": meta.get("title", slug),
+                    "type": page_type,
+                    "status": meta.get("status", ""),
+                    "summary": meta.get("summary", ""),
+                    "last_updated": meta.get("updated", ""),
+                    "body": body,
+                    "content": body,
+                    "metadata": meta,
+                }
+            )
+        return pages
+
+    @staticmethod
+    def _lexical_score(query: str, text: str) -> int:
+        terms = [
+            term
+            for term in query.lower().replace("_", " ").split()
+            if len(term) > 1
+        ]
+        text_lower = text.lower()
+        return sum(text_lower.count(term) for term in terms)
 
     def list_pages(self, type_filter: Optional[str] = None) -> List[Dict[str, Any]]:
         """List all pages in the wiki."""
+        if getattr(self, "disable_chroma", False):
+            return [
+                {
+                    "title": page["title"],
+                    "slug": page["slug"],
+                    "type": page["type"],
+                    "last_updated": page["last_updated"],
+                    "content": page["content"],
+                }
+                for page in self._iter_markdown_pages(type_filter)
+            ]
+
         where = {"type": type_filter} if type_filter else None
-        results = self.wiki_col.get(where=where, include=["documents", "metadatas"])
+        results = self._call_chroma_with_retry(
+            "list_pages",
+            lambda: self.wiki_col.get(where=where, include=["documents", "metadatas"]),
+        )
         
         pages = []
         if results["ids"]:
@@ -235,17 +348,27 @@ class LLMWiki:
             f.write(content.rstrip() + "\n")
 
         # 2. Update the Shadow Index (ChromaDB)
-        chroma_meta = {
-            **{k: v for k, v in full_meta.items() if isinstance(v, (str, int, float, bool))},
-            "last_updated": now_iso,
-            "tags_str": ",".join(full_meta["tags"]),
-            "related_str": ",".join(full_meta["related"]),
-        }
-        self.wiki_col.upsert(
-            ids=[page_id],
-            documents=[f"# {title}\n\n{full_meta['summary']}\n\n{content}"],
-            metadatas=[chroma_meta],
-        )
+        if not getattr(self, "disable_chroma", False):
+            chroma_meta = {
+                **{k: v for k, v in full_meta.items() if isinstance(v, (str, int, float, bool))},
+                "last_updated": now_iso,
+                "tags_str": ",".join(full_meta["tags"]),
+                "related_str": ",".join(full_meta["related"]),
+            }
+            try:
+                self._call_chroma_with_retry(
+                    "upsert",
+                    lambda: self.wiki_col.upsert(
+                        ids=[page_id],
+                        documents=[f"# {title}\n\n{full_meta['summary']}\n\n{content}"],
+                        metadatas=[chroma_meta],
+                    ),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Wiki shadow index upsert failed after retries; "
+                    f"Markdown source page was still written: {exc}"
+                )
 
         # 3. Reciprocal backlink audit (Karpathy: LLMs don't mind touching
         #    15 files in one pass — but we can do it programmatically when
@@ -713,14 +836,46 @@ class LLMWiki:
         """Semantic search that returns full pages (frontmatter + body)
         instead of truncated snippets. Use this when the caller wants to
         reason over complete wiki content rather than paste it as context."""
+        if getattr(self, "disable_chroma", False):
+            pages = self._iter_markdown_pages(type_filter)
+            scored = [
+                (
+                    self._lexical_score(
+                        query,
+                        f"{page['title']} {page['summary']} {page['body']}",
+                    ),
+                    page,
+                )
+                for page in pages
+            ]
+            scored = [item for item in scored if item[0] > 0]
+            scored.sort(key=lambda item: item[0], reverse=True)
+            return [
+                {
+                    "slug": page["slug"],
+                    "title": page["title"],
+                    "type": page["type"],
+                    "status": page["status"],
+                    "summary": page["summary"],
+                    "last_updated": page["last_updated"],
+                    "body": page["body"],
+                    "chroma_meta": {},
+                    "chroma_doc": page["body"],
+                }
+                for _, page in scored[:top_k]
+            ]
+
         try:
-            count = self.wiki_col.count()
+            count = self._call_chroma_with_retry("count", self.wiki_col.count)
             if count == 0:
                 return []
             where = {"type": type_filter} if type_filter else None
             actual_k = min(top_k, count)
-            results = self.wiki_col.query(
-                query_texts=[query], n_results=actual_k, where=where
+            results = self._call_chroma_with_retry(
+                "query_pages",
+                lambda: self.wiki_col.query(
+                    query_texts=[query], n_results=actual_k, where=where
+                ),
             )
         except Exception as e:
             logger.error(f"Wiki query_pages failed: {e}")
@@ -757,16 +912,37 @@ class LLMWiki:
         self, query: str, n_results: int = 3, type_filter: Optional[str] = None
     ) -> str:
         """从 Wiki 检索"""
+        if getattr(self, "disable_chroma", False):
+            pages = self.query_pages(query, top_k=n_results, type_filter=type_filter)
+            if not pages:
+                return "Wiki 中暂无相关匹配内容。"
+            parts = ["=== LLM WIKI ==="]
+            for page in pages:
+                updated_short = (
+                    page["last_updated"][:10]
+                    if isinstance(page.get("last_updated"), str)
+                    else ""
+                )
+                body = page.get("body", "")
+                parts.append(f"**{page['title']}** (更新于 {updated_short})")
+                parts.append(f"Type: {page.get('type', '')}, Status: {page.get('status', '')}")
+                parts.append(body[:1000] + "..." if len(body) > 1000 else body)
+                parts.append("---")
+            return "\n".join(parts)
+
         try:
-            count = self.wiki_col.count()
+            count = self._call_chroma_with_retry("count", self.wiki_col.count)
             if count == 0:
                 return "Wiki 中暂无相关知识。"
 
             actual_n = min(n_results, count)
             where = {"type": type_filter} if type_filter else None
 
-            results = self.wiki_col.query(
-                query_texts=[query], n_results=actual_n, where=where
+            results = self._call_chroma_with_retry(
+                "query",
+                lambda: self.wiki_col.query(
+                    query_texts=[query], n_results=actual_n, where=where
+                ),
             )
 
             if not results["documents"] or not results["documents"][0]:
@@ -791,7 +967,24 @@ class LLMWiki:
 
     def get_page(self, slug: str) -> Optional[Dict]:
         """获取单个页面"""
-        results = self.wiki_col.get(where={"slug": slug})
+        if getattr(self, "disable_chroma", False):
+            path = os.path.join(self.wiki_vault, f"{slug}.md")
+            if not os.path.exists(path):
+                return None
+            with open(path, "r", encoding="utf-8") as f:
+                raw = f.read()
+            meta, body = _parse_frontmatter(raw)
+            return {
+                "id": f"wiki_{slug}",
+                "title": meta.get("title", slug),
+                "content": body,
+                "metadata": meta,
+            }
+
+        results = self._call_chroma_with_retry(
+            "get_page",
+            lambda: self.wiki_col.get(where={"slug": slug}),
+        )
         if results["ids"]:
             return {
                 "id": results["ids"][0],
