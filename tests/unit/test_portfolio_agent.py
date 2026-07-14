@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 import pandas as pd
 import pytest
-from agents.portfolio_agent import PortfolioAgent, PortfolioDecision
+from aiminer.agents.portfolio_agent import PortfolioAgent, PortfolioDecision
 
 def test_portfolio_agent_select_method(monkeypatch):
     # Mock LLM to return a predefined decision
@@ -15,7 +15,7 @@ def test_portfolio_agent_select_method(monkeypatch):
         mock_with_structured.with_structured_output.return_value = mock_llm
         return mock_with_structured
         
-    monkeypatch.setattr("agents.portfolio_agent.get_llm", mock_get_llm)
+    monkeypatch.setattr("aiminer.agents.portfolio_agent.get_llm", mock_get_llm)
     
     agent = PortfolioAgent()
     
@@ -42,7 +42,7 @@ def test_portfolio_agent_uses_plain_json_for_deepseek(monkeypatch):
     base_llm = MagicMock()
     base_llm.invoke.return_value.content = '{"method": "equal", "rationale": "Plain JSON rationale"}'
 
-    monkeypatch.setattr("agents.portfolio_agent.get_llm", lambda *args, **kwargs: base_llm)
+    monkeypatch.setattr("aiminer.agents.portfolio_agent.get_llm", lambda *args, **kwargs: base_llm)
 
     agent = PortfolioAgent(provider="deepseek", model="deepseek-v4-flash")
     factors = [{"id": "f1", "metrics": {"information_coefficient": 0.05, "sharpe": 1.0}}]
@@ -63,7 +63,7 @@ def test_portfolio_agent_retries_plain_json_when_structured_fails(monkeypatch):
     base_llm.with_structured_output.return_value = structured_llm
     base_llm.invoke.return_value.content = '{"method": "risk_parity", "rationale": "Retry rationale"}'
 
-    monkeypatch.setattr("agents.portfolio_agent.get_llm", lambda *args, **kwargs: base_llm)
+    monkeypatch.setattr("aiminer.agents.portfolio_agent.get_llm", lambda *args, **kwargs: base_llm)
 
     agent = PortfolioAgent(provider="openai", model="model-without-structured-output")
     factors = [{"id": "f1", "metrics": {"information_coefficient": 0.05, "sharpe": 1.0}}]

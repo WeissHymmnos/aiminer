@@ -83,7 +83,7 @@ flowchart LR
   负责 LLM 驱动的假说、因子、评估和汇总 Agent。
 - `core/`
   负责配置、评估引擎、RAG、Wiki、本地数据、策略回测等核心能力。
-- `workflow/`
+- `app_workflow/`
   负责 LangGraph 状态图与路由逻辑。
 - `schemas/`
   负责结构化消息模型。
@@ -709,7 +709,7 @@ sequenceDiagram
 - API 单容器模式
   使生产环境可直接依赖一个进程入口
 - `worker` profile
-  使用 `python manager.py --iterations ${AIMINER_ITERATIONS:-5}`，不配置自动重启，避免有限任务循环写产物
+  使用 `python -m aiminer.manager --iterations ${AIMINER_ITERATIONS:-5}`（容器内 `PYTHONPATH=/app/src`），不配置自动重启，避免有限任务循环写产物
 - `tui` profile
   使用 `docker compose --profile tui run --rm tui` 进入交互式 TUI
 
@@ -2060,9 +2060,9 @@ LangChain Agent
 
 已在上文说明。
 
-## 8. `workflow/` 与 `schemas/` 说明
+## 8. `app_workflow/` 与 `schemas/` 说明
 
-### 8.1 `workflow/state.py`
+### 8.1 `app_workflow/state.py`
 
 文件说明：
 
@@ -2073,7 +2073,7 @@ LangChain Agent
 - `AlphaMinerState`
   作用：承载假说、表达式、评估结果、迭代次数、终止条件等。
 
-### 8.2 `workflow/graph.py`
+### 8.2 `app_workflow/graph.py`
 
 文件说明：
 

@@ -1,5 +1,5 @@
-from core import wiki as wiki_module
-from core.wiki import LLMWiki
+from aiminer.core import wiki as wiki_module
+from aiminer.core.wiki import LLMWiki
 
 
 def _wiki_without_init(tmp_path, wiki_col):

@@ -2,8 +2,8 @@ import sqlite3
 
 import pandas as pd
 
-from core import manual_runner
-from core.strategy import _normalize_positions, _rebalance_mask, persist_strategy_result
+from aiminer.core import manual_runner
+from aiminer.core.strategy import _normalize_positions, _rebalance_mask, persist_strategy_result
 
 
 class _FakeStrategyEvaluator:
@@ -126,7 +126,7 @@ def test_manual_strategy_cache_materializes_run_scoped_strategy_ids(monkeypatch,
         build_calls.append(factor_expressions[0])
         return _FakeStrategyEvaluator(factor_expressions[0])
 
-    monkeypatch.setattr("core.evaluator_factory.build_evaluator", _build_evaluator)
+    monkeypatch.setattr("aiminer.core.evaluator_factory.build_evaluator", _build_evaluator)
     config = {
         "label": "cache-test",
         "strategy_mode": "time_series",

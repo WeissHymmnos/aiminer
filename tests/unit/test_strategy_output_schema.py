@@ -1,6 +1,6 @@
 import json
 
-from schemas.messages import RefinementProposalOutput, StrategyProposalBatchOutput
+from aiminer.schemas.messages import RefinementProposalOutput, StrategyProposalBatchOutput
 
 
 def _candidate_payload(**overrides):

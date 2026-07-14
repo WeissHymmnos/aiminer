@@ -1,5 +1,5 @@
 import unittest
-from agents.factor_agent import FactorAgent
+from aiminer.agents.factor_agent import FactorAgent
 
 
 class TestAgentValidation(unittest.TestCase):

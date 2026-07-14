@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
 import pandas as pd
-from core.portfolio import (
+from aiminer.core.portfolio import (
     calculate_equal_weights,
     calculate_inverse_volatility_weights,
     calculate_risk_parity_weights,

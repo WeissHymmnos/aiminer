@@ -7,14 +7,14 @@ import threading
 from datetime import datetime, timedelta
 
 import pytest
-from core.strategy import persist_strategy_result
+from aiminer.core.strategy import persist_strategy_result
 from fastapi import HTTPException
 from pydantic import ValidationError
 
 
 os.environ["AIMINER_DISABLE_AUTH"] = "true"
 
-import api  # noqa: E402
+import aiminer.api as api  # noqa: E402
 
 
 def _module():
@@ -129,6 +129,105 @@ def test_results_endpoint_legacy_alpha_pool_schema(tmp_path, monkeypatch):
     assert "selection_score" in payload["items"][0]
     assert payload["items"][0]["selection_score"] is None
     assert payload["items"][0]["best_strategy_id"] is None
+
+
+def test_factor_crossover_endpoint_uses_selected_pool_factors(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    db_path = _prepare_db(tmp_path)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE alpha_pool (
+                id TEXT PRIMARY KEY,
+                role TEXT,
+                hypothesis TEXT,
+                code TEXT,
+                ic REAL,
+                rank_ic REAL,
+                metrics_json TEXT,
+                returns_json TEXT,
+                perf_metric REAL,
+                is_simulated INTEGER,
+                timestamp TEXT,
+                data_backend TEXT,
+                evaluation_mode TEXT,
+                evaluation_engine TEXT,
+                market_profile TEXT,
+                market_mode TEXT
+            )
+            """
+        )
+        for factor_id, ic in (("alpha_a", 0.03), ("alpha_b", 0.02)):
+            conn.execute(
+                """
+                INSERT INTO alpha_pool (
+                    id, role, hypothesis, code, ic, rank_ic, metrics_json,
+                    returns_json, perf_metric, is_simulated, timestamp,
+                    data_backend, evaluation_mode, evaluation_engine,
+                    market_profile, market_mode
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    factor_id,
+                    "role",
+                    f"hypothesis {factor_id}",
+                    "Rank($close)",
+                    ic,
+                    ic / 2,
+                    json.dumps({"information_coefficient": ic, "rank_ic": ic / 2}),
+                    json.dumps({"2024-01-01": ic}),
+                    ic,
+                    0,
+                    "2024-01-01T00:00:00",
+                    "ricequant",
+                    "ricequant",
+                    "polars",
+                    "cn_stock",
+                    "single",
+                ),
+            )
+        conn.commit()
+
+    mod = _module()
+    calls = {}
+
+    class _DummyManager:
+        def __init__(self, roles=None, **kwargs):
+            calls["init"] = kwargs
+            self.alpha_pool = []
+
+        def run_genetic_crossover(self, **kwargs):
+            calls["run"] = kwargs
+            return {
+                "status": "accepted",
+                "reason": "accepted",
+                "parent_factor_ids": [factor["id"] for factor in kwargs["parent_factors"]],
+                "factor": {
+                    "id": "alpha_hybrid",
+                    "hypothesis": "hybrid",
+                    "code": "Rank($close)",
+                    "perf_metric": 0.02,
+                    "metrics": {"information_coefficient": 0.02},
+                    "returns": {},
+                },
+            }
+
+    monkeypatch.setattr(mod, "PortfolioManager", _DummyManager)
+
+    payload = mod.run_factor_crossover(
+        mod.FactorCrossoverRequest(
+            factor_ids=["alpha_a", "alpha_b"],
+            crossover_iterations=2,
+        ),
+        actor=mod.Actor(identity="test"),
+    )
+
+    assert payload["status"] == "accepted"
+    assert payload["parent_factor_ids"] == ["alpha_a", "alpha_b"]
+    assert calls["init"]["crossover_iterations"] == 2
+    assert calls["run"]["iterations"] == 2
+    assert calls["run"]["agent_id"] == "agent_crossover_pool"
+    assert [factor["id"] for factor in calls["run"]["parent_factors"]] == ["alpha_a", "alpha_b"]
 
 
 def test_wiki_index_returns_paginated_shape():

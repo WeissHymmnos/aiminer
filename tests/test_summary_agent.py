@@ -2,8 +2,8 @@ import unittest
 import os
 import pandas as pd
 from unittest.mock import patch, MagicMock
-from agents.summary_agent import SummaryAgent
-from core.settings import AiminerSettings
+from aiminer.agents.summary_agent import SummaryAgent
+from aiminer.core.settings import AiminerSettings
 
 
 class TestSummaryAgent(unittest.TestCase):
@@ -11,7 +11,7 @@ class TestSummaryAgent(unittest.TestCase):
         # 初始化并在测试中mock LLM避免实际网络调用
         self.agent = SummaryAgent()
 
-    @patch("agents.summary_agent.ChatPromptTemplate")
+    @patch("aiminer.agents.summary_agent.ChatPromptTemplate")
     def test_generate_markdown_report(self, mock_prompt):
         # 配置Mock LLM的行为
         # chain = prompt | self.llm
@@ -60,12 +60,12 @@ class TestSummaryAgent(unittest.TestCase):
 
 def test_summary_agent_uses_settings_paths_and_dict_returns(tmp_path):
     settings = AiminerSettings(results_dir=str(tmp_path / "results"))
-    with patch("agents.summary_agent.get_llm", return_value=MagicMock()):
+    with patch("aiminer.agents.summary_agent.get_llm", return_value=MagicMock()):
         agent = SummaryAgent(settings=settings)
 
     mock_chain = MagicMock()
     mock_chain.invoke.return_value.content = "Mocked economic analysis."
-    with patch("agents.summary_agent.ChatPromptTemplate") as mock_prompt:
+    with patch("aiminer.agents.summary_agent.ChatPromptTemplate") as mock_prompt:
         mock_prompt.from_messages.return_value.__or__.return_value = mock_chain
         report_path = agent.generate_markdown_report(
             {

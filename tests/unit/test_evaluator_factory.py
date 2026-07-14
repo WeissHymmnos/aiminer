@@ -1,6 +1,6 @@
 import unittest
 
-from core.evaluator_factory import evaluation_config_from_mapping
+from aiminer.core.evaluator_factory import evaluation_config_from_mapping
 
 
 class TestEvaluatorFactoryConfig(unittest.TestCase):

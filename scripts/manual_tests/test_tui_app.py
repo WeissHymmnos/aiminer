@@ -1,4 +1,4 @@
-from tui import TUIApp
+from aiminer.tui import TUIApp
 import multiprocessing
 
 if __name__ == "__main__":

@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from core.evaluator_factory import build_evaluator, evaluation_config_from_mapping
-from core.settings import (
+from aiminer.core.evaluator_factory import build_evaluator, evaluation_config_from_mapping
+from aiminer.core.settings import (
     SUPPORTED_DATA_BACKENDS,
     SUPPORTED_EVALUATION_MODES,
     SUPPORTED_LLM_PROVIDERS,
@@ -64,7 +64,7 @@ def test_supported_parameter_matrix_is_validated_consistently(
     market_profiles,
     local_data_layout,
 ):
-    monkeypatch.setattr("core.settings.load_dotenv", lambda: None)
+    monkeypatch.setattr("aiminer.core.settings.load_dotenv", lambda: None)
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
     local_path = tmp_path / "local"
     local_path.mkdir()
@@ -101,7 +101,7 @@ def test_supported_parameter_matrix_is_validated_consistently(
 def test_provider_embedding_reasoning_matrix(
     tmp_path, monkeypatch, llm_provider, embedding_provider, reasoning_effort
 ):
-    monkeypatch.setattr("core.settings.load_dotenv", lambda: None)
+    monkeypatch.setattr("aiminer.core.settings.load_dotenv", lambda: None)
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
     local_path = tmp_path / "local"
     local_path.mkdir()
@@ -127,12 +127,12 @@ def test_provider_embedding_reasoning_matrix(
 
 
 def test_all_settings_supported_combinations_reach_evaluator_factory(tmp_path, monkeypatch):
-    monkeypatch.setattr("core.settings.load_dotenv", lambda: None)
+    monkeypatch.setattr("aiminer.core.settings.load_dotenv", lambda: None)
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
     for module_name, class_name in [
-        ("core.alphaeval.rq_eval", "RiceQuantEval"),
-        ("core.alphaeval.modeltester", "AlphaEval"),
-        ("core.alphaeval.local_eval", "LocalDataEval"),
+        ("aiminer.core.alphaeval.rq_eval", "RiceQuantEval"),
+        ("aiminer.core.alphaeval.modeltester", "AlphaEval"),
+        ("aiminer.core.alphaeval.local_eval", "LocalDataEval"),
     ]:
         module = types.ModuleType(module_name)
         setattr(module, class_name, _DummyEvaluator)

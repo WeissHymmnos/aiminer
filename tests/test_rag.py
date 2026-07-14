@@ -2,7 +2,7 @@ import unittest
 import tempfile
 from unittest.mock import patch
 
-from core.rag import RAGModule
+from aiminer.core.rag import RAGModule
 
 
 class FakeEmbeddingFunction:

@@ -6,7 +6,7 @@ import pytest
 
 pytest.importorskip("rqdatac", reason="RiceQuant evaluator imports the optional rqdatac client")
 
-from core.alphaeval.rq_eval import RiceQuantEval
+from aiminer.core.alphaeval.rq_eval import RiceQuantEval
 
 
 pytestmark = pytest.mark.external
@@ -70,7 +70,7 @@ class TestOperators(unittest.TestCase):
         self.assertAlmostEqual(res.iloc[0, 2], 1.0, places=5)
 
     def test_zscore_robustness(self):
-        from core.alphaeval.rq_eval import zscore
+        from aiminer.core.alphaeval.rq_eval import zscore
 
         # 测试全0或全NaN的情况
         empty_df = pd.DataFrame(0, index=self.dates, columns=self.instruments)

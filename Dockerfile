@@ -70,7 +70,7 @@ RUN mkdir -p data/chroma_db data/wiki_db results logs
 EXPOSE 8000
 
 # Set environment variables
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/app/src
 
 # Default command (can be overridden in docker-compose or docker run)
-CMD ["python", "main.py"]
+CMD ["python", "-m", "aiminer.main"]

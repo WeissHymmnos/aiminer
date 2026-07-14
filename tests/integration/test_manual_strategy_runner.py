@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from core import manual_runner
+from aiminer.core import manual_runner
 
 
 class FakeEvaluator:
@@ -37,8 +37,8 @@ class FakeEvaluator:
 
 
 class TestManualStrategyRunner(unittest.TestCase):
-    @patch("core.manual_runner.validate_expression", return_value=(True, "ok"))
-    @patch("core.evaluator_factory.build_evaluator")
+    @patch("aiminer.core.manual_runner.validate_expression", return_value=(True, "ok"))
+    @patch("aiminer.core.evaluator_factory.build_evaluator")
     def test_run_manual_strategy_backtest_returns_payload(self, mock_build_evaluator, _mock_validate):
         evaluator = FakeEvaluator(
             factor_expressions=["Rank($close)"],

@@ -1,5 +1,5 @@
 import asyncio
-from tui import TUIApp
+from aiminer.tui import TUIApp
 
 async def test():
     app = TUIApp()

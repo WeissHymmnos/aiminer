@@ -21,7 +21,7 @@ pip install -r requirements.txt
 
 ### 启动多 Agent 协作挖掘
 ```bash
-python manager.py --iterations 5 --mode ricequant \
+PYTHONPATH=src python -m aiminer.manager --iterations 5 --mode ricequant \
 --llm-provider glm --llm-model glm-4 \
 --roles "专注量价反转的专家" "宏观周期对冲专家" "统计套利专家" \
 --parallel
@@ -32,7 +32,7 @@ python manager.py --iterations 5 --mode ricequant \
 如果本机已经安装并登录 `codex` CLI，可以把它作为文本生成 LLM 的替代选项：
 
 ```bash
-python manager.py --iterations 3 --mode ricequant \
+PYTHONPATH=src python -m aiminer.manager --iterations 3 --mode ricequant \
   --llm-provider codex --llm-model gpt-5.4 \
   --llm-reasoning-effort xhigh \
   --embedding-provider local \

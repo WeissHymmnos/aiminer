@@ -11,9 +11,10 @@ services:
       - ./data:/app/data
       - ./results:/app/results
       - ./logs:/app/logs
-    command: uvicorn api:app --host 0.0.0.0 --port 8000
+    command: uvicorn aiminer.api:app --host 0.0.0.0 --port 8000
     environment:
       - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app/src
       - AIMINER_DATA_DIR=/app/data
       - AIMINER_RESULTS_DIR=/app/results
       - AIMINER_LOGS_DIR=/app/logs
@@ -54,9 +55,10 @@ services:
       - ./data:/app/data
       - ./results:/app/results
       - ./logs:/app/logs
-    command: python manager.py --iterations ${AIMINER_ITERATIONS:-5}
+    command: python -m aiminer.manager --iterations ${AIMINER_ITERATIONS:-5}
     environment:
       - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app/src
       - AIMINER_DATA_DIR=/app/data
       - AIMINER_RESULTS_DIR=/app/results
       - AIMINER_LOGS_DIR=/app/logs
@@ -86,9 +88,10 @@ services:
       - ./data:/app/data
       - ./results:/app/results
       - ./logs:/app/logs
-    command: python tui.py
+    command: python -m aiminer.tui
     environment:
       - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app/src
       - AIMINER_DATA_DIR=/app/data
       - AIMINER_RESULTS_DIR=/app/results
       - AIMINER_LOGS_DIR=/app/logs

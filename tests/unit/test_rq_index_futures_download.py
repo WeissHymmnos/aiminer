@@ -8,7 +8,7 @@ import pytest
 
 pytest.importorskip("rqdatac", reason="RiceQuant downloader imports the optional rqdatac client")
 
-from core.local_data import load_local_ohlcv
+from aiminer.core.local_data import load_local_ohlcv
 from scripts import download_rq_index_futures as downloader
 
 

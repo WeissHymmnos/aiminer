@@ -7,8 +7,8 @@ import pytest
 pl = pytest.importorskip("polars", reason="Polars tests require the optional native engine stack")
 pytest.importorskip("rqdatac", reason="RiceQuant evaluator imports the optional rqdatac client")
 
-from core.alphaeval.rq_eval import RiceQuantEval
-from core.alphaeval.polars_engine import PolarsEngine
+from aiminer.core.alphaeval.rq_eval import RiceQuantEval
+from aiminer.core.alphaeval.polars_engine import PolarsEngine
 
 
 pytestmark = pytest.mark.native
@@ -54,7 +54,7 @@ class TestPolarsRefactor(unittest.TestCase):
 
     def test_ricequant_eval_integration(self):
         # We need to bypass the auth in RiceQuantEval for testing
-        import core.alphaeval.rq_eval as rq_eval
+        import aiminer.core.alphaeval.rq_eval as rq_eval
 
         original_auth = rq_eval.init_rq_auth
         rq_eval.init_rq_auth = lambda: None
@@ -77,7 +77,7 @@ class TestPolarsRefactor(unittest.TestCase):
 
     def test_ricequant_eval_integration_polars(self):
         # We need to bypass the auth in RiceQuantEval for testing
-        import core.alphaeval.rq_eval as rq_eval
+        import aiminer.core.alphaeval.rq_eval as rq_eval
 
         original_auth = rq_eval.init_rq_auth
         rq_eval.init_rq_auth = lambda: None

@@ -2,7 +2,7 @@ import json
 import unittest
 from unittest.mock import patch, MagicMock
 
-from agents.strategy_critic import (
+from aiminer.agents.strategy_critic import (
     DEFAULT_IMPROVEMENT_EPSILON,
     StrategyCritic,
     _config_signature,
@@ -19,7 +19,7 @@ def _llm_response(payload: dict) -> MagicMock:
 
 def _build_critic(payload: dict) -> StrategyCritic:
     """Construct a critic with the LLM stubbed to return `payload`."""
-    with patch("agents.strategy_critic.get_llm") as mock_get_llm:
+    with patch("aiminer.agents.strategy_critic.get_llm") as mock_get_llm:
         mock_llm = MagicMock()
         mock_llm.invoke.return_value = _llm_response(payload)
         # The critic builds `prompt | self.llm` then calls .invoke({}).

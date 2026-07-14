@@ -17,8 +17,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.alphaeval.rq_eval import init_rq_auth
-from core.local_data import ohlcv_quality_report, validate_ohlcv_quality
+from aiminer.core.alphaeval.rq_eval import init_rq_auth
+from aiminer.core.local_data import ohlcv_quality_report, validate_ohlcv_quality
 from scripts.test_local_futures_data import run_suite
 
 

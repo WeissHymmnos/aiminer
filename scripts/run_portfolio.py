@@ -10,9 +10,9 @@ import sys
 # Add parent directory to sys.path to allow imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agents.portfolio_agent import PortfolioAgent
-from core.portfolio import construct_portfolio
-from core.settings import build_settings
+from aiminer.agents.portfolio_agent import PortfolioAgent
+from aiminer.core.portfolio import construct_portfolio
+from aiminer.core.settings import build_settings
 
 def _serialize_returns(returns) -> dict:
     if returns is None or not hasattr(returns, "items"):

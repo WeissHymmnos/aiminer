@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from core.strategy import (
+from aiminer.core.strategy import (
     StrategyBacktester,
     StrategyConfig,
     _split_walk_forward_windows,

@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from core.local_data import load_local_ohlcv
+from aiminer.core.local_data import load_local_ohlcv
 
 
 class TestLocalDataLoader(unittest.TestCase):

@@ -1,6 +1,6 @@
 import pandas as pd
 
-from core.alphaeval.rq_eval import RiceQuantEval
+from aiminer.core.alphaeval.rq_eval import RiceQuantEval
 
 
 def test_daily_rank_ic_uses_cross_sectional_spearman_rank():

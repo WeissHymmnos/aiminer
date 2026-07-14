@@ -39,6 +39,36 @@ frontend/vite.config.d.ts
 # Packaging artifacts (PyInstaller / Tauri sidecar / Rust plugin wheels)
 build/
 dist/
+*.egg-info/
+.eggs/
+
+# PyInstaller
+*.spec
+
+# pytest
+.pytest_cache/
+
+# Unit test / coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+
+# Tauri
+src-tauri/target/
+
+# Rust
+Cargo.lock
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Other
+*.lock
+
+dist/
 dist_plugins/
 local-dist/
 src-tauri/binaries/

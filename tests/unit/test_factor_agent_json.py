@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from agents.factor_agent import FactorAgent
+from aiminer.agents.factor_agent import FactorAgent
 from langchain_core.runnables import RunnableLambda
 
 
@@ -151,7 +151,7 @@ def test_validate_rejects_tuple_expression_from_bad_auto_repair():
 
 
 def test_ricequant_dry_run_accepts_count_with_window():
-    from core.alphaeval.rq_eval import RiceQuantEval
+    from aiminer.core.alphaeval.rq_eval import RiceQuantEval
 
     ok, message = RiceQuantEval.dry_run("Count($close, 20)")
 
@@ -159,7 +159,7 @@ def test_ricequant_dry_run_accepts_count_with_window():
 
 
 def test_ricequant_dry_run_broadcasts_scalar_log_input():
-    from core.alphaeval.rq_eval import RiceQuantEval
+    from aiminer.core.alphaeval.rq_eval import RiceQuantEval
 
     ok, message = RiceQuantEval.dry_run("Log(1)")
 

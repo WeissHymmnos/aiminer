@@ -11,8 +11,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.local_data import load_local_ohlcv
-from core.local_data import ohlcv_quality_report, validate_ohlcv_quality
+from aiminer.core.local_data import load_local_ohlcv
+from aiminer.core.local_data import ohlcv_quality_report, validate_ohlcv_quality
 
 
 CONTRACT_REQUIRED_COLUMNS = {

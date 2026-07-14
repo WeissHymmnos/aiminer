@@ -1,4 +1,4 @@
-from agents.strategy_agent import (
+from aiminer.agents.strategy_agent import (
     candidate_to_strategy_config,
     normalize_strategy_candidate_payload,
 )

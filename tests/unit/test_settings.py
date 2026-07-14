@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from core.settings import build_settings, detect_llm_provider, provider_api_key
+from aiminer.core.settings import build_settings, detect_llm_provider, provider_api_key
 
 
 class TestSettings(unittest.TestCase):
@@ -56,7 +56,7 @@ class TestSettings(unittest.TestCase):
             cwd = os.getcwd()
             os.chdir(tmpdir)
             try:
-                with patch("core.settings.load_dotenv"):
+                with patch("aiminer.core.settings.load_dotenv"):
                     with self.assertRaises(ValueError):
                         build_settings({"data_backend": "local"})
             finally:
@@ -72,7 +72,7 @@ class TestSettings(unittest.TestCase):
             cwd = os.getcwd()
             os.chdir(root)
             try:
-                with patch("core.settings.load_dotenv"):
+                with patch("aiminer.core.settings.load_dotenv"):
                     settings = build_settings({"data_backend": "local"})
             finally:
                 os.chdir(cwd)
@@ -93,14 +93,14 @@ class TestSettings(unittest.TestCase):
 
     @patch.dict(os.environ, {}, clear=True)
     def test_claudecode_mimo_token_is_explicit_only(self):
-        with patch("core.settings._claudecode_mimo_token", return_value="mimo-token"):
+        with patch("aiminer.core.settings._claudecode_mimo_token", return_value="mimo-token"):
             self.assertEqual(provider_api_key("mimo"), "mimo-token")
             self.assertIsNone(detect_llm_provider())
 
     @patch("shutil.which", return_value="/usr/bin/codex")
     @patch.dict(os.environ, {}, clear=True)
     def test_codex_provider_is_explicit_only(self, _which):
-        with patch("core.settings.load_dotenv"):
+        with patch("aiminer.core.settings.load_dotenv"):
             settings = build_settings({"llm_provider": "codex"})
 
         self.assertEqual(settings.llm_provider, "codex")

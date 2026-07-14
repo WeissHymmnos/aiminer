@@ -1,9 +1,9 @@
 import json
 import sqlite3
 
-import manager
-from core.agent_checkpoint import persist_agent_checkpoint
-from core.strategy import selection_score
+import aiminer.manager as manager
+from aiminer.core.agent_checkpoint import persist_agent_checkpoint
+from aiminer.core.strategy import selection_score
 
 
 class _DummySummaryAgent:
@@ -463,6 +463,73 @@ def test_run_swarm_crossover_uses_dedicated_iteration_cap(monkeypatch, tmp_path)
     assert crossover_calls[0]["max_iterations"] == 1
 
 
+def test_standalone_genetic_crossover_persists_selected_parents(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(manager, "SummaryAgent", _DummySummaryAgent)
+    calls = []
+
+    def _fake_run_agent_task(kwargs):
+        calls.append(dict(kwargs))
+        return {
+            "run_id": kwargs["run_id"],
+            "agent_id": kwargs["agent_id"],
+            "role": kwargs["role_prompt"],
+            "hypothesis": "hybrid factor",
+            "code": "Rank($close)",
+            "perf_metric": 0.02,
+            "metrics": {"information_coefficient": 0.02, "rank_ic": 0.01},
+            "returns": {f"2024-01-{day:02d}": 0.01 for day in range(1, 13)},
+            "is_effective": True,
+            "is_simulated": False,
+        }
+
+    monkeypatch.setattr(manager, "run_agent_task", _fake_run_agent_task)
+
+    portfolio_manager = manager.PortfolioManager(
+        roles=[],
+        run_id="run_crossover_test",
+        data_backend="local",
+        local_data_path=str(tmp_path),
+        crossover_iterations=3,
+    )
+    portfolio_manager.summary_agent.generate_markdown_report = lambda factor: "report.md"
+    parent_factors = [
+        {
+            "id": "alpha_a",
+            "hypothesis": "factor a",
+            "code": "Rank($open)",
+            "perf_metric": 0.03,
+            "returns": {},
+        },
+        {
+            "id": "alpha_b",
+            "hypothesis": "factor b",
+            "code": "Rank($volume)",
+            "perf_metric": 0.02,
+            "returns": {},
+        },
+    ]
+
+    result = portfolio_manager.run_genetic_crossover(
+        parent_factors=parent_factors,
+        comparison_pool=parent_factors,
+        persist=True,
+        agent_id="agent_crossover_pool",
+    )
+
+    assert result["status"] == "accepted"
+    assert result["parent_factor_ids"] == ["alpha_a", "alpha_b"]
+    assert calls[0]["agent_id"] == "agent_crossover_pool"
+    assert calls[0]["max_iterations"] == 3
+    with sqlite3.connect(portfolio_manager.db_path) as conn:
+        row = conn.execute(
+            "SELECT id, hypothesis, perf_metric FROM alpha_pool WHERE hypothesis=?",
+            ("hybrid factor",),
+        ).fetchone()
+    assert row is not None
+    assert row[2] == 0.02
+
+
 def test_evaluate_and_combine_accepts_serialized_returns(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(manager, "SummaryAgent", _DummySummaryAgent)
@@ -697,7 +764,7 @@ def test_evaluate_strategies_consumes_agent_candidates_before_fallback(monkeypat
             "ran_at": "2024-01-01T00:00:00",
         }
 
-    import core.manual_runner as manual_runner
+    import aiminer.core.manual_runner as manual_runner
 
     monkeypatch.setattr(manual_runner, "run_manual_strategy_backtest", _fake_backtest)
 
@@ -791,7 +858,7 @@ def test_evaluate_strategies_caps_parallel_workers(monkeypatch, tmp_path):
             "ran_at": "2024-01-01T00:00:00",
         }
 
-    import core.manual_runner as manual_runner
+    import aiminer.core.manual_runner as manual_runner
 
     monkeypatch.setattr(manual_runner, "run_manual_strategy_backtest", _fake_backtest)
 

@@ -1,7 +1,7 @@
 import polars as pl
 import pandas as pd
 import numpy as np
-from core.alphaeval.polars_engine import PolarsEngine
+from aiminer.core.alphaeval.polars_engine import PolarsEngine
 
 
 def test_complex_formula():

@@ -6,7 +6,7 @@ import pytest
 
 pl = pytest.importorskip("polars", reason="Polars tests require the optional native engine stack")
 
-from core.alphaeval.polars_engine import PolarsEngine
+from aiminer.core.alphaeval.polars_engine import PolarsEngine
 
 
 pytestmark = pytest.mark.native

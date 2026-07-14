@@ -20,14 +20,16 @@ Required `.env` keys: `ZHIPU_API_KEY` (or any other LLM provider key), `RQ_USER`
 
 **Multi-agent swarm (main mode):**
 ```bash
-python manager.py --iterations 5 --mode ricequant --llm-provider glm --llm-model glm-4 \
+PYTHONPATH=src python -m aiminer.manager --iterations 5 --mode ricequant --llm-provider glm --llm-model glm-4 \
   --roles "动量反转专家" "统计套利专家" --parallel --wiki-bootstrap
 ```
 
 **Single-agent legacy mode:**
 ```bash
-python main.py --iterations 3 --mode ricequant --llm-provider glm --llm-model glm-5
+PYTHONPATH=src python -m aiminer.main --iterations 3 --mode ricequant --llm-provider glm --llm-model glm-5
 ```
+
+Or, after `pip install -e .`, use the installed entry points: `aiminer-manager`, `aiminer`, `aiminer-tui`, `aiminer-api`.
 
 `--mode` is either `ricequant` (A-stock, requires RQ credentials) or `qlib` (Microsoft Qlib). `--rebuild-rag` forces re-embedding of docs in `data/rag_docs/`.
 
@@ -53,7 +55,7 @@ python scripts/manual_tests/test_ctx.py
 manager.py (PortfolioManager)
   └─ spawns N SubAgents via ProcessPoolExecutor
        └─ sub_agent.py (AlphaResearcher)
-            └─ workflow/graph.py (LangGraph state machine)
+            └─ app_workflow/graph.py (LangGraph state machine)
                  ├─ idea_agent     → hypothesis generation (RAG + Wiki context)
                  ├─ factor_agent   → math formula + Python code
                  ├─ eval_agent     → backtest (RiceQuant or Qlib)
@@ -68,8 +70,8 @@ manager.py (PortfolioManager)
 
 | Module | Role |
 |---|---|
-| `workflow/state.py` | `AlphaMinerState` TypedDict — the single shared state object flowing through LangGraph |
-| `workflow/graph.py` | LangGraph graph definition; conditional routing based on validity, effectiveness, patience counter |
+| `app_workflow/state.py` | `AlphaMinerState` TypedDict — the single shared state object flowing through LangGraph |
+| `app_workflow/graph.py` | LangGraph graph definition; conditional routing based on validity, effectiveness, patience counter |
 | `agents/idea_agent.py` | Hypothesis generation using HybridKnowledge (RAG + Wiki) |
 | `agents/factor_agent.py` | Translates hypothesis → operator expression; whitelist validation + AST safety check |
 | `agents/eval_agent.py` | Runs backtest, extracts IC/RankIC/Sharpe; LLM effectiveness review |

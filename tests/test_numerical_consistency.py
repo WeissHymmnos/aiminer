@@ -6,7 +6,7 @@ import pytest
 
 pytest.importorskip("rqdatac", reason="RiceQuant evaluator imports the optional rqdatac client")
 
-from core.alphaeval.rq_eval import RiceQuantEval
+from aiminer.core.alphaeval.rq_eval import RiceQuantEval
 from loguru import logger
 
 

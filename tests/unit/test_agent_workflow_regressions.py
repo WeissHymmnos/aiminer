@@ -2,17 +2,17 @@ from types import SimpleNamespace
 
 from langchain_core.runnables import RunnableLambda
 
-from agents.eval_agent import EvalAgent
-from app_workflow.graph import (
+from aiminer.agents.eval_agent import EvalAgent
+from aiminer.app_workflow.graph import (
     _merge_strategy_update_into_best_snapshot,
     _state_has_evaluation_failure,
     route_after_factor,
     route_after_strategy,
 )
-from core.agent_result import state_to_agent_result
-from core.alphaeval.local_eval import LocalDataEval
-from core.hybrid_knowledge import HybridKnowledge
-from sub_agent import AlphaResearcher, _factor_result_view
+from aiminer.core.agent_result import state_to_agent_result
+from aiminer.core.alphaeval.local_eval import LocalDataEval
+from aiminer.core.hybrid_knowledge import HybridKnowledge
+from aiminer.sub_agent import AlphaResearcher, _factor_result_view
 
 
 class _KnowledgeStub:
@@ -50,7 +50,7 @@ def test_main_backtest_metrics_survive_robustness_failure(monkeypatch):
         def run_robustness_test(self):
             raise RuntimeError("noise backend unavailable")
 
-    import core.evaluator_factory as evaluator_factory
+    import aiminer.core.evaluator_factory as evaluator_factory
 
     monkeypatch.setattr(
         evaluator_factory, "build_evaluator", lambda **_: DummyEvaluator()
@@ -78,7 +78,7 @@ def test_main_backtest_metrics_survive_robustness_failure(monkeypatch):
 
 
 def test_eval_backtest_failure_returns_failed_metrics_not_simulated(monkeypatch):
-    import core.evaluator_factory as evaluator_factory
+    import aiminer.core.evaluator_factory as evaluator_factory
 
     def _raise_runtime_error(**_kwargs):
         raise RuntimeError("factor runtime failure")
@@ -181,7 +181,7 @@ def test_local_data_eval_robustness_does_not_use_ricequant_network(monkeypatch):
     def fail_if_called(*args, **kwargs):
         raise AssertionError("RiceQuant robustness path should not run for local data")
 
-    import core.alphaeval.rq_eval as rq_eval
+    import aiminer.core.alphaeval.rq_eval as rq_eval
 
     monkeypatch.setattr(rq_eval.RiceQuantEval, "run", fail_if_called)
     evaluator = LocalDataEval.__new__(LocalDataEval)

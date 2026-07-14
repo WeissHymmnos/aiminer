@@ -104,8 +104,7 @@ fi
 # 同步 CORS 白名单, 让换端口后的前端不被拦
 export AIMINER_CORS_ORIGINS="${AIMINER_CORS_ORIGINS:-http://localhost:${FRONTEND_PORT},http://127.0.0.1:${FRONTEND_PORT},http://localhost:${BACKEND_PORT},http://127.0.0.1:${BACKEND_PORT}}"
 
-# uvicorn 启动 (而不是 python api.py), 这样可以指定端口
-${PY_CMD} -m uvicorn api:app --host 0.0.0.0 --port "${BACKEND_PORT}" \
+PYTHONPATH="${REPO_ROOT}/src:${PYTHONPATH:-}" ${PY_CMD} -m uvicorn aiminer.api:app --host 0.0.0.0 --port "${BACKEND_PORT}" \
   >"${BACKEND_LOG}" 2>&1 &
 BACKEND_PID=$!
 PIDS+=("$BACKEND_PID")

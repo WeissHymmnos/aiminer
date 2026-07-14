@@ -1,6 +1,6 @@
 import unittest
-from app_workflow.state import AlphaMinerState
-from app_workflow.graph import route_after_eval, route_after_wiki
+from aiminer.app_workflow.state import AlphaMinerState
+from aiminer.app_workflow.graph import route_after_eval, route_after_wiki
 
 
 class TestEarlyStopping(unittest.TestCase):

@@ -4,8 +4,8 @@ import textwrap
 import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from core.codex_llm import CodexChatModel, is_codex_available
-from core.llm import get_llm
+from aiminer.core.codex_llm import CodexChatModel, is_codex_available
+from aiminer.core.llm import get_llm
 
 
 def _fake_codex(tmp_path, body: str) -> str:
@@ -186,7 +186,7 @@ def test_get_llm_configures_mimo_provider(monkeypatch):
             captured.update(kwargs)
 
     monkeypatch.setenv("MIMO_API_KEY", "mimo-test-key")
-    monkeypatch.setattr("core.llm.ChatOpenAI", FakeChatOpenAI)
+    monkeypatch.setattr("aiminer.core.llm.ChatOpenAI", FakeChatOpenAI)
 
     llm = get_llm(provider="mimo", model_name="Mimo-v2.5pro")
 
@@ -204,7 +204,7 @@ def test_get_llm_configures_mimo_v25_alias(monkeypatch):
             captured.update(kwargs)
 
     monkeypatch.setenv("MIMO_API_KEY", "mimo-test-key")
-    monkeypatch.setattr("core.llm.ChatOpenAI", FakeChatOpenAI)
+    monkeypatch.setattr("aiminer.core.llm.ChatOpenAI", FakeChatOpenAI)
 
     get_llm(provider="mimo", model_name="mimo v2.5")
 

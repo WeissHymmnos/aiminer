@@ -1,7 +1,7 @@
 import json
 
-from core.settings import AiminerSettings
-from main import save_results
+from aiminer.core.settings import AiminerSettings
+from aiminer.main import save_results
 
 
 def test_save_results_uses_settings_results_dir(tmp_path):
