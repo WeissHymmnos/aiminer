@@ -1,0 +1,39 @@
+# Core orchestration
+langchain>=0.1.0
+langchain-community
+langchain-chroma
+langchain-anthropic
+langchain-openai
+langgraph
+pydantic>=2.0.0
+typing_extensions
+python-dotenv
+loguru
+
+# Vector store / RAG
+chromadb
+sentence-transformers
+tiktoken
+
+# Numerics
+numpy
+pandas
+polars>=0.20.0
+matplotlib
+
+# Evaluation backends (optional at runtime depending on --mode)
+rqdatac
+# Microsoft Qlib — install from git; may require system deps
+pyqlib @ git+https://github.com/microsoft/qlib.git
+
+# LLM SDKs
+anthropic
+openai
+
+# API / TUI
+fastapi
+uvicorn
+textual
+
+# Testing
+pytest>=8.0.0

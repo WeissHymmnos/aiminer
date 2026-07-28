@@ -1,0 +1,44 @@
+# Git / VCS
+.git
+.gitignore
+
+# Rust build artifacts
+**/target/
+polars_plugins/target/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+
+# Secrets
+.env
+.env.local
+.env.*.local
+
+# Runtime data (mount as volumes)
+data/chroma_db/
+data/wiki_db/
+data/test_db/
+results/
+logs/
+
+# IDEs / OS
+.vscode/
+.idea/
+.DS_Store
+.cursor/
+
+# Tool artifacts
+.aider*
+repomix-output.xml
+project_bundle.md
+**/__pycache__/

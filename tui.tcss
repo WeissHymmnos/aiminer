@@ -1,0 +1,206 @@
+Screen {
+    background: #1e1e2e;
+    color: #cdd6f4;
+}
+
+Header {
+    background: #11111b;
+    color: #cba6f7;
+    text-style: bold;
+}
+
+Footer {
+    background: #11111b;
+    color: #89b4fa;
+}
+
+TabbedContent, ContentSwitcher, TabPane, Vertical, Horizontal, VerticalScroll {
+    background: #1e1e2e;
+    height: 100%;
+}
+
+Tabs {
+    background: #181825;
+}
+
+Tab {
+    color: #bac2de;
+}
+
+Tab.-active {
+    color: #89b4fa;
+    background: #313244;
+    text-style: bold;
+}
+
+DataTable {
+    background: #1e1e2e;
+    color: #cdd6f4;
+    height: 100%;
+}
+
+DataTable > .datatable--header {
+    background: #313244;
+    color: #f9e2af;
+    text-style: bold;
+}
+
+DataTable > .datatable--cursor {
+    background: #45475a;
+}
+
+Button {
+    background: #89b4fa;
+    color: #11111b;
+    border: none;
+    margin: 1 2;
+}
+
+Button:hover {
+    background: #b4befe;
+}
+
+Button.-success {
+    background: #a6e3a1;
+}
+Button.-success:hover {
+    background: #94e2d5;
+}
+
+Button.-error {
+    background: #f38ba8;
+}
+Button.-error:hover {
+    background: #f2cdcd;
+}
+
+Input {
+    background: #313244;
+    color: #cdd6f4;
+    border: tall #585b70;
+}
+
+Input:focus {
+    border: tall #89b4fa;
+}
+
+TextArea {
+    background: #313244;
+    color: #cdd6f4;
+    border: tall #585b70;
+    height: 12;
+}
+
+TextArea:focus {
+    border: tall #cba6f7;
+}
+
+Markdown {
+    background: #1e1e2e;
+    color: #cdd6f4;
+}
+
+RichLog {
+    background: #11111b;
+    color: #cdd6f4;
+    border: solid #585b70;
+    height: 100%;
+}
+
+PlotextPlot {
+    height: 1fr;
+    min-height: 15;
+    border: solid #585b70;
+}
+
+.title {
+    color: #cba6f7;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.box {
+    border: solid #585b70;
+    padding: 1;
+    margin: 1;
+    background: #181825;
+}
+
+#expression-display {
+    height: auto;
+    border: solid #89b4fa;
+    background: #1e1e2e;
+    padding: 1;
+    color: #a6e3a1;
+}
+
+#swarm-config {
+    width: 40%;
+    height: 100%;
+}
+
+#swarm-logs-container {
+    width: 60%;
+    height: 100%;
+}
+
+#swarm-buttons {
+    height: auto;
+    margin-top: 1;
+    margin-bottom: 2;
+}
+
+#manual-date-row {
+    height: auto;
+    margin-bottom: 1;
+}
+
+#manual-date-row Label {
+    width: auto;
+    padding: 1 1;
+    content-align: left middle;
+}
+
+#manual-date-row Input {
+    width: 1fr;
+}
+
+#manual-buttons {
+    height: auto;
+}
+
+#manual-top-box {
+    height: auto;
+}
+
+#manual-bottom-box {
+    height: 1fr;
+}
+
+#metrics-container {
+    width: 30%;
+    height: 100%;
+}
+
+#manual-chart {
+    width: 70%;
+    height: 100%;
+}
+
+#pool-tab Horizontal {
+    height: 100%;
+}
+
+#factors-table {
+    width: 55%;
+    height: 100%;
+}
+
+#pool-details-container {
+    width: 45%;
+    height: 100%;
+}
+
+#pool-chart {
+    height: 25;
+}
