@@ -57,6 +57,11 @@ export function SwarmRunsPage() {
     queryFn: api.swarmStatus,
     refetchInterval: 5000,
   });
+  const deskTrace = useQuery({
+    queryKey: ["desk-trace"],
+    queryFn: () => api.listTrace(20),
+    refetchInterval: 15000,
+  });
   const runs = useQuery({
     queryKey: ["runs", runsOffset, RUNS_PAGE_SIZE],
     queryFn: () => api.listRuns({ offset: runsOffset, limit: RUNS_PAGE_SIZE }),
@@ -142,8 +147,26 @@ export function SwarmRunsPage() {
     );
   }, [runItems]);
 
+  const traceItems = deskTrace.data?.items ?? [];
+
   return (
     <div className="page-grid two-col">
+      <SectionCard title="Research trace">
+        <p className="muted">Causal chain from /api/v1/trace. Later rows cite the previous id.</p>
+        {deskTrace.error ? <div className="status-block error">{getErrorMessage(deskTrace.error)}</div> : null}
+        {traceItems.length === 0 && !deskTrace.error ? <p className="muted">No trace events yet.</p> : null}
+        <div className="list">
+          {traceItems.map((item) => (
+            <div key={String(item.id)} className="list-row">
+              <span>
+                {String(item.action ?? "")} · {String(item.id ?? "").slice(0, 8)}
+                {item.cites ? ` cites ${String(item.cites).slice(0, 8)}` : ""}
+              </span>
+              <span className="muted">{String(item.summary ?? item.error ?? "")}</span>
+            </div>
+          ))}
+        </div>
+      </SectionCard>
       <SectionCard
         title="Run Launcher"
         actions={
