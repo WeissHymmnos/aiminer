@@ -41,6 +41,11 @@ export function SwarmRunDetailPage() {
     enabled: Boolean(runId),
     refetchInterval: 5000,
   });
+  const deskTrace = useQuery({
+    queryKey: ["desk-trace", runId],
+    queryFn: () => api.listTrace(20),
+    refetchInterval: 15000,
+  });
   const logs = useQuery({
     queryKey: ["run-logs", runId, logOffset, logTailBootstrap],
     queryFn: () =>
@@ -164,6 +169,18 @@ export function SwarmRunDetailPage() {
           }}
         />
         <JsonView value={run.data?.config ?? {}} maxLines={20} />
+      </SectionCard>
+      <SectionCard title="Research trace">
+        <p className="muted">Causal chain from /api/v1/trace. Later rows cite the previous id.</p>
+        {(deskTrace.data?.items ?? []).map((item) => (
+          <div key={String(item.id)} className="list-row">
+            <span>
+              {String(item.action ?? "")} · {String(item.id ?? "").slice(0, 8)}
+              {item.cites ? ` cites ${String(item.cites).slice(0, 8)}` : ""}
+            </span>
+            <span className="muted">{String(item.summary ?? item.error ?? "")}</span>
+          </div>
+        ))}
       </SectionCard>
 
       <Group orientation="horizontal" className="panel-container" style={{ flex: 1, minHeight: 450 }}>
