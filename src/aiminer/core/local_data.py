@@ -35,12 +35,10 @@ def _read_table(path: Path) -> pd.DataFrame:
     if suffix == ".csv":
         return pd.read_csv(path)
     if suffix in {".parquet", ".pq"}:
-        try:
-            import polars as pl
+        import polars as pl
 
-            return pl.read_parquet(path).to_pandas()
-        except Exception:
-            return pd.read_parquet(path)
+        frame = pl.read_parquet(path)
+        return pd.DataFrame(frame.to_dict(as_series=False))
     raise ValueError(f"Unsupported local data file format: {path}")
 
 
