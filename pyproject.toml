@@ -9,6 +9,20 @@ description = "AI Alpha Miner: Multi-Agent Quant Factor Discovery System"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "pydantic>=2.0.0",
+    "typing_extensions",
+    "python-dotenv",
+    "loguru",
+    "numpy",
+    "pandas",
+    "polars>=0.20.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.0.0"
+]
+swarm = [
     "langchain>=0.1.0",
     "langchain-community",
     "langchain-chroma",
@@ -16,32 +30,33 @@ dependencies = [
     "langchain-openai",
     "langgraph",
     "chromadb",
-    "pydantic>=2.0.0",
-    "typing_extensions",
-    "python-dotenv",
-    "loguru",
-    "numpy",
-    "pandas",
-    "rqdatac",
     "sentence-transformers",
     "tiktoken",
     "anthropic",
+    "openai",
+]
+qlib = [
     "pyqlib @ git+https://github.com/microsoft/qlib.git",
-    "polars>=0.20.0",
+]
+rq = [
+    "rqdatac",
+]
+tui = [
+    "textual",
+    "textual-plotext",
+]
+portfolio = [
+    "cvxpy>=1.4.0",
+    "scipy",
+]
+web = [
     "fastapi",
     "uvicorn",
     "matplotlib",
-    "cvxpy>=1.4.0",
-    "scipy",
     "psutil",
-    "textual",
-    "textual-plotext",
-    "openai"
 ]
-
-[project.optional-dependencies]
-test = [
-    "pytest>=8.0.0"
+all = [
+    "aiminer[swarm,qlib,rq,tui,portfolio,web]",
 ]
 
 [project.scripts]
