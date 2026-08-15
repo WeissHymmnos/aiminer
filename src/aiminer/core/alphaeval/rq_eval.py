@@ -730,7 +730,12 @@ class RiceQuantEval:
                 res_matrix = _ensure_df(res_matrix)
 
                 # Stack back to multi-index
-                res_series = res_matrix.stack(dropna=False)
+                try:
+                    res_series = res_matrix.stack(dropna=False)
+                except TypeError:
+                    res_series = res_matrix.stack()
+                except ValueError:
+                    res_series = res_matrix.stack()
                 factor_matrices.append(res_series)
 
             except Exception as e:
