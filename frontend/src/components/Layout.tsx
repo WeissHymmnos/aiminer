@@ -3,7 +3,11 @@ import { NavLink, Outlet } from "react-router-dom";
 import { getStoredToken, setStoredToken } from "../lib/api";
 
 const links = [
-  { to: "/", label: "Swarm Runs" },
+  { to: "/", label: "Catalog" },
+  { to: "/review", label: "Review" },
+  { to: "/reproduce", label: "Reproduce" },
+  { to: "/agent", label: "Agent" },
+  { to: "/runs", label: "Swarm Runs" },
   { to: "/pool", label: "Alpha Pool" },
   { to: "/manual", label: "Manual Backtest" },
   { to: "/strategy", label: "Strategy Backtest" },
@@ -28,11 +32,10 @@ export function Layout() {
     <div className="shell">
       <aside className="sidebar">
         <div>
-          <p className="eyebrow">AIMiner</p>
-          <h1>Web Workstation</h1>
+          <p className="eyebrow">FinAlpha</p>
+          <h1>Desk</h1>
           <p className="muted">
-            Concurrent swarm runs, factor pool inspection, manual and strategy
-            backtests, plus Obsidian-style wiki graph navigation and reversible workspace ops.
+            Catalog, review, reproduce, swarm, and wiki. Report library remains on :8765.
           </p>
         </div>
         <label className="field">

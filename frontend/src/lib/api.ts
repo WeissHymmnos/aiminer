@@ -6,6 +6,9 @@ import type {
   WikiGraphEdge,
   WikiGraphNode,
 } from "../types";
+import { buildAuthHeaders } from "./authHeaders.js";
+
+export { buildAuthHeaders, getBearerlessToken } from "./authHeaders.js";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 const PAGE_LIMIT = 200;
@@ -52,10 +55,6 @@ export function getStoredToken() {
     return (import.meta.env.VITE_API_AUTH_TOKEN ?? "").trim();
   }
   return (window.localStorage.getItem(TOKEN_STORAGE_KEY) ?? import.meta.env.VITE_API_AUTH_TOKEN ?? "").trim();
-}
-
-export function getBearerlessToken(value = getStoredToken()) {
-  return value.replace(/^Bearer\s+/i, "").trim();
 }
 
 export function setStoredToken(value: string) {
@@ -198,6 +197,18 @@ export function getRunStatusView(
   };
 }
 
+export function deskFetch(path: string, init: RequestInit = {}) {
+  const headers = new Headers(init.headers);
+  if (init.body && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  const storedToken = getStoredToken();
+  for (const [key, value] of Object.entries(buildAuthHeaders(storedToken))) {
+    headers.set(key, String(value));
+  }
+  return fetch(withBase(path), { ...init, headers });
+}
+
 async function request<T>(input: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (!headers.has("Content-Type")) {
@@ -205,10 +216,8 @@ async function request<T>(input: string, init?: RequestInit): Promise<T> {
   }
 
   const storedToken = getStoredToken();
-  if (storedToken) {
-    const apiKey = getBearerlessToken(storedToken);
-    headers.set("Authorization", /^Bearer\s+/i.test(storedToken) ? storedToken : `Bearer ${apiKey}`);
-    headers.set("X-API-Key", apiKey);
+  for (const [key, value] of Object.entries(buildAuthHeaders(storedToken))) {
+    headers.set(key, String(value));
   }
 
   const response = await fetch(withBase(input), {
@@ -254,6 +263,8 @@ async function requestAllPages<T>(path: string): Promise<T[]> {
 }
 
 export const api = {
+  listTrace: (limit = 20) =>
+    request<{ items: Record<string, unknown>[]; count: number }>(withQuery("/api/v1/trace", { limit })),
   manualBacktestChartUrl: (jobId: string, cacheKey?: string | number) =>
     withBase(withQuery(`/api/charts/${jobId}`, { t: cacheKey })),
   listRuns: (params: PaginationParams = {}) =>

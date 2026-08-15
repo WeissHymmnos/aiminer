@@ -16,6 +16,7 @@ dependencies = [
     "numpy",
     "pandas",
     "polars>=0.20.0",
+    "matplotlib",
 ]
 
 [project.optional-dependencies]

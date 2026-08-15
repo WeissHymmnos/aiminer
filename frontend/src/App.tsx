@@ -33,13 +33,38 @@ const AdminPage = lazy(() =>
     default: module.AdminPage,
   })),
 );
+const CatalogPage = lazy(() =>
+  import("./pages/CatalogPage").then((module) => ({
+    default: module.CatalogPage,
+  })),
+);
+const ReviewPage = lazy(() =>
+  import("./pages/ReviewPage").then((module) => ({
+    default: module.ReviewPage,
+  })),
+);
+const ReproducePage = lazy(() =>
+  import("./pages/ReproducePage").then((module) => ({
+    default: module.ReproducePage,
+  })),
+);
+const AgentPage = lazy(() =>
+  import("./pages/AgentPage").then((module) => ({
+    default: module.AgentPage,
+  })),
+);
 
 export default function App() {
   return (
     <Suspense fallback={<div className="page-grid"><p className="muted">Loading page...</p></div>}>
       <Routes>
         <Route element={<Layout />}>
-          <Route path="/" element={<SwarmRunsPage />} />
+          <Route path="/" element={<CatalogPage />} />
+          <Route path="/catalog/:id" element={<CatalogPage />} />
+          <Route path="/review" element={<ReviewPage />} />
+          <Route path="/reproduce" element={<ReproducePage />} />
+          <Route path="/agent" element={<AgentPage />} />
+          <Route path="/runs" element={<SwarmRunsPage />} />
           <Route path="/runs/:runId" element={<SwarmRunDetailPage />} />
           <Route path="/pool" element={<AlphaPoolPage />} />
           <Route path="/manual" element={<ManualBacktestPage />} />

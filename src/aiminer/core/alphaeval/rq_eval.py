@@ -3,16 +3,25 @@
 import os
 import numpy as np
 import pandas as pd
-import rqdatac as rq
 from typing import List, Optional
 from loguru import logger
 from dotenv import load_dotenv
 import ast
-import matplotlib
+
+try:
+    import rqdatac as rq
+except ImportError:  # local-backend eval must not require RiceQuant
+    rq = None  # type: ignore[assignment]
+
+try:
+    import matplotlib
+except ImportError:  # plots are optional for local child eval
+    matplotlib = None  # type: ignore[assignment]
 
 from aiminer.core.constants import TRADING_DAYS_PER_YEAR
 
-matplotlib.use("Agg", force=True)
+if matplotlib is not None:
+    matplotlib.use("Agg", force=True)
 
 # Load environment variables
 load_dotenv()
@@ -64,6 +73,8 @@ def init_rq_auth():
     global _rq_initialized
     if _rq_initialized:
         return
+    if rq is None:
+        raise ImportError("rqdatac is not installed")
 
     token = os.getenv("RQ_TOKEN")
     username = os.getenv("RQ_USER")
@@ -98,8 +109,12 @@ def init_rq_auth():
     raise ValueError("RiceQuant Auth Failed: No valid credentials found or accepted.")
 
 
-from matplotlib import font_manager
-import matplotlib.pyplot as plt
+try:
+    from matplotlib import font_manager
+    import matplotlib.pyplot as plt
+except ImportError:
+    font_manager = None  # type: ignore[assignment]
+    plt = None  # type: ignore[assignment]
 from pathlib import Path
 
 class RiceQuantEval:
@@ -164,6 +179,8 @@ class RiceQuantEval:
         return all_data.groupby(level="datetime").apply(_corr)
 
     def _configure_matplotlib(self):
+        if font_manager is None or plt is None:
+            return
         preferred_fonts = ["Microsoft YaHei", "SimHei", "Arial Unicode MS"]
         installed = {font.name for font in font_manager.fontManager.ttflist}
         for f in preferred_fonts:
