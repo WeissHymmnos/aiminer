@@ -61,7 +61,10 @@ export function ReproducePage() {
   return (
     <div className="page-grid">
       <h2>Reproduce</h2>
-      <p className="muted">PDF path in, job poll on the same id. Library desk still :8765.</p>
+      <p className="muted">
+        PDF path must sit under FINAINCE_PDF_ROOT. Job poll uses the same id. Desk
+        token required.
+      </p>
       <form onSubmit={onSubmit}>
         <label className="field">
           PDF path

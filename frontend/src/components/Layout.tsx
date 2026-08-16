@@ -35,7 +35,8 @@ export function Layout() {
           <p className="eyebrow">FinAlpha</p>
           <h1>Desk</h1>
           <p className="muted">
-            Catalog, review, reproduce, swarm, and wiki. Report library remains on :8765.
+            Catalog, review, reproduce, swarm, and wiki. Promote, reproduce, and
+            agent need the desk token (`FINAINCE_DESK_TOKEN`).
           </p>
         </div>
         <label className="field">

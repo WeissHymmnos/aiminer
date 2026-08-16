@@ -54,14 +54,15 @@ export function CatalogPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ catalog_id: id, direction }),
     })
-      .then((r) => r.json())
-      .then((body) => {
-        if (body && body.ok === false) {
-          setError(String(body.error || "promote failed"));
-        } else {
-          setError(null);
+      .then(async (r) => {
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok || body.ok === false) {
+          setError(String(body.detail || body.error || `promote ${r.status}`));
+          setMessage(null);
+          return;
         }
-        setMessage(body.ok === false ? null : `queued ${body.promotion_id || ""}`.trim());
+        setError(null);
+        setMessage(`queued ${body.promotion_id || ""}`.trim());
       })
       .catch((err) => setError(String(err)));
   };

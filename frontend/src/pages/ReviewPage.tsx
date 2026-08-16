@@ -14,8 +14,6 @@ export function ReviewPage() {
   const [items, setItems] = useState<Promo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [overrideThin, setOverrideThin] = useState(false);
-
   const load = () => {
     deskFetch("/api/v1/review")
       .then((r) => {
@@ -31,20 +29,21 @@ export function ReviewPage() {
   }, []);
 
   const approve = (id: string) => {
-    const override = overrideThin ? ["thin_panel"] : [];
     deskFetch(`/api/v1/review/${id}/approve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ override }),
+      body: JSON.stringify({}),
     })
-      .then((r) => r.json())
-      .then((body) => {
-        if (body && body.ok === false) {
-          setError(String(body.error || "approve failed"));
-        } else {
-          setError(null);
+      .then(async (r) => {
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok || body.ok === false) {
+          setError(String(body.detail || body.error || `approve ${r.status}`));
+          setMessage(null);
+          load();
+          return;
         }
-        setMessage(body.ok === false ? String(body.error || "approve failed") : "approved");
+        setError(null);
+        setMessage("approved");
         load();
       })
       .catch((err) => setError(String(err)));
@@ -52,14 +51,16 @@ export function ReviewPage() {
 
   const reject = (id: string) => {
     deskFetch(`/api/v1/review/${id}/reject`, { method: "POST" })
-      .then((r) => r.json())
-      .then((body) => {
-        if (body && body.ok === false) {
-          setError(String(body.error || "reject failed"));
-        } else {
-          setError(null);
+      .then(async (r) => {
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok || body.ok === false) {
+          setError(String(body.detail || body.error || `reject ${r.status}`));
+          setMessage(null);
+          load();
+          return;
         }
-        setMessage(body.ok === false ? String(body.error || "reject failed") : "rejected");
+        setError(null);
+        setMessage("rejected");
         load();
       })
       .catch((err) => setError(String(err)));
@@ -68,15 +69,10 @@ export function ReviewPage() {
   return (
     <div className="page-grid">
       <h2>Review</h2>
-      <p className="muted">Pending promotions. Approve writes the other store.</p>
-      <label className="field-toggle">
-        <span>override thin_panel</span>
-        <input
-          type="checkbox"
-          checked={overrideThin}
-          onChange={(e) => setOverrideThin(e.target.checked)}
-        />
-      </label>
+      <p className="muted">
+        Pending promotions. Approve writes the other store. HTTP cannot override
+        thin_panel; a smoke panel stays fail-closed.
+      </p>
       {error ? <div className="status-block error">{error}</div> : null}
       {message ? <p className="muted">{message}</p> : null}
       <div className="list">
