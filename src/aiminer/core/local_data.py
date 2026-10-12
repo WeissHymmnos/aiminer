@@ -128,8 +128,9 @@ def _ensure_schema(
     required_price_cols = {"open", "high", "low", "close", "volume"}
     missing = sorted(required_price_cols - set(df.columns))
     if missing:
+        missing_str = ", ".join(missing)
         raise ValueError(
-            f"Local data is missing required OHLCV columns: {', '.join(missing)}"
+            f"Local data is missing required OHLCV columns: {missing_str}"
         )
 
     df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
@@ -218,9 +219,9 @@ def infer_layout(path: Path) -> str:
     if not any(has_instrument):
         return "instrument_files"
     raise ValueError(
-        "Ambiguous local data directory: panel files include an instrument column, "
-        "instrument_files omit it and use filenames as instruments. Do not mix both "
-        "semantics in one auto-detected directory."
+        "Ambiguous local data directory: panel files include an instrument "
+        "column, instrument_files omit it and use filenames as instruments. "
+        "Do not mix both semantics in one auto-detected directory."
     )
 
 
@@ -243,6 +244,7 @@ def load_local_ohlcv(
     start_date: str | None = None,
     end_date: str | None = None,
     instrument_prefix: str | None = None,
+    validate_contract: bool = True,
 ) -> pd.DataFrame:
     source = Path(path).expanduser()
     if not source.exists():
@@ -251,7 +253,8 @@ def load_local_ohlcv(
     effective_layout = infer_layout(source) if layout == "auto" else layout
     if effective_layout not in {"panel", "instrument_files"}:
         raise ValueError(
-            f"Unsupported local data layout '{effective_layout}'. Expected auto, panel, or instrument_files."
+            f"Unsupported local data layout '{effective_layout}'. "
+            "Expected auto, panel, or instrument_files."
         )
 
     frames: list[pd.DataFrame] = []
@@ -273,8 +276,9 @@ def load_local_ohlcv(
                     )
                 except ValueError as exc:
                     raise ValueError(
-                        "panel layout treats every file in a directory as a panel shard "
-                        f"and requires an instrument column; {file_path.name}: {exc}"
+                        "panel layout treats every file in a directory as a "
+                        "panel shard and requires an instrument column; "
+                        f"{file_path.name}: {exc}"
                     ) from exc
         else:
             frames.append(
@@ -320,4 +324,14 @@ def load_local_ohlcv(
         .set_index(["datetime", "instrument"])
         .sort_index()
     )
+    if validate_contract:
+        from aiminer.core.data_contract import DataContractValidator
+
+        DataContractValidator.validate_ohlcv(
+            df,
+            source=str(source),
+            strict=True,
+            cutoff_date=end_date,
+            check_calendar_gaps=False,
+        )
     return df
