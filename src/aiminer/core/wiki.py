@@ -13,7 +13,6 @@ from loguru import logger
 
 from aiminer.core.chroma_lock import chroma_process_lock
 from aiminer.core.interfaces import VectorStore
-from aiminer.core.llm import get_llm_config
 from aiminer.core.settings import AiminerSettings, build_settings
 
 # --- Frontmatter Helpers ---
@@ -168,70 +167,30 @@ class LLMWiki:
 
         # ... (Previous embedding initialization remains for search speed) ...
         # [Existing embedding code here, truncated for replace call brevity]
-        use_local = (embedding_provider == "local") or (
-            os.getenv("USE_LOCAL_EMBEDDING", "false").lower() == "true"
-        )
+        from aiminer.core.embeddings import resolve_embedding_backend
 
-        model_tag = "api"
-        if use_local:
-            model_name = "Qwen/Qwen3-Embedding-4B"
-            model_tag = model_name.replace("/", "_")
+        backend = resolve_embedding_backend(embedding_provider)
+        model_tag = backend["model_tag"]
+        if backend["mode"] == "local":
             logger.info(
-                f"Wiki: Initializing LOCAL embedding model ({model_name})..."
+                "Wiki: Initializing LOCAL embedding model ({}) for provider={!r}",
+                backend["model_name"],
+                backend.get("provider"),
             )
-            self.embedding_fn = SentenceTransformerEmbeddingFunction(
-                model_name=model_name, trust_remote_code=True
-            )
-        else:
-            _EMBEDDING_DEFAULTS = {
-                "kimi": {
-                    "model_name": "embedding-2",
-                    "api_base": "https://api.moonshot.cn/v1",
-                },
-                "qwen": {
-                    "model_name": "text-embedding-v3",
-                    "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                },
-                "claude": {
-                    "model_name": "text-embedding-3-small",
-                    "api_base": "https://api.gptsapi.net/v1",
-                },
-                "glm": {
-                    "model_name": "embedding-3",
-                    "api_base": "https://open.bigmodel.cn/api/paas/v4",
-                },
-                "openai": {
-                    "model_name": "text-embedding-3-large",
-                    "api_base": "https://api.gptsapi.net/v1",
-                },
-            }
-            try:
-                cfg = get_llm_config(provider=embedding_provider)
-                provider = cfg["provider"]
-                api_key = cfg["api_key"]
-                emb_defaults = _EMBEDDING_DEFAULTS.get(
-                    provider, _EMBEDDING_DEFAULTS["openai"]
-                )
-
-                logger.info(
-                    f"Wiki: Initializing API-based embedding ({provider})..."
-                )
-                self.embedding_fn = OpenAIEmbeddingFunction(
-                    api_key=api_key,
-                    model_name=emb_defaults["model_name"],
-                    api_base=emb_defaults["api_base"],
-                )
-                model_tag = (
-                    f"{provider}_{emb_defaults['model_name'].replace('/', '_')}"
-                )
-            except Exception:
-                logger.warning(
-                    "Wiki: Falling back to LOCAL bge-large for embeddings."
-                )
-                model_tag = "bge-large"
+            with chroma_process_lock("wiki embedding load"):
                 self.embedding_fn = SentenceTransformerEmbeddingFunction(
-                    model_name="BAAI/bge-large-zh-v1.5"
+                    model_name=backend["model_name"], trust_remote_code=True
                 )
+        else:
+            logger.info(
+                "Wiki: Initializing API-based embedding ({})",
+                backend["provider"],
+            )
+            self.embedding_fn = OpenAIEmbeddingFunction(
+                api_key=backend["api_key"],
+                model_name=backend["model_name"],
+                api_base=backend["api_base"],
+            )
 
         self.db_dir = os.path.join(db_root, model_tag)
         os.makedirs(self.db_dir, exist_ok=True)

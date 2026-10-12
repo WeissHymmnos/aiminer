@@ -60,11 +60,7 @@ def _use_forced_local(embedding_provider: str | None) -> bool:
 def resolve_embedding_backend(
     embedding_provider: str | None = None,
 ) -> dict[str, Any]:
-    """Pick a working embedding backend.
-
-    Providers without a real embeddings API (notably DeepSeek / CPA chat)
-    return a local SentenceTransformer backend instead of borrowing gptsapi.
-    """
+    """Chat-only providers use a local SentenceTransformer instead of gptsapi."""
     if _use_forced_local(embedding_provider):
         tag = LOCAL_QWEN.replace("/", "_")
         return {

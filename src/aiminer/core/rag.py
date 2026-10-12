@@ -15,7 +15,6 @@ from loguru import logger
 
 from aiminer.core.chroma_lock import chroma_process_lock
 from aiminer.core.interfaces import VectorStore
-from aiminer.core.llm import get_llm_config
 from aiminer.core.settings import AiminerSettings, build_settings
 
 # Load environment variables
@@ -31,28 +30,9 @@ def resolve_embedding_model_tag(
     embedding_provider: str = None, *, use_gpu: bool = False
 ) -> str:
     """Resolve the Chroma subdirectory tag without initializing embeddings."""
-    use_local = (embedding_provider == "local") or (
-        os.getenv("USE_LOCAL_EMBEDDING", "false").lower() == "true"
-    )
-    if use_local:
-        return "Qwen_Qwen3-Embedding-4B"
+    from aiminer.core.embeddings import resolve_embedding_backend
 
-    embedding_defaults = {
-        "kimi": "embedding-2",
-        "qwen": "text-embedding-v3",
-        "claude": "text-embedding-3-small",
-        "glm": "embedding-3",
-        "openai": "text-embedding-3-large",
-        "ollama": "nomic-embed-text",
-        "vllm": "BAAI_bge-large-zh-v1.5",
-    }
-    try:
-        cfg = get_llm_config(provider=embedding_provider)
-        provider = cfg["provider"]
-        model_name = embedding_defaults[provider]
-        return f"{provider}_{model_name.replace('/', '_')}"
-    except (ValueError, KeyError):
-        return "bge-large"
+    return str(resolve_embedding_backend(embedding_provider)["model_tag"])
 
 
 def chroma_sqlite_summary(db_root: str, model_tag: str) -> Dict[str, object]:
@@ -140,92 +120,45 @@ class RAGModule:
             self._init_knowledge_cache()
             return
 
-        # Check if local embedding is forced
-        use_local = (embedding_provider == "local") or (
-            os.getenv("USE_LOCAL_EMBEDDING", "false").lower() == "true"
-        )
+        from aiminer.core.embeddings import resolve_embedding_backend
 
-        if use_local:
-            model_name = "Qwen/Qwen3-Embedding-4B"
-            model_tag = model_name.replace("/", "_")  # Safe for filesystem
-            device = "cuda" if use_gpu else "cpu"
+        backend = resolve_embedding_backend(embedding_provider)
+        model_tag = backend["model_tag"]
+        device = "cuda" if use_gpu else "cpu"
+        if backend["mode"] == "local":
             logger.info(
-                f"Initializing LARGE LOCAL embedding model ({model_name}) on {device}..."
+                "Initializing LOCAL embedding model ({}) on {}...",
+                backend["model_name"],
+                device,
             )
-            try:
-                self.embedding_fn = SentenceTransformerEmbeddingFunction(
-                    model_name=model_name, device=device, trust_remote_code=True
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Note: Hub connection sluggish ({e}). Trying mirror fallback..."
-                )
-                os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-                self.embedding_fn = SentenceTransformerEmbeddingFunction(
-                    model_name=model_name, device=device, trust_remote_code=True
-                )
+            # 序列化本地模型加载: 16 进程同时 mmap 1.3GB 会打满 IO/内存并与 Chroma 锁死锁
+            # 单进程串行加载可将 34s 全局锁等待降至可控, ThreadPool 共享模型无需此锁.
+            with chroma_process_lock("embedding load"):
+                try:
+                    self.embedding_fn = SentenceTransformerEmbeddingFunction(
+                        model_name=backend["model_name"],
+                        device=device,
+                        trust_remote_code=True,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Note: Hub connection sluggish ({e}). Trying mirror fallback..."
+                    )
+                    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+                    self.embedding_fn = SentenceTransformerEmbeddingFunction(
+                        model_name=backend["model_name"],
+                        device=device,
+                        trust_remote_code=True,
+                    )
         else:
-            # Auto-detect API provider
-            _EMBEDDING_DEFAULTS = {
-                "kimi": {
-                    "model_name": "embedding-2",
-                    "api_base": "https://api.moonshot.cn/v1",
-                },
-                "qwen": {
-                    "model_name": "text-embedding-v3",
-                    "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                },
-                "claude": {
-                    "model_name": "text-embedding-3-small",
-                    "api_base": "https://api.gptsapi.net/v1",
-                },
-                "glm": {
-                    "model_name": "embedding-3",
-                    "api_base": "https://open.bigmodel.cn/api/paas/v4",
-                },
-                "openai": {
-                    "model_name": "text-embedding-3-large",
-                    "api_base": "https://api.gptsapi.net/v1",
-                },
-                "ollama": {
-                    "model_name": "nomic-embed-text",
-                    "api_base": os.getenv(
-                        "OLLAMA_BASE_URL", "http://localhost:11434/v1"
-                    ),
-                },
-                "vllm": {
-                    "model_name": "BAAI/bge-large-zh-v1.5",
-                    "api_base": os.getenv(
-                        "VLLM_BASE_URL", "http://localhost:8000/v1"
-                    ),
-                },
-            }
-
-            try:
-                cfg = get_llm_config(provider=embedding_provider)
-                provider = cfg["provider"]
-                model_tag = provider
-                api_key = cfg["api_key"]
-                emb_defaults = _EMBEDDING_DEFAULTS[provider]
-
-                logger.info(f"Initializing API-based embedding ({provider})...")
-                self.embedding_fn = OpenAIEmbeddingFunction(
-                    api_key=api_key,
-                    model_name=emb_defaults["model_name"],
-                    api_base=emb_defaults["api_base"],
-                )
-                # Version by provider AND model name to prevent dimension mismatch
-                model_tag = (
-                    f"{provider}_{emb_defaults['model_name'].replace('/', '_')}"
-                )
-            except (ValueError, KeyError):
-                logger.warning(
-                    "No API key or provider found for embeddings. Falling back to LOCAL bge-large."
-                )
-                model_tag = "bge-large"
-                self.embedding_fn = SentenceTransformerEmbeddingFunction(
-                    model_name="BAAI/bge-large-zh-v1.5"
-                )
+            logger.info(
+                "Initializing API-based embedding ({})...", backend["provider"]
+            )
+            self.embedding_fn = OpenAIEmbeddingFunction(
+                api_key=backend["api_key"],
+                model_name=backend["model_name"],
+                api_base=backend["api_base"],
+            )
 
         # Version the DB directory by model_tag to avoid dimension mismatch
         self.db_dir = os.path.join(db_dir, model_tag)

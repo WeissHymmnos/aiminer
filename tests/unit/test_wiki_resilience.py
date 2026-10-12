@@ -1,4 +1,5 @@
 from aiminer.core import wiki as wiki_module
+from aiminer.core.embeddings import resolve_embedding_backend
 from aiminer.core.wiki import LLMWiki
 
 
@@ -11,6 +12,17 @@ def _wiki_without_init(tmp_path, wiki_col):
     wiki._log_event = lambda *_args, **_kwargs: None
     wiki._recompile_index = lambda: None
     return wiki
+
+
+def test_deepseek_embedding_backend_is_local_not_gptsapi(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-not-a-gptsapi-token")
+    monkeypatch.delenv("USE_LOCAL_EMBEDDING", raising=False)
+    backend = resolve_embedding_backend("deepseek")
+    assert backend["mode"] == "local"
+    assert backend["model_name"] == "BAAI/bge-large-zh-v1.5"
+    assert backend["api_base"] is None
+    auto = resolve_embedding_backend(None)
+    assert auto["mode"] == "local"
 
 
 def test_wiki_upsert_503_does_not_block_markdown_write(tmp_path, monkeypatch):
