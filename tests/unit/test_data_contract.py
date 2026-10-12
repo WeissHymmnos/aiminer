@@ -233,3 +233,95 @@ def test_pydantic_contracts_instantiation():
         volume=25.0,
     )
     assert tick.price == 101.5
+
+
+def test_forward_survivorship_intraday_on_cutoff_date_allowed():
+    df = pd.DataFrame(
+        {
+            "datetime": pd.to_datetime(
+                ["2024-01-01 15:00:00", "2024-01-02 15:00:00"]
+            ),
+            "instrument": ["AAPL", "AAPL"],
+            "open": [10.0, 10.0],
+            "high": [11.0, 11.0],
+            "low": [9.0, 9.0],
+            "close": [10.5, 10.5],
+            "volume": [100.0, 100.0],
+        }
+    )
+    rep = DataContractValidator.validate_ohlcv(
+        df, cutoff_date="2024-01-02", strict=True, check_calendar_gaps=False
+    )
+    assert rep.is_valid is True
+    assert rep.error_count == 0
+
+
+def test_forward_survivorship_timezone_aware():
+    df = pd.DataFrame(
+        {
+            "datetime": (
+                pd.to_datetime(["2024-01-01", "2024-01-02"])
+                .tz_localize("UTC")
+            ),
+            "instrument": ["AAPL", "AAPL"],
+            "open": [10.0, 10.0],
+            "high": [11.0, 11.0],
+            "low": [9.0, 9.0],
+            "close": [10.5, 10.5],
+            "volume": [100.0, 100.0],
+        }
+    )
+    rep = DataContractValidator.validate_ohlcv(
+        df, cutoff_date="2024-01-05", strict=True, check_calendar_gaps=False
+    )
+    assert rep.is_valid is True
+
+
+def test_missing_dates_with_non_consecutive_indices():
+    s = pd.Series(
+        ["2024-01-01", "2024-01-02", "2024-01-02", "2024-01-15"],
+        index=[10, 20, 30, 40],
+    )
+    gaps = DataContractValidator.detect_missing_dates(s)
+    assert len(gaps) == 1
+    assert gaps[0]["gap_days"] == 13
+    assert gaps[0]["previous_date"] == "2024-01-02 00:00:00"
+    assert gaps[0]["resume_date"] == "2024-01-15 00:00:00"
+
+
+def test_market_depth_negative_and_nan_prices_rejected():
+    depth_neg = pd.DataFrame(
+        {
+            "bid_price_1": [-100.0],
+            "ask_price_1": [-90.0],
+            "bid_vol_1": [10],
+            "ask_vol_1": [10],
+        }
+    )
+    with pytest.raises(DataContractError, match="invalid bid_price_1"):
+        DataContractValidator.validate_market_depth(depth_neg, strict=True)
+
+    depth_nan = pd.DataFrame(
+        {
+            "bid_price_1": [np.nan],
+            "ask_price_1": [100.0],
+            "bid_vol_1": [10],
+            "ask_vol_1": [10],
+        }
+    )
+    with pytest.raises(DataContractError, match="invalid bid_price_1"):
+        DataContractValidator.validate_market_depth(depth_nan, strict=True)
+
+
+def test_tick_data_nat_timestamps_rejected():
+    bad_ticks = pd.DataFrame(
+        {
+            "datetime": ["2024-01-01", "not_a_date"],
+            "instrument": ["A", "A"],
+            "price": [10.0, 10.5],
+            "volume": [100, 100],
+        }
+    )
+    with pytest.raises(DataContractError, match="invalid timestamps"):
+        DataContractValidator.validate_tick_data(bad_ticks, strict=True)
+

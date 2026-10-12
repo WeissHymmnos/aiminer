@@ -134,7 +134,10 @@ class DataContractValidator:
     ) -> list[dict[str, Any]]:
         """Detect gaps in trading dates exceeding normal weekend limits."""
         dt_series = (
-            pd.Series(pd.to_datetime(dates)).drop_duplicates().sort_values()
+            pd.Series(pd.to_datetime(dates))
+            .drop_duplicates()
+            .sort_values()
+            .reset_index(drop=True)
         )
         if len(dt_series) < 2:
             return []
@@ -143,9 +146,7 @@ class DataContractValidator:
         suspicious = diffs[diffs > pd.Timedelta(days=max_allowed_gap_days)]
         gaps = []
         for idx, gap in suspicious.items():
-            start_date = (
-                dt_series.loc[idx - 1] if (idx - 1) in dt_series.index else None
-            )
+            start_date = dt_series.loc[idx - 1] if (idx - 1) >= 0 else None
             end_date = dt_series.loc[idx]
             gaps.append(
                 {
@@ -167,20 +168,70 @@ class DataContractValidator:
         """Detect forward leakage beyond cutoff or pre-listing survivorship."""
         violations = []
         frame = df.copy()
+
         if isinstance(frame.index, pd.MultiIndex):
-            dt_idx = frame.index.get_level_values("datetime")
-            inst_idx = frame.index.get_level_values("instrument")
+            level_names = frame.index.names
+            if "datetime" in level_names:
+                dt_idx = frame.index.get_level_values("datetime")
+            elif "date" in level_names:
+                dt_idx = frame.index.get_level_values("date")
+            elif len(frame.index.levels) > 0:
+                dt_idx = frame.index.get_level_values(0)
+            else:
+                return []
+
+            if "instrument" in level_names:
+                inst_idx = frame.index.get_level_values("instrument")
+            elif "order_book_id" in level_names:
+                inst_idx = frame.index.get_level_values("order_book_id")
+            elif len(frame.index.levels) > 1:
+                inst_idx = frame.index.get_level_values(1)
+            else:
+                inst_idx = pd.Series("UNKNOWN", index=frame.index)
         else:
-            dt_idx = pd.to_datetime(frame["datetime"])
-            inst_idx = frame["instrument"]
+            if "datetime" in frame.columns:
+                dt_idx = frame["datetime"]
+            elif "date" in frame.columns:
+                dt_idx = frame["date"]
+            elif isinstance(frame.index, pd.DatetimeIndex):
+                dt_idx = frame.index
+            else:
+                return []
+
+            if "instrument" in frame.columns:
+                inst_idx = frame["instrument"]
+            elif "order_book_id" in frame.columns:
+                inst_idx = frame["order_book_id"]
+            else:
+                inst_idx = pd.Series("UNKNOWN", index=frame.index)
 
         dt_series = pd.Series(pd.to_datetime(dt_idx), index=frame.index)
         inst_series = pd.Series(inst_idx, index=frame.index)
+        target_tz = getattr(dt_series.dt, "tz", None)
+
+        def _to_aligned_ts(val: Any) -> pd.Timestamp:
+            ts = pd.Timestamp(val)
+            if target_tz is not None:
+                if ts.tzinfo is None:
+                    return ts.tz_localize(target_tz)
+                return ts.tz_convert(target_tz)
+            if ts.tzinfo is not None:
+                return ts.tz_localize(None)
+            return ts
 
         # Check future leakage beyond cutoff_date
         if cutoff_date is not None:
-            cutoff = pd.Timestamp(cutoff_date)
-            future_mask = dt_series > cutoff
+            cutoff = _to_aligned_ts(cutoff_date)
+            is_date_only = (
+                isinstance(cutoff_date, str) and len(cutoff_date.strip()) <= 10
+            ) or (
+                cutoff.hour == 0 and cutoff.minute == 0 and cutoff.second == 0
+            )
+            if is_date_only:
+                future_mask = dt_series.dt.date > cutoff.date()
+            else:
+                future_mask = dt_series > cutoff
+
             future_count = int(future_mask.sum())
             if future_count > 0:
                 violations.append(
@@ -195,7 +246,7 @@ class DataContractValidator:
         # Check listing date violations (data before instrument listing)
         if listing_dates:
             for inst, list_dt in listing_dates.items():
-                list_ts = pd.Timestamp(list_dt)
+                list_ts = _to_aligned_ts(list_dt)
                 sub_mask = (inst_series == inst) & (dt_series < list_ts)
                 sub_count = int(sub_mask.sum())
                 if sub_count > 0:
@@ -461,10 +512,49 @@ class DataContractValidator:
                 )
             return report
 
-        # Crossed book check: ask_price_1 must strictly exceed bid_price_1
+        # Price sanity: positive, finite, and non-NaN
         ask1 = pd.to_numeric(work["ask_price_1"], errors="coerce")
         bid1 = pd.to_numeric(work["bid_price_1"], errors="coerce")
-        crossed = ask1 <= bid1
+
+        bad_bid1 = (bid1 <= 0) | np.isinf(bid1) | bid1.isna()
+        if bad_bid1.any():
+            report.add_issue(
+                rule="valid_bid_prices",
+                severity=ValidationSeverity.ERROR,
+                message=f"{int(bad_bid1.sum())} rows have invalid bid_price_1.",
+                count=int(bad_bid1.sum()),
+            )
+
+        bad_ask1 = (ask1 <= 0) | np.isinf(ask1) | ask1.isna()
+        if bad_ask1.any():
+            report.add_issue(
+                rule="valid_ask_prices",
+                severity=ValidationSeverity.ERROR,
+                message=f"{int(bad_ask1.sum())} rows have invalid ask_price_1.",
+                count=int(bad_ask1.sum()),
+            )
+
+        # Check all price and volume columns in depth for NaN and Inf
+        price_cols = [c for c in work.columns if "price" in c or "px" in c]
+        for pc in price_cols:
+            s_px = pd.to_numeric(work[pc], errors="coerce")
+            inf_count = int(np.isinf(s_px).sum())
+            if inf_count > 0:
+                report.add_issue(
+                    rule="no_infinite_depth_prices",
+                    severity=ValidationSeverity.ERROR,
+                    message=f"Column {pc} has {inf_count} infinite values.",
+                )
+            nan_count = int(s_px.isna().sum())
+            if nan_count > 0:
+                report.add_issue(
+                    rule="no_nan_depth_prices",
+                    severity=ValidationSeverity.ERROR,
+                    message=f"Column {pc} has {nan_count} NaN values.",
+                )
+
+        # Crossed book check: ask_price_1 must strictly exceed bid_price_1
+        crossed = (ask1 <= bid1) & (~bad_bid1) & (~bad_ask1)
         if crossed.any():
             report.add_issue(
                 rule="crossed_book",
@@ -615,6 +705,14 @@ class DataContractValidator:
 
         # Monotonic timestamps per instrument
         dt = pd.to_datetime(work["datetime"], errors="coerce")
+        nat_count = int(dt.isna().sum())
+        if nat_count > 0:
+            report.add_issue(
+                rule="valid_tick_timestamps",
+                severity=ValidationSeverity.ERROR,
+                message=f"{nat_count} tick rows have invalid timestamps.",
+                count=nat_count,
+            )
         work["_parsed_dt"] = dt
         for inst, group in work.groupby("instrument"):
             ts_diff = group["_parsed_dt"].diff()
