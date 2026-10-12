@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import compileall
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -86,7 +87,7 @@ def check_pytest_collection(repo_root: Path) -> bool:
         cwd=str(repo_root),
         capture_output=True,
         text=True,
-        env={"PYTHONPATH": "src", "PATH": sys.path[0]},
+        env={**os.environ, "PYTHONPATH": "src"},
     )
     if res.returncode == 0:
         print("  -> Pytest collection succeeded.")
