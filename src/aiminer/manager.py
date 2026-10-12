@@ -1294,6 +1294,21 @@ class PortfolioManager:
     # --- Swarm Execution ---
 
     def run_swarm(self, parallel=False, log_queue=None):
+        try:
+            return self._run_swarm_impl(parallel=parallel, log_queue=log_queue)
+        except KeyboardInterrupt:
+            logger.warning("Swarm run interrupted by user")
+            self.execution_tracker.cancel_run(
+                self.run_id, reason="KeyboardInterrupt"
+            )
+            raise
+        except Exception as exc:
+            self.execution_tracker.fail_run(
+                self.run_id, error_message=str(exc)
+            )
+            raise
+
+    def _run_swarm_impl(self, parallel=False, log_queue=None):
         with logger.contextualize(**log_context(run_id=self.run_id)):
             # 1. Extract global RiceQuant Auth
             if (
@@ -1561,6 +1576,10 @@ class PortfolioManager:
                             break
                         result = run_agent_task(kwargs)
                         all_results.append(result)
+                        self.execution_tracker.update_progress(
+                            self.run_id,
+                            completed_agents=len(all_results),
+                        )
             finally:
                 heartbeat.stop()
                 if worker_log_queue is not None:
@@ -1572,6 +1591,16 @@ class PortfolioManager:
                     worker_log_thread.join(timeout=2)
                 if worker_log_manager is not None:
                     worker_log_manager.shutdown()
+
+            if self.cancellation_token.is_cancelled():
+                logger.warning(
+                    f"Swarm run {self.run_id} cancelled: "
+                    f"{self.cancellation_token.reason}"
+                )
+                self.execution_tracker.cancel_run(
+                    self.run_id, reason=self.cancellation_token.reason
+                )
+                return self.alpha_pool
 
             # Manager evaluates all
             all_results = self._recover_checkpoint_results(all_results)

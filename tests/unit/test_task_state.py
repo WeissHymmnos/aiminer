@@ -181,3 +181,27 @@ def test_portfolio_manager_cancellation_and_idempotency(
     run_info = tracker.get_run(mgr.run_id)
     assert run_info is not None
     assert run_info["status"] == "cancelled"
+
+
+def test_portfolio_manager_failure_records_error(tmp_path, monkeypatch):
+    db_file = tmp_path / "mgr_fail_test.db"
+    tracker = SwarmRunExecutionTracker(db_file)
+
+    mgr = PortfolioManager(
+        db_path=str(db_file),
+        execution_tracker=tracker,
+    )
+
+    def _boom(**kwargs):
+        raise RuntimeError("Fatal explosion in swarm execution")
+
+    monkeypatch.setattr(mgr, "dispatch_tasks", _boom)
+
+    with pytest.raises(RuntimeError, match="Fatal explosion"):
+        mgr.run_swarm(parallel=False)
+
+    run_info = tracker.get_run(mgr.run_id)
+    assert run_info is not None
+    assert run_info["status"] == "failed"
+    assert "Fatal explosion" in run_info["error_message"]
+
