@@ -88,7 +88,9 @@ class TestPolarsOperatorsExtensive(unittest.TestCase):
         self.assertTrue(ranks[0] < ranks[1])
 
     def test_logical_and_conditional(self):
-        res = self.get_result("If($close > 15, pl.lit(1), pl.lit(0))")
+        # Plain numeric constants: attribute calls such as pl.lit(1) are not
+        # part of the factor grammar (see core/alphaeval/expr_validator.py).
+        res = self.get_result("If($close > 15, 1, 0)")
         d1 = res.filter(pl.col("datetime") == "2020-01-01").sort("instrument")
         vals = d1["factor"].to_list()
         self.assertEqual(vals[0], 0)  # A=10

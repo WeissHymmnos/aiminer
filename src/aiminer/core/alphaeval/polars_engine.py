@@ -6,6 +6,8 @@ import polars as pl
 from polars.plugins import register_plugin_function
 import polars_plugins as lib
 
+from aiminer.core.alphaeval.expr_validator import validate_factor_expression
+
 
 # Find the binary plugin path
 def get_plugin_path():
@@ -472,6 +474,7 @@ class PolarsEngine:
         Evaluate a Qlib expression on a Polars DataFrame.
         Returns a polars.Expr.
         """
+        validate_factor_expression(expression)
         expression = _preprocess_expression(expression)
 
         # 1. Try the Rust compiler first
@@ -523,6 +526,7 @@ class PolarsEngine:
         result = df
         for e in expressions:
             try:
+                validate_factor_expression(e)
                 result = self._eager_eval(result, e)
             except Exception as exc:
                 logger.warning(
