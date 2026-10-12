@@ -414,7 +414,7 @@ class EvalAgent:
                 f"[EvalAgent] Review Summary: {review_result.review_summary}"
             )
 
-            # 3. Save experience to RAG (Vector fallback) - ONLY if it's real data
+            # Skip RAG for simulated or failed metrics.
             if not is_simulated and not evaluation_failed:
                 self.knowledge.rag.add_experience(
                     hypothesis=hypothesis_desc,
@@ -428,10 +428,7 @@ class EvalAgent:
                     "[EvalAgent] Skipping RAG update: Metrics are simulated or evaluation failed."
                 )
 
-            # 4. Update Early Stopping Metrics
-            # IMPORTANT: Simulated metrics must NOT update best_ic or patience counter —
-            # fake high IC from quota-exceeded fallback would otherwise trigger early stop
-            # and freeze the patience counter at 0, preventing any real exploration.
+            # Simulated metrics must not move best_ic or patience.
             current_ic = self._float_metric(
                 metrics.get("information_coefficient", 0.0)
             )
@@ -442,7 +439,6 @@ class EvalAgent:
             best_snapshot = state.get("best_factor_snapshot")
 
             if is_simulated:
-                # Freeze all early-stopping state; treat this iteration as a no-op
                 logger.warning(
                     "[EvalAgent] Simulated metrics detected — best_ic and patience_counter unchanged."
                 )

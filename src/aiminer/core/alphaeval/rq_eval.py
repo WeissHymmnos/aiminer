@@ -9,20 +9,20 @@ from loguru import logger
 import numpy as np
 import pandas as pd
 
-try:
-    import rqdatac as rq
-except ImportError:  # local-backend eval must not require RiceQuant
-    rq = None  # type: ignore[assignment]
+from aiminer.core.constants import TRADING_DAYS_PER_YEAR
 
 try:
     import matplotlib
 except ImportError:  # plots are optional for local child eval
     matplotlib = None  # type: ignore[assignment]
 
-from aiminer.core.constants import TRADING_DAYS_PER_YEAR
-
 if matplotlib is not None:
     matplotlib.use("Agg", force=True)
+
+try:
+    import rqdatac as rq
+except ImportError:  # local-data / skip_auth paths do not need RiceQuant
+    rq = None
 
 # Load environment variables
 load_dotenv()
@@ -79,7 +79,9 @@ def init_rq_auth():
     if _rq_initialized:
         return
     if rq is None:
-        raise ImportError("rqdatac is not installed")
+        raise ImportError(
+            "rqdatac is required for RiceQuant live data but is not installed"
+        )
 
     token = os.getenv("RQ_TOKEN")
     username = os.getenv("RQ_USER")
@@ -116,13 +118,14 @@ def init_rq_auth():
     )
 
 
+from pathlib import Path
+
 try:
     from matplotlib import font_manager
     import matplotlib.pyplot as plt
 except ImportError:
     font_manager = None  # type: ignore[assignment]
     plt = None  # type: ignore[assignment]
-from pathlib import Path
 
 
 class RiceQuantEval:
@@ -230,6 +233,9 @@ class RiceQuantEval:
 
     def generate_plots(self, daily_ret, layer_ret, factor_name):
         """Generate and save backtest plots."""
+        if plt is None:
+            logger.warning("matplotlib not installed; skipping plots.")
+            return {}
         safe_name = "".join(
             [c if (c.isalnum() or c in "._-") else "_" for c in factor_name]
         )[:50]
@@ -790,9 +796,7 @@ class RiceQuantEval:
                 # Stack back to multi-index
                 try:
                     res_series = res_matrix.stack(dropna=False)
-                except TypeError:
-                    res_series = res_matrix.stack()
-                except ValueError:
+                except (TypeError, ValueError):
                     res_series = res_matrix.stack()
                 factor_matrices.append(res_series)
 

@@ -16,10 +16,7 @@ from aiminer.core.settings import AiminerSettings, build_settings
 
 
 class SummaryAgent:
-    """
-    SummaryAgent generates comprehensive factor research reports.
-    Includes economic analysis, risk metrics, and equity curve visualization.
-    """
+    """Write a markdown factor report and an equity-curve PNG."""
 
     def __init__(
         self,

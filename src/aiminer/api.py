@@ -2939,6 +2939,13 @@ if FRONTEND_DIST_DIR:
 
 @app.get("/{full_path:path}", response_model=None)
 def frontend_fallback(full_path: str):
+    include_spa = os.getenv("AIMINER_INCLUDE_SPA", "1").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    if not include_spa:
+        raise HTTPException(404, "spa disabled")
     if full_path.startswith("api") or full_path.startswith("ws"):
         raise HTTPException(404, "not found")
     index_path = _frontend_index_path()
