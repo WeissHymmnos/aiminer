@@ -24,6 +24,9 @@ class EvaluationConfig:
     valid_split_date: str | None = None
     oos_split_date: str | None = None
     cost_bps: float = 5.0
+    slippage_model: str = "fixed"
+    impact_gamma: float = 0.1
+    portfolio_value: float = 1e7
 
 
 def resolve_data_backend(
@@ -84,6 +87,24 @@ def evaluation_config_from_mapping(
         or os.environ.get("AIMINER_OOS_SPLIT_DATE")
         or None,
         cost_bps=cost_bps,
+        slippage_model=(
+            get("slippage_model")
+            or get("market_impact_model")
+            or os.environ.get("AIMINER_SLIPPAGE_MODEL")
+            or "fixed"
+        )
+        .strip()
+        .lower(),
+        impact_gamma=float(
+            get("impact_gamma")
+            or os.environ.get("AIMINER_IMPACT_GAMMA")
+            or 0.1
+        ),
+        portfolio_value=float(
+            get("portfolio_value")
+            or os.environ.get("AIMINER_PORTFOLIO_VALUE")
+            or 1e7
+        ),
     )
 
 
@@ -120,6 +141,9 @@ def build_evaluator(
             valid_split_date=config.valid_split_date,
             oos_split_date=config.oos_split_date,
             cost_bps=config.cost_bps,
+            slippage_model=config.slippage_model,
+            impact_gamma=config.impact_gamma,
+            portfolio_value=config.portfolio_value,
         )
 
     if config.data_backend == "qlib":
@@ -175,6 +199,9 @@ def build_evaluator(
             valid_split_date=config.valid_split_date,
             oos_split_date=config.oos_split_date,
             cost_bps=config.cost_bps,
+            slippage_model=config.slippage_model,
+            impact_gamma=config.impact_gamma,
+            portfolio_value=config.portfolio_value,
         )
 
     raise ValueError(f"Unsupported data backend: {config.data_backend}")

@@ -1,8 +1,8 @@
-# --- Imports & Auth ---
+from __future__ import annotations
 
 import ast
 import os
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -152,6 +152,10 @@ class RiceQuantEval:
         valid_split_date: Optional[str] = None,
         oos_split_date: Optional[str] = None,
         cost_bps: float = 5.0,
+        slippage_model: str = "fixed",
+        impact_gamma: float = 0.1,
+        portfolio_value: float = 1e7,
+        impact_model: Any | None = None,
     ):
         self.factor_expressions = factor_expressions
         self.weights = weights if weights else [1.0] * len(factor_expressions)
@@ -169,6 +173,22 @@ class RiceQuantEval:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.cost_bps = float(cost_bps)
+        self.slippage_model_name = str(slippage_model)
+        self.impact_gamma = float(impact_gamma)
+        self.portfolio_value = float(portfolio_value)
+        if impact_model is not None:
+            self.impact_model = impact_model
+        else:
+            from aiminer.core.alphaeval.market_impact import build_impact_model
+
+            self.impact_model = build_impact_model(
+                self.slippage_model_name,
+                cost_bps=self.cost_bps,
+                impact_gamma=self.impact_gamma,
+                portfolio_value=self.portfolio_value,
+            )
+        self.effective_cost_bps: float = self.cost_bps
+        self.total_cost_drag: float = 0.0
         self.turnover_series: pd.Series = pd.Series(dtype=float)
         self.mean_turnover: float = 0.0
         self.turnover: float = 0.0
@@ -1230,9 +1250,13 @@ class RiceQuantEval:
         else:
             turnover_series = pd.Series(dtype=float, index=weights_df.index)
 
-        # Transaction cost drag: cost_bps
-        cost_rate = float(self.cost_bps) / 10000.0
-        net_daily_ret = gross_daily_ret - turnover_series * cost_rate
+        # Transaction cost and market impact drag
+        daily_drag, _ = self.impact_model.compute_drag(
+            weights_df=weights_df,
+            raw_data=getattr(self, "raw_data", None),
+            label_df=label_df,
+        )
+        net_daily_ret = gross_daily_ret - daily_drag
 
         self.daily_returns_series = net_daily_ret
         self.gross_daily_returns_series = gross_daily_ret
@@ -1241,6 +1265,13 @@ class RiceQuantEval:
             float(turnover_series.mean()) if not turnover_series.empty else 0.0
         )
         self.turnover = self.mean_turnover
+        total_to = float(turnover_series.sum())
+        total_drag = float(daily_drag.sum())
+        self.total_cost_drag = total_drag
+        if total_to > 1e-8:
+            self.effective_cost_bps = float((total_drag / total_to) * 10000.0)
+        else:
+            self.effective_cost_bps = float(self.cost_bps)
 
         if len(gross_daily_ret) >= 2:
             gross_std = gross_daily_ret.std()

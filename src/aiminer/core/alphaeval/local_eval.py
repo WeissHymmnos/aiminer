@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from loguru import logger
 import numpy as np
@@ -32,6 +32,10 @@ class LocalDataEval(RiceQuantEval):
         valid_split_date: Optional[str] = None,
         oos_split_date: Optional[str] = None,
         cost_bps: float = 5.0,
+        slippage_model: str = "fixed",
+        impact_gamma: float = 0.1,
+        portfolio_value: float = 1e7,
+        impact_model: Any | None = None,
     ):
         self.local_data_path = local_data_path
         self.local_data_layout = local_data_layout
@@ -52,6 +56,10 @@ class LocalDataEval(RiceQuantEval):
             valid_split_date=valid_split_date,
             oos_split_date=oos_split_date,
             cost_bps=cost_bps,
+            slippage_model=slippage_model,
+            impact_gamma=impact_gamma,
+            portfolio_value=portfolio_value,
+            impact_model=impact_model,
         )
 
     def _load_profile_frame(
