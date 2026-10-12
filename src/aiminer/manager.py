@@ -19,15 +19,10 @@ import sqlite3
 import json
 import uuid
 
-from aiminer.sub_agent import AlphaResearcher
-from aiminer.agents.summary_agent import SummaryAgent
-from aiminer.agents.portfolio_agent import PortfolioAgent
 from aiminer.core.agent_checkpoint import (
     ensure_agent_checkpoint_table,
     load_agent_checkpoints,
 )
-from aiminer.core.portfolio import construct_portfolio
-from aiminer.core.alphaeval.rq_eval import init_rq_auth
 from aiminer.core.constants import IC_CULL_THRESHOLD
 from aiminer.core.runtime import log_context, new_agent_id, new_run_id
 from aiminer.core.settings import build_settings
@@ -37,6 +32,30 @@ from aiminer.core.strategy import (
     selection_score,
     strategy_templates,
 )
+
+# Optional heavy imports: present in the aiminer conda env; absent in the
+# 3.12 finaince env. Names stay on the module so existing tests can
+# monkeypatch them. cull_alpha_pool does not construct these agents.
+try:
+    from aiminer.sub_agent import AlphaResearcher
+except ImportError:  # pragma: no cover
+    AlphaResearcher = None  # type: ignore[misc, assignment]
+try:
+    from aiminer.agents.summary_agent import SummaryAgent
+except ImportError:  # pragma: no cover
+    SummaryAgent = None  # type: ignore[misc, assignment]
+try:
+    from aiminer.agents.portfolio_agent import PortfolioAgent
+except ImportError:  # pragma: no cover
+    PortfolioAgent = None  # type: ignore[misc, assignment]
+try:
+    from aiminer.core.portfolio import construct_portfolio
+except ImportError:  # pragma: no cover
+    construct_portfolio = None  # type: ignore[misc, assignment]
+try:
+    from aiminer.core.alphaeval.rq_eval import init_rq_auth
+except ImportError:  # pragma: no cover
+    init_rq_auth = None  # type: ignore[misc, assignment]
 
 
 # --- Worker Process Utilities ---
@@ -1508,6 +1527,17 @@ class PortfolioManager:
         )
         self._dedupe_alpha_pool_by_returns(stage="strategy")
         return self.strategy_pool
+
+
+def cull_alpha_pool(results_list):
+    """IC-threshold + correlation cull used by the swarm manager.
+
+    Same mechanics as ``PortfolioManager.evaluate_and_combine`` without
+    constructing LLM/summary agents or opening a results database.
+    """
+    manager = PortfolioManager.__new__(PortfolioManager)
+    manager.alpha_pool = []
+    return PortfolioManager.evaluate_and_combine(manager, results_list)
 
 
 # --- CLI Entry Point ---
