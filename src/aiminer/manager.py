@@ -13,17 +13,29 @@ import random
 import sqlite3
 import threading
 import time
+from typing import Any
 import uuid
 
 from dotenv import load_dotenv
 from loguru import logger
+import numpy as np
 import pandas as pd
+import scipy.stats
 
 from aiminer.core.agent_checkpoint import (
     ensure_agent_checkpoint_table,
     load_agent_checkpoints,
 )
 from aiminer.core.constants import IC_CULL_THRESHOLD
+
+try:
+    from aiminer.core.orthogonalization import (
+        compute_cross_sectional_factor_correlation,
+        compute_incremental_ic,
+    )
+except ImportError:
+    compute_cross_sectional_factor_correlation = None
+    compute_incremental_ic = None
 from aiminer.core.runtime import log_context, new_agent_id, new_run_id
 from aiminer.core.settings import build_settings
 from aiminer.core.strategy import (
@@ -458,6 +470,8 @@ class PortfolioManager:
         self.researchers = []
         self.alpha_pool = []
         self.strategy_pool = []
+        self.n_trials = 0
+        self.trial_sharpes: list[float] = []
         self.kwargs = dict(kwargs)
         self.kwargs.setdefault("llm_provider", self.settings.llm_provider)
         self.kwargs.setdefault("llm_model", self.settings.llm_model)
@@ -563,7 +577,9 @@ class PortfolioManager:
                     market_profile TEXT,
                     llm_provider TEXT,
                     llm_model TEXT,
-                    is_simulated INTEGER
+                    is_simulated INTEGER,
+                    dsr REAL,
+                    n_trials INTEGER
                 )
             """)
             cursor.execute(
@@ -644,6 +660,11 @@ class PortfolioManager:
                 (
                     "is_simulated",
                     "ALTER TABLE alpha_pool ADD COLUMN is_simulated INTEGER",
+                ),
+                ("dsr", "ALTER TABLE alpha_pool ADD COLUMN dsr REAL"),
+                (
+                    "n_trials",
+                    "ALTER TABLE alpha_pool ADD COLUMN n_trials INTEGER",
                 ),
             ]:
                 try:
@@ -798,11 +819,38 @@ class PortfolioManager:
                 self.researchers.append(task_kwargs)
                 counter += 1
 
+    def record_trial(
+        self, sharpe_or_factor: float | dict[str, Any]
+    ) -> None:
+        """Record an evaluated trial for multiple testing tracking."""
+        self.n_trials += 1
+        if isinstance(sharpe_or_factor, (int, float)):
+            self.trial_sharpes.append(float(sharpe_or_factor))
+        elif isinstance(sharpe_or_factor, dict):
+            sr = sharpe_or_factor.get("metrics", {}).get("sharpe")
+            if sr is None:
+                sr = sharpe_or_factor.get("perf_metric")
+            if sr is not None:
+                try:
+                    self.trial_sharpes.append(float(sr))
+                except (ValueError, TypeError):
+                    pass
+
     def evaluate_and_combine(self, results_list):
         """Drop weak / correlated factors before they enter the pool."""
         for item in results_list:
-            if isinstance(item, dict) and item.get("role"):
-                item["role"] = _normalize_role(item.get("role"))
+            if isinstance(item, dict):
+                self.n_trials += int(item.get("iteration") or 1)
+                sr = item.get("metrics", {}).get("sharpe")
+                if sr is None:
+                    sr = item.get("perf_metric")
+                if sr is not None:
+                    try:
+                        self.trial_sharpes.append(float(sr))
+                    except (ValueError, TypeError):
+                        pass
+                if item.get("role"):
+                    item["role"] = _normalize_role(item.get("role"))
         logger.info("=== Manager Evaluation & Synthesis ===")
         valid_factors = []
 
@@ -862,13 +910,32 @@ class PortfolioManager:
                 same_market = new_factor.get(
                     "market_profile"
                 ) == existing_factor.get("market_profile")
+                if not same_market:
+                    continue
+
                 corr = _series_correlation(new_returns, existing_returns)
-                if same_market and corr is not None and corr > 0.7:
+                if corr is not None and corr > 0.7:
                     is_redundant = True
                     logger.info(
-                        f"[Rejected:correlated] {new_factor['role'][:30]}... highly correlated (Corr: {corr:.2f}) with existing factor."
+                        f"[Rejected:correlated_returns] {new_factor['role'][:30]}... highly correlated returns (Corr: {corr:.2f}) with existing factor."
                     )
                     break
+
+                # Cross-sectional factor value correlation check (if available)
+                new_fvals = new_factor.get("factor_series")
+                exist_fvals = existing_factor.get("factor_series")
+                if isinstance(new_fvals, pd.Series) and isinstance(
+                    exist_fvals, pd.Series
+                ):
+                    f_corr = compute_cross_sectional_factor_correlation(
+                        new_fvals, exist_fvals
+                    )
+                    if f_corr is not None and f_corr > 0.75:
+                        is_redundant = True
+                        logger.info(
+                            f"[Rejected:correlated_factor_vals] {new_factor['role'][:30]}... highly correlated factor values (RankCorr: {f_corr:.2f}) with existing factor."
+                        )
+                        break
 
             if not is_redundant:
                 # Assign unique ID
@@ -1089,6 +1156,16 @@ class PortfolioManager:
             iterations=iterations,
             agent_id=agent_id,
         )
+        if isinstance(result, dict):
+            self.n_trials += int(result.get("iteration") or 1)
+            sr = result.get("metrics", {}).get("sharpe")
+            if sr is None:
+                sr = result.get("perf_metric")
+            if sr is not None:
+                try:
+                    self.trial_sharpes.append(float(sr))
+                except (ValueError, TypeError):
+                    pass
         accepted, reason = self._accept_crossover_result(
             result,
             comparison_pool=comparison_pool,
@@ -1126,6 +1203,68 @@ class PortfolioManager:
         )
         if not factors_to_persist:
             return []
+
+        effective_n_trials = max(
+            self.n_trials,
+            len(self.trial_sharpes),
+            len(factors_to_persist),
+            1,
+        )
+        from aiminer.core.alphaeval.multiple_testing import (
+            deflated_sharpe_ratio,
+        )
+
+        for factor in factors_to_persist:
+            if factor.get("n_trials") is None:
+                factor["n_trials"] = effective_n_trials
+
+            if factor.get("dsr") is None:
+                metrics = factor.get("metrics") or {}
+                sr = metrics.get("sharpe")
+                if sr is None:
+                    sr = factor.get("perf_metric", 0.0)
+                try:
+                    sr_val = float(sr) if sr is not None else 0.0
+                except (ValueError, TypeError):
+                    sr_val = 0.0
+
+                returns = factor.get("returns") or {}
+                if isinstance(returns, dict) and len(returns) >= 4:
+                    try:
+                        rets = np.asarray(
+                            list(returns.values()), dtype=float
+                        )
+                        rets = rets[np.isfinite(rets)]
+                    except Exception:
+                        rets = np.array([], dtype=float)
+                else:
+                    rets = np.array([], dtype=float)
+
+                if len(rets) >= 4:
+                    sample_len = len(rets)
+                    skew = float(scipy.stats.skew(rets))
+                    kurt = float(
+                        scipy.stats.kurtosis(rets, fisher=False)
+                    )
+                else:
+                    sample_len = 252
+                    skew = 0.0
+                    kurt = 3.0
+
+                factor_n = factor.get("n_trials", effective_n_trials)
+                trials = (
+                    self.trial_sharpes
+                    if self.trial_sharpes
+                    else [sr_val]
+                )
+                factor["dsr"] = deflated_sharpe_ratio(
+                    estimated_sharpe=sr_val,
+                    var_sharpe_or_trials=trials,
+                    n_trials=factor_n,
+                    skewness=skew,
+                    kurtosis=kurt,
+                    sample_length=sample_len,
+                )
 
         from aiminer.pool_io import persist_alpha_pool_rows
 

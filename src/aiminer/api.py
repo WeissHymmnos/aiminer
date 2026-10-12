@@ -152,6 +152,8 @@ _ALPHA_POOL_OPTIONAL_COLUMNS: Dict[str, str] = {
     "best_strategy_metrics_json": "TEXT",
     "execution_style": "TEXT",
     "run_id": "TEXT",
+    "dsr": "REAL",
+    "n_trials": "INTEGER",
 }
 
 _STRATEGY_BACKTEST_OPTIONAL_COLUMNS: Dict[str, str] = {
@@ -228,7 +230,9 @@ CREATE TABLE IF NOT EXISTS alpha_pool (
     market_profile TEXT,
     llm_provider TEXT,
     llm_model TEXT,
-    is_simulated INTEGER
+    is_simulated INTEGER,
+    dsr REAL,
+    n_trials INTEGER
 )
 """
 

@@ -61,7 +61,9 @@ CREATE TABLE IF NOT EXISTS alpha_pool (
     market_profile TEXT,
     llm_provider TEXT,
     llm_model TEXT,
-    is_simulated INTEGER
+    is_simulated INTEGER,
+    dsr REAL,
+    n_trials INTEGER
 )
 """
 
@@ -72,6 +74,14 @@ def ensure_alpha_pool_schema(db_path: str | Path) -> None:
     with sqlite3.connect(path) as conn:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute(_CREATE_ALPHA_POOL)
+        for ddl in [
+            "ALTER TABLE alpha_pool ADD COLUMN dsr REAL",
+            "ALTER TABLE alpha_pool ADD COLUMN n_trials INTEGER",
+        ]:
+            try:
+                conn.execute(ddl)
+            except sqlite3.OperationalError:
+                pass
 
 
 def load_alpha_pool_rows(db_path: str | Path) -> list[dict[str, Any]]:
@@ -157,11 +167,16 @@ def persist_alpha_pool_rows(
                 INSERT OR REPLACE INTO alpha_pool
                     (id, role, hypothesis, code, ic, rank_ic, report_path,
                      metrics_json, returns_json, is_effective, perf_metric,
-                     selection_score, best_strategy_id, best_strategy_metrics_json, execution_style,
+                     selection_score, best_strategy_id,
+                     best_strategy_metrics_json, execution_style,
                      run_id, agent_id, iteration, evaluation_mode,
-                     evaluation_engine, data_backend, market_mode, market_profile,
-                     llm_provider, llm_model, is_simulated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     evaluation_engine, data_backend, market_mode,
+                     market_profile, llm_provider, llm_model, is_simulated,
+                     dsr, n_trials)
+                VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                )
                 """,
                 (
                     factor.get("id"),
@@ -200,6 +215,8 @@ def persist_alpha_pool_rows(
                     factor.get("llm_provider"),
                     factor.get("llm_model"),
                     int(factor.get("is_simulated", False)),
+                    factor.get("dsr"),
+                    factor.get("n_trials"),
                 ),
             )
             persisted.append(factor)
