@@ -6,11 +6,17 @@ from fastapi import APIRouter
 
 import aiminer.api as api
 from aiminer.routers import (
+    admin,
     admin_router,
+    backtest,
     backtest_router,
+    strategy,
     strategy_router,
+    swarm,
     swarm_router,
+    websocket,
     websocket_router,
+    wiki,
     wiki_router,
 )
 
@@ -22,6 +28,31 @@ def test_api_routers_importable():
     assert isinstance(swarm_router, APIRouter)
     assert isinstance(wiki_router, APIRouter)
     assert isinstance(websocket_router, APIRouter)
+
+
+def test_api_routers_have_routes_standalone():
+    """Verify that routers actually define their routes within the module."""
+    assert len(admin_router.routes) >= 4
+    assert len(backtest_router.routes) >= 9
+    assert len(strategy_router.routes) >= 5
+    assert len(swarm_router.routes) >= 6
+    assert len(wiki_router.routes) >= 5
+    assert len(websocket_router.routes) >= 1
+
+
+def test_router_modules_contain_callable_handlers():
+    """Verify endpoints exist on router modules directly."""
+    assert callable(admin.health)
+    assert callable(admin.readiness)
+    assert callable(backtest.run_backtest)
+    assert callable(backtest.get_results)
+    assert callable(strategy.run_strategy)
+    assert callable(strategy.get_strategies)
+    assert callable(swarm.start_swarm)
+    assert callable(swarm.stop_swarm)
+    assert callable(wiki.wiki_index)
+    assert callable(wiki.wiki_graph)
+    assert callable(websocket.websocket_endpoint)
 
 
 def test_api_routers_backward_compatibility_namespace():
