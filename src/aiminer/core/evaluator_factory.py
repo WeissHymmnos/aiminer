@@ -23,6 +23,7 @@ class EvaluationConfig:
     # (see aiminer.core.alphaeval.holdout.resolve_split_dates).
     valid_split_date: str | None = None
     oos_split_date: str | None = None
+    cost_bps: float = 5.0
 
 
 def resolve_data_backend(
@@ -54,6 +55,14 @@ def evaluation_config_from_mapping(
     market_profiles = [market_profile] + [
         item for item in market_profiles if item != market_profile
     ]
+    raw_cost_bps = get("cost_bps")
+    if raw_cost_bps is None:
+        raw_cost_bps = os.environ.get("AIMINER_COST_BPS")
+    try:
+        cost_bps = float(raw_cost_bps) if raw_cost_bps is not None else 5.0
+    except (ValueError, TypeError):
+        cost_bps = 5.0
+
     return EvaluationConfig(
         data_backend=resolve_data_backend(
             get("data_backend"), evaluation_mode=get("evaluation_mode")
@@ -74,6 +83,7 @@ def evaluation_config_from_mapping(
         oos_split_date=get("oos_split_date")
         or os.environ.get("AIMINER_OOS_SPLIT_DATE")
         or None,
+        cost_bps=cost_bps,
     )
 
 
@@ -109,6 +119,7 @@ def build_evaluator(
             engine=config.evaluation_engine,
             valid_split_date=config.valid_split_date,
             oos_split_date=config.oos_split_date,
+            cost_bps=config.cost_bps,
         )
 
     if config.data_backend == "qlib":
@@ -163,6 +174,7 @@ def build_evaluator(
             market_mode=config.market_mode,
             valid_split_date=config.valid_split_date,
             oos_split_date=config.oos_split_date,
+            cost_bps=config.cost_bps,
         )
 
     raise ValueError(f"Unsupported data backend: {config.data_backend}")

@@ -139,6 +139,9 @@ class EvalAgent:
             "pfs2": round(rng.uniform(0.0, 1.0), 6),
             "diversity": round(rng.uniform(0.0, 1.0), 3),
             "llm_score": round(rng.uniform(50.0, 100.0), 2),
+            "sharpe": 0.0,
+            "gross_sharpe": 0.0,
+            "turnover": 0.0,
             "daily_returns": {},
             "plot_paths": {},
             "_simulated": True,
@@ -151,6 +154,8 @@ class EvalAgent:
             "rank_ic": 0.0,
             "rre": None,
             "sharpe": 0.0,
+            "gross_sharpe": 0.0,
+            "turnover": 0.0,
             "max_drawdown": 0.0,
             "daily_returns": {},
             "plot_paths": {},
@@ -198,16 +203,40 @@ class EvalAgent:
         has_split = isinstance(is_ic, (int, float)) and not isinstance(
             is_ic, bool
         )
-        full_ic = getattr(evaluator, "ic", 0.0)
-        full_rank_ic = getattr(evaluator, "rankic", 0.0)
-        full_sharpe = getattr(evaluator, "sharpe", 0.0)
-        full_max_dd = getattr(evaluator, "max_dd", 0.0)
+        full_ic = cls._float_metric(getattr(evaluator, "ic", 0.0))
+        full_rank_ic = cls._float_metric(getattr(evaluator, "rankic", 0.0))
+        full_sharpe = cls._float_metric(getattr(evaluator, "sharpe", 0.0))
+        raw_gross = getattr(evaluator, "gross_sharpe", None)
+        full_gross_sharpe = (
+            cls._float_metric(raw_gross, full_sharpe)
+            if raw_gross is not None
+            else full_sharpe
+        )
+        raw_turnover = getattr(evaluator, "turnover", None)
+        if raw_turnover is None:
+            raw_turnover = getattr(evaluator, "mean_turnover", 0.0)
+        full_turnover = cls._float_metric(raw_turnover, 0.0)
+        full_max_dd = cls._float_metric(getattr(evaluator, "max_dd", 0.0))
 
         if has_split:
+            train_turnover = getattr(evaluator, "is_turnover", None)
+            train_gross = getattr(evaluator, "is_gross_sharpe", None)
+            turnover_val = (
+                cls._float_metric(train_turnover, full_turnover)
+                if train_turnover is not None
+                else full_turnover
+            )
+            gross_sharpe_val = (
+                cls._float_metric(train_gross, full_gross_sharpe)
+                if train_gross is not None
+                else full_gross_sharpe
+            )
             metrics = {
                 "information_coefficient": is_ic,
                 "rank_ic": getattr(evaluator, "is_rankic", None) or 0.0,
                 "sharpe": getattr(evaluator, "is_sharpe", None) or 0.0,
+                "gross_sharpe": gross_sharpe_val,
+                "turnover": turnover_val,
                 "max_drawdown": getattr(evaluator, "is_max_dd", None) or 0.0,
                 "metric_window": "train",
             }
@@ -215,13 +244,23 @@ class EvalAgent:
                 "val_ic": getattr(evaluator, "val_ic", None),
                 "val_rank_ic": getattr(evaluator, "val_rankic", None),
                 "val_sharpe": getattr(evaluator, "val_sharpe", None),
+                "val_gross_sharpe": getattr(
+                    evaluator, "val_gross_sharpe", None
+                ),
+                "val_turnover": getattr(evaluator, "val_turnover", None),
                 "oos_ic": getattr(evaluator, "oos_ic", None),
                 "oos_rank_ic": getattr(evaluator, "oos_rankic", None),
                 "oos_sharpe": getattr(evaluator, "oos_sharpe", None),
+                "oos_gross_sharpe": getattr(
+                    evaluator, "oos_gross_sharpe", None
+                ),
                 "oos_max_drawdown": getattr(evaluator, "oos_max_dd", None),
+                "oos_turnover": getattr(evaluator, "oos_turnover", None),
                 "full_ic": full_ic,
                 "full_rank_ic": full_rank_ic,
                 "full_sharpe": full_sharpe,
+                "full_gross_sharpe": full_gross_sharpe,
+                "full_turnover": full_turnover,
                 "full_max_drawdown": full_max_dd,
                 "valid_split_date": getattr(
                     evaluator, "valid_split_date", None
@@ -235,6 +274,8 @@ class EvalAgent:
                 "information_coefficient": full_ic,
                 "rank_ic": full_rank_ic,
                 "sharpe": full_sharpe,
+                "gross_sharpe": full_gross_sharpe,
+                "turnover": full_turnover,
                 "max_drawdown": full_max_dd,
                 "metric_window": "full",
             }

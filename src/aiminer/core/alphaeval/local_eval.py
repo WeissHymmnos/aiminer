@@ -31,6 +31,7 @@ class LocalDataEval(RiceQuantEval):
         market_mode: str = "single",
         valid_split_date: Optional[str] = None,
         oos_split_date: Optional[str] = None,
+        cost_bps: float = 5.0,
     ):
         self.local_data_path = local_data_path
         self.local_data_layout = local_data_layout
@@ -50,6 +51,7 @@ class LocalDataEval(RiceQuantEval):
             skip_auth=True,
             valid_split_date=valid_split_date,
             oos_split_date=oos_split_date,
+            cost_bps=cost_bps,
         )
 
     def _load_profile_frame(

@@ -108,6 +108,8 @@ def segment_stats(
     daily_returns: pd.Series,
     start: Optional[str],
     end: Optional[str],
+    turnover_series: Optional[pd.Series] = None,
+    gross_daily_returns: Optional[pd.Series] = None,
 ) -> Optional[Dict[str, Any]]:
     """Metrics for dates in ``[start, end)``; ``None`` when the slice is empty.
 
@@ -117,6 +119,10 @@ def segment_stats(
     ic_series = _to_datetime_index(ic_series)
     rank_ic_series = _to_datetime_index(rank_ic_series)
     daily_returns = _to_datetime_index(daily_returns)
+    if turnover_series is not None:
+        turnover_series = _to_datetime_index(turnover_series)
+    if gross_daily_returns is not None:
+        gross_daily_returns = _to_datetime_index(gross_daily_returns)
 
     def _mask(index: pd.Index) -> np.ndarray:
         mask = np.ones(len(index), dtype=bool)
@@ -141,10 +147,36 @@ def segment_stats(
         cum = (1 + rets).cumprod()
         max_dd = float((cum / cum.cummax() - 1).min())
 
-    return {
+    stats: Dict[str, Any] = {
         "ic": round(float(ic.mean()), 4),
-        "rank_ic": round(float(rank_ic.mean()), 4) if not rank_ic.empty else None,
+        "rank_ic": (
+            round(float(rank_ic.mean()), 4) if not rank_ic.empty else None
+        ),
         "sharpe": sharpe,
         "max_dd": max_dd,
         "n_days": int(len(ic)),
     }
+
+    if gross_daily_returns is not None:
+        gross_rets = gross_daily_returns[
+            _mask(gross_daily_returns.index)
+        ].dropna()
+        if len(gross_rets) >= 2:
+            stats["gross_sharpe"] = float(
+                gross_rets.mean()
+                / (gross_rets.std() + 1e-8)
+                * np.sqrt(TRADING_DAYS_PER_YEAR)
+            )
+            g_cum = (1 + gross_rets).cumprod()
+            stats["gross_max_dd"] = float((g_cum / g_cum.cummax() - 1).min())
+        else:
+            stats["gross_sharpe"] = None
+            stats["gross_max_dd"] = None
+
+    if turnover_series is not None:
+        to = turnover_series[_mask(turnover_series.index)].dropna()
+        stats["turnover"] = (
+            round(float(to.mean()), 4) if not to.empty else None
+        )
+
+    return stats

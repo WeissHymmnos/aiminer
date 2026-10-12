@@ -151,6 +151,7 @@ class RiceQuantEval:
         skip_auth: bool = False,
         valid_split_date: Optional[str] = None,
         oos_split_date: Optional[str] = None,
+        cost_bps: float = 5.0,
     ):
         self.factor_expressions = factor_expressions
         self.weights = weights if weights else [1.0] * len(factor_expressions)
@@ -167,25 +168,39 @@ class RiceQuantEval:
         self.noise_level = noise_level
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.cost_bps = float(cost_bps)
+        self.turnover_series: pd.Series = pd.Series(dtype=float)
+        self.mean_turnover: float = 0.0
+        self.turnover: float = 0.0
+        self.gross_daily_returns_series: pd.Series = pd.Series(dtype=float)
+        self.daily_returns_series: pd.Series = pd.Series(dtype=float)
 
         # Full-window metrics (manual backtests / reports).
         self.ic = 0.0
         self.rankic = 0.0
         self.sharpe = 0.0
+        self.gross_sharpe = 0.0
         self.max_dd = 0.0
+        self.gross_max_dd = 0.0
         # Per-segment metrics. ``None`` means the segment has no data; it is
         # never back-filled with another window's value.
         self.is_ic: Optional[float] = None
         self.is_rankic: Optional[float] = None
         self.is_sharpe: Optional[float] = None
+        self.is_gross_sharpe: Optional[float] = None
         self.is_max_dd: Optional[float] = None
+        self.is_turnover: Optional[float] = None
         self.val_ic: Optional[float] = None
         self.val_rankic: Optional[float] = None
         self.val_sharpe: Optional[float] = None
+        self.val_gross_sharpe: Optional[float] = None
+        self.val_turnover: Optional[float] = None
         self.oos_ic: Optional[float] = None
         self.oos_rankic: Optional[float] = None
         self.oos_sharpe: Optional[float] = None
+        self.oos_gross_sharpe: Optional[float] = None
         self.oos_max_dd: Optional[float] = None
+        self.oos_turnover: Optional[float] = None
         self.segment_metrics: dict = {}
         self.rre = 0.0
         self.plot_paths = {}
@@ -253,7 +268,14 @@ class RiceQuantEval:
 
         return layer_ret
 
-    def generate_plots(self, daily_ret, layer_ret, factor_name):
+    def generate_plots(
+        self,
+        daily_ret: pd.Series,
+        layer_ret: pd.DataFrame,
+        factor_name: str,
+        gross_ret: Optional[pd.Series] = None,
+        turnover_series: Optional[pd.Series] = None,
+    ):
         """Generate and save backtest plots."""
         if plt is None:
             logger.warning("matplotlib not installed; skipping plots.")
@@ -263,22 +285,121 @@ class RiceQuantEval:
         )[:50]
         plot_paths = {}
 
-        # 1. Cumulative Returns (Equity Curve)
-        plt.figure(figsize=(10, 5))
-        cum_ret = (1 + daily_ret.fillna(0)).cumprod()
-        cum_ret.plot(title=f"Factor Equity Curve: {factor_name}")
-        plt.axvline(
-            x=pd.to_datetime(self.oos_split_date),
-            color="r",
-            linestyle="--",
-            label="OOS Split",
+        gross_s = (
+            gross_ret
+            if gross_ret is not None
+            else getattr(self, "gross_daily_returns_series", None)
         )
-        plt.legend()
-        plt.grid(True, alpha=0.3)
+        to_s = (
+            turnover_series
+            if turnover_series is not None
+            else getattr(self, "turnover_series", None)
+        )
+        has_turnover = to_s is not None and not to_s.empty
+        has_gross = gross_s is not None and not gross_s.empty
+
+        # 1. Cumulative Returns (Net vs Gross Equity & Turnover)
+        if has_turnover:
+            fig, (ax1, ax2) = plt.subplots(
+                2,
+                1,
+                figsize=(10, 7),
+                sharex=True,
+                gridspec_kw={"height_ratios": [3, 1]},
+            )
+        else:
+            fig, ax1 = plt.subplots(1, 1, figsize=(10, 5))
+            ax2 = None
+
+        cum_net = (1 + daily_ret.fillna(0)).cumprod()
+        cost_bps_val = getattr(self, "cost_bps", 5.0)
+        ax1.plot(
+            cum_net.index,
+            cum_net.values,
+            label=f"Net Equity ({cost_bps_val:.1f} bps)",
+            color="#1f77b4",
+            linewidth=1.8,
+        )
+
+        if has_gross:
+            cum_gross = (1 + gross_s.fillna(0)).cumprod()
+            ax1.plot(
+                cum_gross.index,
+                cum_gross.values,
+                label="Gross Equity",
+                color="#7f7f7f",
+                linestyle="--",
+                linewidth=1.4,
+                alpha=0.85,
+            )
+
+        if getattr(self, "oos_split_date", None):
+            ax1.axvline(
+                x=pd.to_datetime(self.oos_split_date),
+                color="r",
+                linestyle="--",
+                label="OOS Split",
+            )
+            if ax2 is not None:
+                ax2.axvline(
+                    x=pd.to_datetime(self.oos_split_date),
+                    color="r",
+                    linestyle="--",
+                )
+
+        ax1.set_title(f"Factor Equity Curve: {factor_name}")
+        ax1.legend(loc="upper left")
+        ax1.grid(True, alpha=0.3)
+
+        if ax2 is not None:
+            ax2.plot(
+                to_s.index,
+                to_s.values,
+                label="Turnover",
+                color="#ff7f0e",
+                linewidth=1.2,
+            )
+            mean_to = float(to_s.mean())
+            ax2.axhline(
+                y=mean_to,
+                color="#2ca02c",
+                linestyle=":",
+                label=f"Mean Turnover: {mean_to:.2%}",
+            )
+            ax2.set_ylabel("Turnover")
+            ax2.legend(loc="upper left")
+            ax2.grid(True, alpha=0.3)
+
+        plt.tight_layout()
         eq_path = self.output_dir / f"{safe_name}_equity.png"
         plt.savefig(eq_path, dpi=120)
         plt.close()
         plot_paths["equity"] = str(eq_path.resolve())
+
+        # Also save standalone turnover plot if turnover is available
+        if has_turnover:
+            plt.figure(figsize=(10, 4))
+            to_s.plot(
+                title=f"Turnover — {factor_name}", color="#ff7f0e", grid=True
+            )
+            plt.axhline(
+                y=float(to_s.mean()),
+                color="#2ca02c",
+                linestyle=":",
+                label=f"Mean: {float(to_s.mean()):.2%}",
+            )
+            if getattr(self, "oos_split_date", None):
+                plt.axvline(
+                    x=pd.to_datetime(self.oos_split_date),
+                    color="r",
+                    linestyle="--",
+                    label="OOS Split",
+                )
+            plt.legend()
+            to_path = self.output_dir / f"{safe_name}_turnover.png"
+            plt.savefig(to_path, dpi=120)
+            plt.close()
+            plot_paths["turnover"] = str(to_path.resolve())
 
         # 2. Layered Returns
         if (
@@ -288,12 +409,13 @@ class RiceQuantEval:
             plt.figure(figsize=(10, 5))
             layer_cum = (1 + layer_ret.fillna(0)).cumprod()
             layer_cum.plot(title="Layered Cumulative Returns")
-            plt.axvline(
-                x=pd.to_datetime(self.oos_split_date),
-                color="r",
-                linestyle="--",
-                label="OOS Split",
-            )
+            if getattr(self, "oos_split_date", None):
+                plt.axvline(
+                    x=pd.to_datetime(self.oos_split_date),
+                    color="r",
+                    linestyle="--",
+                    label="OOS Split",
+                )
             plt.legend()
             plt.grid(True, alpha=0.3)
             lay_path = self.output_dir / f"{safe_name}_layers.png"
@@ -1066,30 +1188,115 @@ class RiceQuantEval:
 
     # --- Metrics & Summary ---
     def calculate_pnl(self, all_data):
-        """Calculate basic PnL metrics like Sharpe and MaxDD."""
-        # Simple long-short return calculation
-        daily_ret = all_data.groupby(level="datetime").apply(
-            lambda x: (
-                (x["factor"] * x["label"]).sum()
-                / (x["factor"].abs().sum() + 1e-8)
+        """Calculate PnL metrics with turnover tracking and transaction costs."""
+        if all_data.empty:
+            self.daily_returns_series = pd.Series(dtype=float)
+            self.gross_daily_returns_series = pd.Series(dtype=float)
+            self.turnover_series = pd.Series(dtype=float)
+            self.mean_turnover = 0.0
+            self.turnover = 0.0
+            self.sharpe = 0.0
+            self.gross_sharpe = 0.0
+            self.max_dd = 0.0
+            self.gross_max_dd = 0.0
+            return pd.Series(dtype=float)
+
+        # Unstack factor and label into matrices (datetime x instrument)
+        factor_df = (
+            all_data["factor"]
+            .unstack(level="instrument")
+            .sort_index()
+            .fillna(0.0)
+        )
+        label_df = (
+            all_data["label"]
+            .unstack(level="instrument")
+            .sort_index()
+            .fillna(0.0)
+        )
+
+        # Long-short portfolio weights on day t:
+        # weights = factor / (factor.abs().sum() + 1e-8)
+        denom = factor_df.abs().sum(axis=1) + 1e-8
+        weights_df = factor_df.div(denom, axis=0).fillna(0.0)
+
+        # Gross daily returns
+        gross_daily_ret = (weights_df * label_df).sum(axis=1)
+
+        # Daily turnover = sum(|w_t - w_{t-1}|) / 2
+        if len(weights_df) > 0:
+            turnover_series = weights_df.diff().abs().sum(axis=1) / 2.0
+            turnover_series.iloc[0] = 0.0
+        else:
+            turnover_series = pd.Series(dtype=float, index=weights_df.index)
+
+        # Transaction cost drag: cost_bps
+        cost_rate = float(self.cost_bps) / 10000.0
+        net_daily_ret = gross_daily_ret - turnover_series * cost_rate
+
+        self.daily_returns_series = net_daily_ret
+        self.gross_daily_returns_series = gross_daily_ret
+        self.turnover_series = turnover_series
+        self.mean_turnover = (
+            float(turnover_series.mean()) if not turnover_series.empty else 0.0
+        )
+        self.turnover = self.mean_turnover
+
+        if len(gross_daily_ret) >= 2:
+            gross_std = gross_daily_ret.std()
+            self.gross_sharpe = float(
+                (gross_daily_ret.mean() / (gross_std + 1e-8))
+                * np.sqrt(TRADING_DAYS_PER_YEAR)
             )
-        )
+            gross_cum = (1 + gross_daily_ret).cumprod()
+            g_dd = (gross_cum / gross_cum.cummax() - 1).min()
+            self.gross_max_dd = 0.0 if np.isnan(g_dd) else float(g_dd)
 
-        self.daily_returns_series = daily_ret
-        self.sharpe = (daily_ret.mean() / (daily_ret.std() + 1e-8)) * np.sqrt(
-            TRADING_DAYS_PER_YEAR
-        )
+            net_std = net_daily_ret.std()
+            self.sharpe = float(
+                (net_daily_ret.mean() / (net_std + 1e-8))
+                * np.sqrt(TRADING_DAYS_PER_YEAR)
+            )
+            net_cum = (1 + net_daily_ret).cumprod()
+            n_dd = (net_cum / net_cum.cummax() - 1).min()
+            self.max_dd = 0.0 if np.isnan(n_dd) else float(n_dd)
+        else:
+            self.gross_sharpe = 0.0
+            self.gross_max_dd = 0.0
+            self.sharpe = 0.0
+            self.max_dd = 0.0
 
-        cum_ret = (1 + daily_ret).cumprod()
-        self.max_dd = (cum_ret / cum_ret.cummax() - 1).min()
+        return net_daily_ret
 
-        return daily_ret
-
-    def _compute_segment_metrics(self, ic_series, rank_ic_series, daily_ret):
+    def _compute_segment_metrics(
+        self,
+        ic_series,
+        rank_ic_series,
+        daily_ret,
+        turnover_series=None,
+        gross_daily_ret=None,
+    ):
         """Split metrics into train [start, valid), valid [valid, oos) and
         test [oos, end]. Empty segments stay ``None``."""
+        to_s = (
+            turnover_series
+            if turnover_series is not None
+            else getattr(self, "turnover_series", None)
+        )
+        gross_s = (
+            gross_daily_ret
+            if gross_daily_ret is not None
+            else getattr(self, "gross_daily_returns_series", None)
+        )
+
         train = segment_stats(
-            ic_series, rank_ic_series, daily_ret, None, self.valid_split_date
+            ic_series,
+            rank_ic_series,
+            daily_ret,
+            None,
+            self.valid_split_date,
+            turnover_series=to_s,
+            gross_daily_returns=gross_s,
         )
         valid = segment_stats(
             ic_series,
@@ -1097,9 +1304,17 @@ class RiceQuantEval:
             daily_ret,
             self.valid_split_date,
             self.oos_split_date,
+            turnover_series=to_s,
+            gross_daily_returns=gross_s,
         )
         test = segment_stats(
-            ic_series, rank_ic_series, daily_ret, self.oos_split_date, None
+            ic_series,
+            rank_ic_series,
+            daily_ret,
+            self.oos_split_date,
+            None,
+            turnover_series=to_s,
+            gross_daily_returns=gross_s,
         )
         self.segment_metrics = {"train": train, "valid": valid, "test": test}
 
@@ -1109,14 +1324,22 @@ class RiceQuantEval:
         self.is_ic = _get(train, "ic")
         self.is_rankic = _get(train, "rank_ic")
         self.is_sharpe = _get(train, "sharpe")
+        self.is_gross_sharpe = _get(train, "gross_sharpe")
         self.is_max_dd = _get(train, "max_dd")
+        self.is_turnover = _get(train, "turnover")
+
         self.val_ic = _get(valid, "ic")
         self.val_rankic = _get(valid, "rank_ic")
         self.val_sharpe = _get(valid, "sharpe")
+        self.val_gross_sharpe = _get(valid, "gross_sharpe")
+        self.val_turnover = _get(valid, "turnover")
+
         self.oos_ic = _get(test, "ic")
         self.oos_rankic = _get(test, "rank_ic")
         self.oos_sharpe = _get(test, "sharpe")
+        self.oos_gross_sharpe = _get(test, "gross_sharpe")
         self.oos_max_dd = _get(test, "max_dd")
+        self.oos_turnover = _get(test, "turnover")
 
     # --- Backtest Execution ---
     def run(self):
@@ -1161,6 +1384,14 @@ class RiceQuantEval:
             str(k.date() if hasattr(k, "date") else k): float(v)
             for k, v in daily_ret.fillna(0).items()
         }
+        self.gross_daily_returns = {
+            str(k.date() if hasattr(k, "date") else k): float(v)
+            for k, v in self.gross_daily_returns_series.fillna(0).items()
+        }
+        self.turnover_daily = {
+            str(k.date() if hasattr(k, "date") else k): float(v)
+            for k, v in self.turnover_series.fillna(0).items()
+        }
 
         self._compute_segment_metrics(ic_series, rank_ic_series, daily_ret)
 
@@ -1177,7 +1408,8 @@ class RiceQuantEval:
         logger.info(
             f"RiceQuant Evaluation - IC(full): {self.ic}, IC(train): {self.is_ic}, "
             f"IC(valid): {self.val_ic}, IC(oos): {self.oos_ic}, "
-            f"Sharpe(full): {self.sharpe:.2f}"
+            f"Sharpe(full): {self.sharpe:.2f}, Gross Sharpe: {self.gross_sharpe:.2f}, "
+            f"Turnover: {self.mean_turnover:.4f}"
         )
 
     # --- Expression Parsing ---
@@ -1434,3 +1666,6 @@ class RiceQuantEval:
     def summary(self):
         logger.info(f"RiceQuant IC: {self.ic}")
         logger.info(f"RiceQuant RankIC: {self.rankic}")
+        logger.info(f"RiceQuant Net Sharpe: {self.sharpe:.2f}")
+        logger.info(f"RiceQuant Gross Sharpe: {self.gross_sharpe:.2f}")
+        logger.info(f"RiceQuant Mean Turnover: {self.mean_turnover:.4f}")
