@@ -131,6 +131,14 @@ def get_llm(
         resolved_base_url = base_url or "https://openrouter.ai/api/v1"
         if not model_name:
             model_name = "deepseek/deepseek-r1"
+    elif provider in ("opencode-go", "opencode"):
+        resolved_base_url = (
+            base_url
+            or os.getenv("OPENCODE_GO_BASE_URL")
+            or "https://opencode.ai/zen/go/v1"
+        )
+        if not model_name:
+            model_name = "ox-alpha-free"
     elif provider == "groq":
         resolved_base_url = base_url or "https://api.groq.com/openai/v1"
         if not model_name:

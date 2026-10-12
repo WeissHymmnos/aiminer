@@ -27,7 +27,8 @@ if not DEFAULT_PYTHON:
 
 DEFAULT_COMMAND = [
     DEFAULT_PYTHON,
-    "manager.py",
+    "-m",
+    "aiminer.manager",
     "--iterations",
     "300",
     "--mode",
@@ -37,27 +38,37 @@ DEFAULT_COMMAND = [
     "--engine",
     "polars",
     "--llm-provider",
-    "mimo",
+    "openai",
     "--llm-model",
-    "Mimo-v2.5",
+    "ox-alpha-free",
+    "--llm-base-url",
+    "https://opencode.ai/zen/go/v1",
     "--market-start",
     "2015-01-01",
     "--market-end",
     "2020-12-01",
     "--roles",
-    "动量专家",
+    "期限结构专家",
+    "资金流专家",
     "波动率专家",
+    "量价背离专家",
+    "隔夜跳空专家",
+    "尾盘行为专家",
+    "振幅结构专家",
+    "周内效应专家",
+    "情绪面专家",
+    "流动性专家",
+    "均值回归专家",
     "统计套利专家",
     "基本面套利专家",
     "反转专家",
-    "流动性专家",
-    "量价背离专家",
-    "均值回归专家",
-    "资金流专家",
-    "情绪面专家",
+    "行业轮动专家",
+    "高频量价专家",
     "--parallel",
+    "--swarm-executor",
+    "thread",
     "--swarm-global-timeout-seconds",
-    "2000",
+    "2400",
 ]
 
 
@@ -145,14 +156,8 @@ def _paused(state: dict[str, Any], now: datetime | None = None) -> bool:
 
 
 def _apply_model_for_mode(command: list[str], mode: str) -> list[str]:
-    """Swap --llm-model based on mode: auto=Mimo-v2.5pro, manual=Mimo-v2.5."""
-    model = "Mimo-v2.5pro" if mode == "auto" else "Mimo-v2.5"
-    result = list(command)
-    if "--llm-model" in result:
-        idx = result.index("--llm-model")
-        if idx + 1 < len(result):
-            result[idx + 1] = model
-    return result
+    """Keep the configured --llm-model; mode-based swap removed (ox-alpha)."""
+    return list(command)
 
 
 def _command_from_args(extra_args: list[str] | None = None) -> list[str]:
@@ -179,9 +184,32 @@ def _run_id_for_mode(mode: str, state: dict[str, Any]) -> str:
 def _with_run_id(command: list[str], run_id: str) -> list[str]:
     if "--run-id" in command:
         return command
-    if not any(Path(part).name == "manager.py" for part in command):
+    if not any(
+        Path(part).name == "manager.py" or part == "aiminer.manager"
+        for part in command
+    ):
         return command
     return [*command, "--run-id", run_id]
+
+
+def _load_project_env_overrides() -> dict[str, str]:
+    """Parse ROOT/.env so child processes get these values even when the
+    parent shell exports conflicting vars (load_dotenv does not override)."""
+    overrides: dict[str, str] = {}
+    env_file = ROOT / ".env"
+    try:
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip("'\"")
+            if key:
+                overrides[key] = value
+    except OSError:
+        pass
+    return overrides
 
 
 def start(mode: str, extra_args: list[str] | None = None) -> int:
@@ -201,12 +229,31 @@ def start(mode: str, extra_args: list[str] | None = None) -> int:
     log_path = LOG_DIR / f"hermes_{mode}_{stamp}.log"
     log_fh = log_path.open("ab")
 
+    child_env = os.environ.copy()
+    src_path = str(ROOT / "src")
+    existing_pp = child_env.get("PYTHONPATH")
+    child_env["PYTHONPATH"] = (
+        f"{src_path}{os.pathsep}{existing_pp}" if existing_pp else src_path
+    )
+    # Project .env wins over inherited shell vars (e.g. stale OpenAI_KEY)
+    child_env.update(_load_project_env_overrides())
+    # 并发限流热修复: local embedding(1.3GB) + Chroma Rust HNSW 多线程并发会 segfault/zombie
+    # ThreadPool 同进程 16线程仍会打满, 限 4 并发最稳 (process 模式 manager 已 cap 4, thread 需额外 env)
+    child_env.setdefault("AIMINER_MAX_WORKERS_PER_SWARM", "4")
+    child_env.setdefault("OMP_NUM_THREADS", "1")
+    child_env.setdefault("POLARS_MAX_THREADS", "1")
+    child_env.setdefault("TOKENIZERS_PARALLELISM", "false")
+    # Chroma 1.5.5 在 631 docs 时查询挂死 (Retrieving hybrid context 卡 60s), 临时禁用 RAG/Wiki 以保生产
+    # 后台 Codex 已修复 rag.py 加锁, 但 bge-large 的 HNSW 仍可能在 file lock 残留时 hang, 先走无 RAG 路径
+    child_env.setdefault("AIMINER_DISABLE_CHROMA", "1")
+
     process = subprocess.Popen(
         command,
         cwd=str(ROOT),
         stdout=log_fh,
         stderr=subprocess.STDOUT,
         start_new_session=True,
+        env=child_env,
     )
     state.update(
         {
@@ -340,8 +387,25 @@ def _dump_errors_to_daily_log():
         pass
 
 
+def _update_daily_portfolio():
+    """每日刷新 walk-forward 组合持仓 (alphamax v8, 诚实管线)"""
+    try:
+        import subprocess
+
+        py = DEFAULT_PYTHON
+        subprocess.run(
+            [py, str(ROOT / "scripts" / "alphamax_v8_portfolio.py"), "--live"],
+            cwd=str(ROOT),
+            capture_output=True,
+            timeout=300,
+        )
+    except Exception:
+        pass
+
+
 def tick() -> int:
     _dump_errors_to_daily_log()
+    _update_daily_portfolio()
     state = _load_state()
     pid = _active_pid(state)
     now = _now()
