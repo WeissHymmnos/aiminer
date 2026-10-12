@@ -1,34 +1,35 @@
 :root {
   color-scheme: dark;
-  --ctp-rosewater: #f4dbd6;
-  --ctp-flamingo: #f0c6c6;
-  --ctp-pink: #f5bde6;
-  --ctp-mauve: #c6a0f6;
-  --ctp-red: #ed8796;
-  --ctp-maroon: #ee99a0;
-  --ctp-peach: #f5a97f;
-  --ctp-yellow: #eed49f;
-  --ctp-green: #a6da95;
-  --ctp-teal: #8bd5ca;
-  --ctp-sky: #91d7e3;
-  --ctp-sapphire: #7dc4e4;
-  --ctp-blue: #8aadf4;
-  --ctp-lavender: #b7bdf8;
-  --ctp-text: #cad3f5;
-  --ctp-subtext1: #b8c0e0;
-  --ctp-subtext0: #a5adcb;
-  --ctp-overlay2: #939ab7;
-  --ctp-overlay1: #8087a2;
-  --ctp-overlay0: #6e738d;
-  --ctp-surface2: #5b6078;
-  --ctp-surface1: #494d64;
-  --ctp-surface0: #363a4f;
-  --ctp-base: #24273a;
-  --ctp-mantle: #1e2030;
-  --ctp-crust: #181926;
+  --ctp-rosewater: #d8cfc4;
+  --ctp-flamingo: #c9b8a8;
+  --ctp-pink: #b89a7a;
+  --ctp-mauve: #c4a35a;
+  --ctp-red: #c45c4a;
+  --ctp-maroon: #b85a4c;
+  --ctp-peach: #c4a35a;
+  --ctp-yellow: #c9b36a;
+  --ctp-green: #6b8f71;
+  --ctp-teal: #6a8a7e;
+  --ctp-sky: #7a8b8a;
+  --ctp-sapphire: #6e7f86;
+  --ctp-blue: #7d8b78;
+  --ctp-lavender: #c4a35a;
+  --ctp-text: #e8e4d9;
+  --ctp-subtext1: #b4afa3;
+  --ctp-subtext0: #8f8a7e;
+  --ctp-overlay2: #7a756a;
+  --ctp-overlay1: #6a655c;
+  --ctp-overlay0: #5a564e;
+  --ctp-surface2: #4a463e;
+  --ctp-surface1: #3a3731;
+  --ctp-surface0: #2a2824;
+  --ctp-base: #1c1b18;
+  --ctp-mantle: #161512;
+  --ctp-crust: #12110e;
 
-  font-family: "IBM Plex Sans", "Source Sans 3", sans-serif;
-  line-height: 1.5;
+  font-family:
+    'IBM Plex Sans', 'Source Sans 3', 'Noto Sans SC', 'Segoe UI', sans-serif;
+  line-height: 1.45;
   color: var(--ctp-text);
   background: var(--ctp-base);
 }
@@ -49,7 +50,10 @@ a {
   text-decoration: none;
 }
 
-button, input, textarea, select {
+button,
+input,
+textarea,
+select {
   font: inherit;
 }
 
@@ -78,13 +82,13 @@ button, input, textarea, select {
 
 .ResizeHandle:hover .ResizeHandleInner,
 .ResizeHandle[data-panel-group-handle-active] .ResizeHandleInner {
-  background-color: var(--ctp-mauve);
+  background-color: var(--ctp-peach);
   height: 100%;
-  width: 4px;
+  width: 3px;
 }
 
 .ResizeHandle[data-panel-group-handle-active] {
-  background-color: rgba(198, 160, 246, 0.05);
+  background-color: rgba(196, 163, 90, 0.08);
 }
 
 *::-webkit-scrollbar {
@@ -94,7 +98,7 @@ button, input, textarea, select {
 
 *::-webkit-scrollbar-thumb {
   background: var(--ctp-surface2);
-  border-radius: 999px;
+  border-radius: 2px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
@@ -112,11 +116,11 @@ button, input, textarea, select {
 }
 
 .sidebar {
-  width: 20vw;
-  flex: 0 0 20vw;
-  padding: 24px;
+  width: 15rem;
+  flex: 0 0 15rem;
+  padding: 16px 14px;
   background: var(--ctp-mantle);
-  border-right: 1px solid var(--ctp-crust);
+  border-right: 1px solid var(--ctp-surface1);
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -135,10 +139,10 @@ button, input, textarea, select {
 
 .eyebrow {
   margin: 0;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-transform: none;
   color: var(--ctp-peach);
-  font-size: 0.78rem;
+  font-size: 0.75rem;
 }
 
 .muted {
@@ -152,24 +156,24 @@ button, input, textarea, select {
 }
 
 .nav-link {
-  padding: 12px 16px;
-  border-radius: 12px;
+  padding: 6px 8px;
+  border-radius: 2px;
   background: transparent;
   color: var(--ctp-subtext1);
-  font-size: 1.15rem;
-  transition: all 0.2s ease;
+  font-size: 0.92rem;
+  border-left: 2px solid transparent;
 }
 
 .nav-link:hover {
   background: var(--ctp-surface0);
   color: var(--ctp-text);
-  transform: translateX(4px);
 }
 
 .nav-link.active {
-  background: var(--ctp-surface1);
-  color: var(--ctp-mauve);
+  background: var(--ctp-surface0);
+  color: var(--ctp-text);
   font-weight: 600;
+  border-left-color: var(--ctp-peach);
 }
 
 .panel-container {
@@ -179,11 +183,11 @@ button, input, textarea, select {
 
 /* Component Styles */
 .card {
-  padding: 18px;
-  border-radius: 20px;
+  padding: 14px;
+  border-radius: 2px;
   background: var(--ctp-mantle);
-  border: 1px solid var(--ctp-surface0);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--ctp-surface1);
+  box-shadow: none;
   display: flex;
   flex-direction: column;
   overflow: hidden; /* Let children handle scrolling */
@@ -202,33 +206,32 @@ button, input, textarea, select {
 
 .card-header h2 {
   margin: 0;
-  font-size: 1.25rem;
-  color: var(--ctp-lavender);
+  font-size: 1.05rem;
+  color: var(--ctp-text);
 }
 
 .button {
-  border: 0;
-  border-radius: 999px;
-  padding: 8px 16px;
+  border: 1px solid var(--ctp-surface2);
+  border-radius: 2px;
+  padding: 6px 12px;
   background: var(--ctp-surface1);
   color: var(--ctp-text);
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s ease;
 }
 
 .button:hover:not(:disabled) {
   background: var(--ctp-surface2);
-  transform: translateY(-1px);
 }
 
 .button.active {
-  background: var(--ctp-mauve);
+  background: var(--ctp-peach);
   color: var(--ctp-crust);
+  border-color: var(--ctp-peach);
 }
 
 .button:active:not(:disabled) {
-  transform: translateY(0);
+  background: var(--ctp-surface2);
 }
 
 .button-danger {
@@ -271,10 +274,9 @@ button, input, textarea, select {
   justify-content: space-between;
   gap: 12px;
   align-items: center;
-  padding: 12px;
-  border-radius: 12px;
+  padding: 8px 10px;
+  border-radius: 2px;
   background: var(--ctp-surface0);
-  transition: all 0.2s ease;
   min-width: 0;
 }
 
@@ -287,8 +289,33 @@ button, input, textarea, select {
 }
 
 .list-row.selected {
-  outline: 2px solid var(--ctp-mauve);
+  outline: 1px solid var(--ctp-peach);
   background: var(--ctp-surface1);
+}
+
+.factor-parent-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  color: var(--ctp-subtext1);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.factor-row-main {
+  flex: 1 1 auto;
+  padding: 4px 6px;
+  border-radius: 8px;
+}
+
+.factor-row-main p {
+  margin: 4px 0 0;
+}
+
+.factor-row-ic {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
 }
 
 .metric-grid {
@@ -316,7 +343,7 @@ button, input, textarea, select {
 .metric strong {
   display: block;
   margin-top: 4px;
-  font-size: 1.0rem;
+  font-size: 1rem;
   color: var(--ctp-text);
   white-space: nowrap;
   overflow: hidden;
@@ -345,24 +372,27 @@ button, input, textarea, select {
   background: var(--ctp-surface0);
 }
 
-textarea, input, select {
+textarea,
+input,
+select {
   width: 100%;
   border: 1px solid var(--ctp-surface1);
-  border-radius: 10px;
-  padding: 8px 12px;
+  border-radius: 2px;
+  padding: 6px 8px;
   background: var(--ctp-crust);
   color: var(--ctp-text);
-  transition: border-color 0.2s ease;
 }
 
-textarea:focus, input:focus, select:focus {
-  outline: none;
-  border-color: var(--ctp-mauve);
+textarea:focus,
+input:focus,
+select:focus {
+  outline: 1px solid var(--ctp-peach);
+  border-color: var(--ctp-peach);
 }
 
-input[type="checkbox"] {
+input[type='checkbox'] {
   width: auto;
-  accent-color: var(--ctp-mauve);
+  accent-color: var(--ctp-peach);
 }
 
 .stack {
@@ -377,6 +407,14 @@ input[type="checkbox"] {
   display: grid;
   gap: 16px;
   min-height: 0;
+  overflow-y: auto;
+}
+
+.desk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
 }
 
 .page-grid.two-col {
@@ -394,8 +432,8 @@ input[type="checkbox"] {
 }
 
 .status-block {
-  padding: 12px 14px;
-  border-radius: 12px;
+  padding: 8px 10px;
+  border-radius: 2px;
   margin-bottom: 12px;
   background: var(--ctp-surface0);
   border: 1px solid var(--ctp-surface1);
@@ -419,14 +457,12 @@ input[type="checkbox"] {
 .socket-status {
   display: inline-flex;
   align-items: center;
-  padding: 4px 10px;
-  border-radius: 999px;
+  padding: 2px 6px;
+  border-radius: 2px;
   background: var(--ctp-surface0);
   color: var(--ctp-subtext1);
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: 0.75rem;
+  font-weight: 600;
 }
 
 .socket-status.open {
@@ -492,11 +528,11 @@ input[type="checkbox"] {
 .pill {
   display: inline-flex;
   align-items: center;
-  padding: 4px 10px;
-  border-radius: 999px;
+  padding: 2px 6px;
+  border-radius: 2px;
   background: var(--ctp-crust);
   color: var(--ctp-subtext1);
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   white-space: nowrap;
 }
 
@@ -515,7 +551,7 @@ input[type="checkbox"] {
   grid-template-columns: 140px 72px minmax(0, 1fr);
   gap: 10px;
   align-items: start;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 0.82rem;
 }
 
@@ -542,7 +578,7 @@ input[type="checkbox"] {
   background: var(--ctp-crust);
   color: var(--ctp-text);
   overflow: auto;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 0.85rem;
 }
 
@@ -557,7 +593,7 @@ input[type="checkbox"] {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  flex-shrink: 0;        /* 防止在父 flex 列容器 (.stack) 中被压扁 */
+  flex-shrink: 0; /* 防止在父 flex 列容器 (.stack) 中被压扁 */
   min-height: 240px;
 }
 
@@ -634,16 +670,17 @@ input[type="checkbox"] {
 
 .markdown-body h1 {
   margin-top: 0;
-  color: var(--ctp-mauve);
-  font-size: 1.8rem;
+  color: var(--ctp-text);
+  font-size: 1.4rem;
   word-break: break-word;
 }
 
 .sidebar h1 {
-  font-size: 1.7rem;
-  color: var(--ctp-lavender);
-  margin-top: 0.5rem;
+  font-size: 1.15rem;
+  color: var(--ctp-text);
+  margin-top: 0.25rem;
   margin-bottom: 0.5rem;
+  font-weight: 600;
 }
 
 .markdown-body h2 {
@@ -661,7 +698,7 @@ input[type="checkbox"] {
 }
 
 .wiki-body :where(h1, h2, h3) {
-  color: var(--ctp-mauve);
+  color: var(--ctp-text);
   margin-top: 1.5em;
   margin-bottom: 0.5em;
 }
@@ -677,7 +714,7 @@ input[type="checkbox"] {
   background: var(--ctp-surface1);
   padding: 0.2em 0.4em;
   border-radius: 4px;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: 'IBM Plex Mono', monospace;
   font-size: 0.9em;
 }
 
@@ -696,7 +733,9 @@ input[type="checkbox"] {
   color: var(--ctp-sky);
 }
 
-.error-text, .log-level-error, .log-level-critical {
+.error-text,
+.log-level-error,
+.log-level-critical {
   color: var(--ctp-red);
 }
 
