@@ -44,6 +44,11 @@ from aiminer.core.strategy import (
     selection_score,
     strategy_templates,
 )
+from aiminer.core.task_state import (
+    CancellationToken,
+    HeartbeatMonitor,
+    SwarmRunExecutionTracker,
+)
 
 # Optional deps: keep names on the module so tests can monkeypatch them.
 try:
@@ -535,6 +540,16 @@ class PortfolioManager:
             settings=self.settings,
         )
         self._init_db()
+        self.idempotency_key = kwargs.pop("idempotency_key", None)
+        self.cancellation_token = (
+            kwargs.pop("cancellation_token", None) or CancellationToken()
+        )
+        self.execution_tracker = kwargs.pop(
+            "execution_tracker", None
+        ) or SwarmRunExecutionTracker(self.settings.db_path)
+        self.kwargs.pop("idempotency_key", None)
+        self.kwargs.pop("cancellation_token", None)
+        self.kwargs.pop("execution_tracker", None)
 
     def _init_db(self):
         """Initialize SQLite database for long-term factor tracking.
@@ -1323,6 +1338,33 @@ class PortfolioManager:
                 worker_log_thread.start()
                 dispatch_log_queue = worker_log_queue
 
+            if self.idempotency_key:
+                registered, active_id = self.execution_tracker.register_run(
+                    run_id=self.run_id,
+                    idempotency_key=self.idempotency_key,
+                    config=self.kwargs,
+                    total_agents=len(self.researchers),
+                )
+                if not registered:
+                    logger.warning(
+                        f"Run with key '{self.idempotency_key}' already "
+                        f"exists ({active_id}). Skipping execution."
+                    )
+                    return self.alpha_pool
+            else:
+                self.execution_tracker.register_run(
+                    run_id=self.run_id,
+                    config=self.kwargs,
+                    total_agents=len(self.researchers),
+                )
+
+            heartbeat = HeartbeatMonitor(
+                tracker=self.execution_tracker,
+                run_id=self.run_id,
+                interval_seconds=5.0,
+            )
+            heartbeat.start()
+
             task_log_queue = (
                 None
                 if parallel and self.swarm_executor == "process"
@@ -1363,6 +1405,9 @@ class PortfolioManager:
                                 futures,
                                 timeout=self.swarm_global_timeout,
                             ):
+                                if self.cancellation_token.is_cancelled():
+                                    _cancel_pending_futures(futures, completed)
+                                    break
                                 completed.add(future)
                                 try:
                                     result = future.result()
@@ -1422,6 +1467,11 @@ class PortfolioManager:
                                     futures,
                                     timeout=self.swarm_global_timeout,
                                 ):
+                                    if self.cancellation_token.is_cancelled():
+                                        _cancel_pending_futures(
+                                            futures, completed
+                                        )
+                                        break
                                     completed.add(future)
                                     try:
                                         result = future.result()
@@ -1503,9 +1553,16 @@ class PortfolioManager:
                 else:
                     logger.info("Running sub-agents in SERIAL mode...")
                     for kwargs in self.researchers:
+                        if self.cancellation_token.is_cancelled():
+                            logger.warning(
+                                f"Swarm run {self.run_id} cancelled: "
+                                f"{self.cancellation_token.reason}"
+                            )
+                            break
                         result = run_agent_task(kwargs)
                         all_results.append(result)
             finally:
+                heartbeat.stop()
                 if worker_log_queue is not None:
                     try:
                         worker_log_queue.put(None)
@@ -1616,8 +1673,23 @@ class PortfolioManager:
             # ------------------------------
 
             logger.info(
-                f"Swarm execution completed. {len(self.alpha_pool)} orthogonal factors found; {len(self.strategy_pool)} strategies evaluated."
+                f"Swarm execution completed. {len(self.alpha_pool)} "
+                f"orthogonal factors found; {len(self.strategy_pool)} "
+                "strategies evaluated."
             )
+            if self.cancellation_token.is_cancelled():
+                self.execution_tracker.cancel_run(
+                    self.run_id, reason=self.cancellation_token.reason
+                )
+            else:
+                self.execution_tracker.complete_run(
+                    self.run_id,
+                    metrics={
+                        "factors_count": len(self.alpha_pool),
+                        "n_trials": self.n_trials,
+                    },
+                    factors_count=len(self.alpha_pool),
+                )
             return self.alpha_pool
 
     # --- Strategy Evaluation ---
