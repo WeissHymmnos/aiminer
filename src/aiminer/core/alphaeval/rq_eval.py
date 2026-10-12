@@ -9,6 +9,7 @@ from loguru import logger
 import numpy as np
 import pandas as pd
 
+from aiminer.core.alphaeval.expr_validator import validate_factor_expression
 from aiminer.core.constants import TRADING_DAYS_PER_YEAR
 
 try:
@@ -712,9 +713,6 @@ class RiceQuantEval:
             "Correlation": Corr,
             "Sign": Sign,
             "Sqrt": Sqrt,
-            "Exp": lambda df: np.exp(df),
-            "Pow": lambda a, b: a**b,
-            "Inv": lambda df: 1.0 / (df + 1e-9),
             "Ts_ArgMax": Ts_ArgMax,
             "Ts_ArgMin": Ts_ArgMin,
             "Ts_Max": lambda df, n: df.rolling(max(1, _get_n(n))).max(),
@@ -756,6 +754,7 @@ class RiceQuantEval:
 
         for expr in self.factor_expressions:
             try:
+                validate_factor_expression(expr)
                 # Prepare expression for Python eval
                 safe_expr = expr
                 # Handle standard fields
@@ -1129,6 +1128,7 @@ class RiceQuantEval:
         Returns (is_success, error_message).
         """
         try:
+            validate_factor_expression(expr)
             # 1. Create dummy 10x10 environment
             dates = pd.date_range("2020-01-01", periods=10)
             symbols = [f"S{i:02d}" for i in range(10)]
