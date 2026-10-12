@@ -393,8 +393,14 @@ def _update_daily_portfolio():
         import subprocess
 
         py = DEFAULT_PYTHON
+        script_path = (
+            ROOT / "scripts" / "archive" / "alphamax"
+            / "alphamax_v8_portfolio.py"
+        )
+        if not script_path.exists():
+            script_path = ROOT / "scripts" / "alphamax_v8_portfolio.py"
         subprocess.run(
-            [py, str(ROOT / "scripts" / "alphamax_v8_portfolio.py"), "--live"],
+            [py, str(script_path), "--live"],
             cwd=str(ROOT),
             capture_output=True,
             timeout=300,
