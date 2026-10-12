@@ -42,6 +42,7 @@ def factor_result_view(final_state: dict) -> dict:
             "is_simulated": final_state.get("is_simulated", False),
             "ic_direction": final_state.get("ic_direction"),
             "ic_direction_label": final_state.get("ic_direction_label"),
+            "holdout_metrics": final_state.get("holdout_metrics", {}) or {},
         }
     return {
         "iteration": snapshot.get("iteration", final_state.get("iteration")),
@@ -103,6 +104,11 @@ def factor_result_view(final_state: dict) -> dict:
         "ic_direction_label": snapshot.get(
             "ic_direction_label", final_state.get("ic_direction_label")
         ),
+        "holdout_metrics": snapshot.get(
+            "holdout_metrics"
+        )
+        or final_state.get("holdout_metrics", {})
+        or {},
     }
 
 
@@ -195,6 +201,7 @@ def state_to_agent_result(
         "is_simulated": factor_view.get("is_simulated", False),
         "ic_direction": factor_view.get("ic_direction"),
         "ic_direction_label": factor_view.get("ic_direction_label"),
+        "holdout_metrics": factor_view.get("holdout_metrics", {}),
         "terminal_error": terminal_error if has_recoverable_best else None,
         "error": None if has_recoverable_best else terminal_error,
     }

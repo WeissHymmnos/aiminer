@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from aiminer.core.alphaeval.expr_validator import validate_factor_expression
+from aiminer.core.alphaeval.holdout import resolve_split_dates, segment_stats
 from aiminer.core.constants import TRADING_DAYS_PER_YEAR
 
 try:
@@ -148,12 +149,18 @@ class RiceQuantEval:
         noise_level: float = 0.0,
         output_dir: str = "results/reports",
         skip_auth: bool = False,
+        valid_split_date: Optional[str] = None,
+        oos_split_date: Optional[str] = None,
     ):
         self.factor_expressions = factor_expressions
         self.weights = weights if weights else [1.0] * len(factor_expressions)
         self.test_start_date = test_start_date
         self.test_end_date = test_end_date
-        self.oos_split_date = "2023-01-01"
+        self._explicit_valid_split_date = valid_split_date
+        self._explicit_oos_split_date = oos_split_date
+        self.valid_split_date, self.oos_split_date = resolve_split_dates(
+            test_start_date, test_end_date, valid_split_date, oos_split_date
+        )
         self.market = market
         self.daily_normalize = daily_normalize
         self.engine = engine
@@ -161,11 +168,25 @@ class RiceQuantEval:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
+        # Full-window metrics (manual backtests / reports).
         self.ic = 0.0
         self.rankic = 0.0
-        self.oos_ic = 0.0
         self.sharpe = 0.0
         self.max_dd = 0.0
+        # Per-segment metrics. ``None`` means the segment has no data; it is
+        # never back-filled with another window's value.
+        self.is_ic: Optional[float] = None
+        self.is_rankic: Optional[float] = None
+        self.is_sharpe: Optional[float] = None
+        self.is_max_dd: Optional[float] = None
+        self.val_ic: Optional[float] = None
+        self.val_rankic: Optional[float] = None
+        self.val_sharpe: Optional[float] = None
+        self.oos_ic: Optional[float] = None
+        self.oos_rankic: Optional[float] = None
+        self.oos_sharpe: Optional[float] = None
+        self.oos_max_dd: Optional[float] = None
+        self.segment_metrics: dict = {}
         self.rre = 0.0
         self.plot_paths = {}
 
@@ -1005,7 +1026,10 @@ class RiceQuantEval:
         if not hasattr(self, "ic"):
             self.run()
 
-        orig_ic = self.ic
+        # Compare on the train segment so RRE (which the research agent
+        # sees) carries no holdout information.
+        use_train = self.is_ic is not None
+        orig_ic = self.is_ic if use_train else self.ic
 
         # Create a noisy clone
         noisy_eval = RiceQuantEval(
@@ -1017,18 +1041,24 @@ class RiceQuantEval:
             daily_normalize=self.daily_normalize,
             engine=self.engine,
             noise_level=0.05,  # 5% noise injection
+            valid_split_date=self.valid_split_date,
+            oos_split_date=self.oos_split_date,
         )
         noisy_eval.run()
-        noisy_ic = noisy_eval.ic
+        noisy_ic = (
+            noisy_eval.is_ic
+            if use_train and noisy_eval.is_ic is not None
+            else noisy_eval.ic
+        )
 
         # Robustness Ratio (RRE): 1.0 means no decay, lower means sensitive to noise
         if abs(orig_ic) < 1e-6:
             self.rre = 0.0
         else:
-            # We care about the magnitude of IC retention
-            self.rre = (
-                max(0.0, min(1.0, noisy_ic / orig_ic)) if orig_ic > 0 else 0.0
-            )
+            # Magnitude of IC retention. The ratio is positive only when the
+            # noisy IC keeps the original sign, so negative-IC factors (traded
+            # inverted by the manager) are scored the same way.
+            self.rre = max(0.0, min(1.0, noisy_ic / orig_ic))
 
         logger.info(
             f"Robustness Test - Original IC: {orig_ic}, Noisy IC: {noisy_ic}, RRE: {self.rre:.4f}"
@@ -1054,6 +1084,39 @@ class RiceQuantEval:
         self.max_dd = (cum_ret / cum_ret.cummax() - 1).min()
 
         return daily_ret
+
+    def _compute_segment_metrics(self, ic_series, rank_ic_series, daily_ret):
+        """Split metrics into train [start, valid), valid [valid, oos) and
+        test [oos, end]. Empty segments stay ``None``."""
+        train = segment_stats(
+            ic_series, rank_ic_series, daily_ret, None, self.valid_split_date
+        )
+        valid = segment_stats(
+            ic_series,
+            rank_ic_series,
+            daily_ret,
+            self.valid_split_date,
+            self.oos_split_date,
+        )
+        test = segment_stats(
+            ic_series, rank_ic_series, daily_ret, self.oos_split_date, None
+        )
+        self.segment_metrics = {"train": train, "valid": valid, "test": test}
+
+        def _get(seg, key):
+            return seg.get(key) if seg else None
+
+        self.is_ic = _get(train, "ic")
+        self.is_rankic = _get(train, "rank_ic")
+        self.is_sharpe = _get(train, "sharpe")
+        self.is_max_dd = _get(train, "max_dd")
+        self.val_ic = _get(valid, "ic")
+        self.val_rankic = _get(valid, "rank_ic")
+        self.val_sharpe = _get(valid, "sharpe")
+        self.oos_ic = _get(test, "ic")
+        self.oos_rankic = _get(test, "rank_ic")
+        self.oos_sharpe = _get(test, "sharpe")
+        self.oos_max_dd = _get(test, "max_dd")
 
     # --- Backtest Execution ---
     def run(self):
@@ -1092,19 +1155,14 @@ class RiceQuantEval:
         self.ic = round(float(ic_series.mean()), 4)
         self.rankic = round(float(rank_ic_series.mean()), 4)
 
-        # OOS IC calculation
-        oos_mask = ic_series.index >= pd.to_datetime(self.oos_split_date)
-        if oos_mask.any():
-            self.oos_ic = round(float(ic_series[oos_mask].mean()), 4)
-        else:
-            self.oos_ic = self.ic
-
         # PnL Metrics
         daily_ret = self.calculate_pnl(all_data)
         self.daily_returns = {
             str(k.date() if hasattr(k, "date") else k): float(v)
             for k, v in daily_ret.fillna(0).items()
         }
+
+        self._compute_segment_metrics(ic_series, rank_ic_series, daily_ret)
 
         # Layered Analysis & Plots
         try:
@@ -1117,7 +1175,9 @@ class RiceQuantEval:
             self.plot_paths = {}
 
         logger.info(
-            f"RiceQuant Evaluation - IC: {self.ic}, OOS IC: {self.oos_ic}, Sharpe: {self.sharpe:.2f}"
+            f"RiceQuant Evaluation - IC(full): {self.ic}, IC(train): {self.is_ic}, "
+            f"IC(valid): {self.val_ic}, IC(oos): {self.oos_ic}, "
+            f"Sharpe(full): {self.sharpe:.2f}"
         )
 
     # --- Expression Parsing ---

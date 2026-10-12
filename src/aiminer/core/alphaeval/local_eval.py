@@ -29,6 +29,8 @@ class LocalDataEval(RiceQuantEval):
         market_profile: str = "cn_stock",
         market_profiles: list[str] | None = None,
         market_mode: str = "single",
+        valid_split_date: Optional[str] = None,
+        oos_split_date: Optional[str] = None,
     ):
         self.local_data_path = local_data_path
         self.local_data_layout = local_data_layout
@@ -46,6 +48,8 @@ class LocalDataEval(RiceQuantEval):
             noise_level=noise_level,
             output_dir=output_dir,
             skip_auth=True,
+            valid_split_date=valid_split_date,
+            oos_split_date=oos_split_date,
         )
 
     def _load_profile_frame(

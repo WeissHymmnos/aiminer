@@ -11,7 +11,7 @@ class BacktestBackend(Protocol):
 
     ic: float
     rankic: float
-    oos_ic: float
+    oos_ic: Optional[float]  # None when the window has no OOS data
     sharpe: float
     max_dd: float
     rre: Optional[float]

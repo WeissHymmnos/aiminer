@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from typing import Any
 
 from aiminer.core.interfaces import BacktestBackend
@@ -18,6 +19,10 @@ class EvaluationConfig:
     local_data_layout: str = "auto"
     market_start: str | None = None
     market_end: str | None = None
+    # Train/valid/test boundaries. ``None`` lets the evaluator pick defaults
+    # (see aiminer.core.alphaeval.holdout.resolve_split_dates).
+    valid_split_date: str | None = None
+    oos_split_date: str | None = None
 
 
 def resolve_data_backend(
@@ -63,6 +68,12 @@ def evaluation_config_from_mapping(
         local_data_layout=(get("local_data_layout") or "auto").strip().lower(),
         market_start=get("market_start") or get("market_analysis_start_date"),
         market_end=get("market_end") or get("market_analysis_end_date"),
+        valid_split_date=get("valid_split_date")
+        or os.environ.get("AIMINER_VALID_SPLIT_DATE")
+        or None,
+        oos_split_date=get("oos_split_date")
+        or os.environ.get("AIMINER_OOS_SPLIT_DATE")
+        or None,
     )
 
 
@@ -96,6 +107,8 @@ def build_evaluator(
             market=profile.default_market,
             daily_normalize=daily_normalize,
             engine=config.evaluation_engine,
+            valid_split_date=config.valid_split_date,
+            oos_split_date=config.oos_split_date,
         )
 
     if config.data_backend == "qlib":
@@ -148,6 +161,8 @@ def build_evaluator(
             market_profile=config.market_profile,
             market_profiles=market_profiles,
             market_mode=config.market_mode,
+            valid_split_date=config.valid_split_date,
+            oos_split_date=config.oos_split_date,
         )
 
     raise ValueError(f"Unsupported data backend: {config.data_backend}")

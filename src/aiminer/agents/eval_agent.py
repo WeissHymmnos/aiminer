@@ -186,18 +186,68 @@ class EvalAgent:
 
     @classmethod
     def _collect_evaluator_metrics(cls, evaluator: Any) -> Dict[str, Any]:
-        metrics = {
-            "information_coefficient": getattr(evaluator, "ic", 0.0),
-            "oos_ic": getattr(
-                evaluator, "oos_ic", getattr(evaluator, "ic", 0.0)
-            ),
-            "rank_ic": getattr(evaluator, "rankic", 0.0),
-            "rre": getattr(evaluator, "rre", 0.0),
-            "sharpe": getattr(evaluator, "sharpe", 0.0),
-            "max_drawdown": getattr(evaluator, "max_dd", 0.0),
-            "plot_paths": getattr(evaluator, "plot_paths", {}) or {},
-            "daily_returns": getattr(evaluator, "daily_returns", {}) or {},
-        }
+        """Build agent-facing metrics plus a separate holdout payload.
+
+        When the evaluator exposes a train segment (``is_ic``), the research
+        loop only sees train-segment numbers. Validation, OOS and full-window
+        numbers are kept under ``_holdout``; ``__call__`` strips that key
+        before the LLM review, RAG and wiki, and only persistence and the
+        manager's pool admission read it.
+        """
+        is_ic = getattr(evaluator, "is_ic", None)
+        has_split = isinstance(is_ic, (int, float)) and not isinstance(
+            is_ic, bool
+        )
+        full_ic = getattr(evaluator, "ic", 0.0)
+        full_rank_ic = getattr(evaluator, "rankic", 0.0)
+        full_sharpe = getattr(evaluator, "sharpe", 0.0)
+        full_max_dd = getattr(evaluator, "max_dd", 0.0)
+
+        if has_split:
+            metrics = {
+                "information_coefficient": is_ic,
+                "rank_ic": getattr(evaluator, "is_rankic", None) or 0.0,
+                "sharpe": getattr(evaluator, "is_sharpe", None) or 0.0,
+                "max_drawdown": getattr(evaluator, "is_max_dd", None) or 0.0,
+                "metric_window": "train",
+            }
+            holdout = {
+                "val_ic": getattr(evaluator, "val_ic", None),
+                "val_rank_ic": getattr(evaluator, "val_rankic", None),
+                "val_sharpe": getattr(evaluator, "val_sharpe", None),
+                "oos_ic": getattr(evaluator, "oos_ic", None),
+                "oos_rank_ic": getattr(evaluator, "oos_rankic", None),
+                "oos_sharpe": getattr(evaluator, "oos_sharpe", None),
+                "oos_max_drawdown": getattr(evaluator, "oos_max_dd", None),
+                "full_ic": full_ic,
+                "full_rank_ic": full_rank_ic,
+                "full_sharpe": full_sharpe,
+                "full_max_drawdown": full_max_dd,
+                "valid_split_date": getattr(
+                    evaluator, "valid_split_date", None
+                ),
+                "oos_split_date": getattr(evaluator, "oos_split_date", None),
+            }
+        else:
+            # Backends without a split (e.g. qlib AlphaEval) keep the old
+            # full-window behaviour; there is no holdout to report.
+            metrics = {
+                "information_coefficient": full_ic,
+                "rank_ic": full_rank_ic,
+                "sharpe": full_sharpe,
+                "max_drawdown": full_max_dd,
+                "metric_window": "full",
+            }
+            holdout = {}
+
+        metrics.update(
+            {
+                "rre": getattr(evaluator, "rre", 0.0),
+                "plot_paths": getattr(evaluator, "plot_paths", {}) or {},
+                "daily_returns": getattr(evaluator, "daily_returns", {}) or {},
+                "_holdout": holdout,
+            }
+        )
         return cls._add_ic_direction(metrics)
 
     @classmethod
@@ -223,6 +273,7 @@ class EvalAgent:
         is_effective: bool,
         suggested_improvements: str,
         is_simulated: bool,
+        holdout_metrics: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         return {
             "iteration": state.get("iteration"),
@@ -248,6 +299,8 @@ class EvalAgent:
             "is_simulated": is_simulated,
             "ic_direction": metrics.get("ic_direction"),
             "ic_direction_label": metrics.get("ic_direction_label"),
+            # Persistence-only; never fed back to the research LLM.
+            "holdout_metrics": dict(holdout_metrics or {}),
         }
 
     # --- Backtest Execution ---
@@ -378,6 +431,8 @@ class EvalAgent:
             evaluation_failed = metrics.get("_evaluation_failed", False)
             daily_returns = metrics.get("daily_returns", {})
             plot_paths = metrics.get("plot_paths", {})
+            # Holdout numbers must not reach the review prompt, RAG or wiki.
+            holdout_metrics = dict(metrics.get("_holdout") or {})
             metrics = {
                 k: v
                 for k, v in metrics.items()
@@ -387,6 +442,7 @@ class EvalAgent:
                     "_evaluation_failed",
                     "daily_returns",
                     "plot_paths",
+                    "_holdout",
                 )
             }
             metrics = self._add_ic_direction(metrics)
@@ -470,6 +526,7 @@ class EvalAgent:
                     is_effective=review_result.is_effective,
                     suggested_improvements=review_result.suggested_improvements,
                     is_simulated=is_simulated,
+                    holdout_metrics=holdout_metrics,
                 )
             else:
                 new_best_ic = best_ic
@@ -481,6 +538,7 @@ class EvalAgent:
             return {
                 "backtest_metrics": metrics,
                 "factor_metrics": metrics,
+                "holdout_metrics": holdout_metrics,
                 "daily_returns": daily_returns,
                 "plot_paths": plot_paths,
                 "ic_direction": metrics.get("ic_direction", 0),

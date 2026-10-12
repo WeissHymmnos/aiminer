@@ -200,6 +200,7 @@ def increment_iteration(state: AlphaMinerState):
         "variables_defined": None,
         "backtest_metrics": None,
         "factor_metrics": None,
+        "holdout_metrics": None,
         "daily_returns": None,
         "plot_paths": None,
         "review_summary": None,

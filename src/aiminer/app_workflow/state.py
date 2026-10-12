@@ -36,6 +36,9 @@ class AlphaMinerState(TypedDict, total=False):
     # EvalAgent
     backtest_metrics: Dict[str, Any]
     factor_metrics: Dict[str, Any]
+    # Validation/OOS/full-window metrics. Persistence-only: never passed to
+    # the research LLM, RAG or wiki.
+    holdout_metrics: Dict[str, Any]
     daily_returns: Dict[str, float]
     plot_paths: Dict[str, str]
     review_summary: str

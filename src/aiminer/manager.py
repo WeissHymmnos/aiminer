@@ -821,18 +821,25 @@ class PortfolioManager:
                 )
                 continue
 
+            # P1.1: If validation segment IC is available in holdout_metrics,
+            # use validation IC for admission check to prevent train overfitting.
+            # Otherwise fall back to perf_metric (train IC or full IC).
+            holdout = res.get("holdout_metrics") or {}
+            val_ic = holdout.get("val_ic")
+            check_metric = val_ic if val_ic is not None else float(res.get("perf_metric", 0.0) or 0.0)
             perf = float(res.get("perf_metric", 0.0) or 0.0)
-            if perf > threshold:
+
+            if check_metric > threshold:
                 valid_factors.append(res)
-            elif perf < -threshold:
+            elif check_metric < -threshold:
                 valid_factors.append(_orient_negative_ic_factor(res, threshold))
                 label = str(res.get("role") or res.get("hypothesis") or "?")
                 logger.info(
-                    f"[Accepted:inverse_ic] {label[:30]}... negative IC ({perf:.4f}) will be traded with inverted signal."
+                    f"[Accepted:inverse_ic] {label[:30]}... negative metric ({check_metric:.4f}) will be traded with inverted signal."
                 )
             else:
                 logger.info(
-                    f"[Rejected:threshold] {res['role'][:30]}... generated factor IC ({perf:.4f}) below threshold {threshold}."
+                    f"[Rejected:threshold] {res['role'][:30]}... factor metric ({check_metric:.4f}, val_ic={val_ic}) below threshold {threshold}."
                 )
 
         # Drop factors too correlated with ones already in the pool.
