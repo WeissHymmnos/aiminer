@@ -1,6 +1,8 @@
 import os
 from typing import Any, Dict, Optional
+
 from loguru import logger
+
 
 class TemplateRenderer:
     def __init__(self, templates_dir: str = "data/rag_docs/templates"):
@@ -15,21 +17,23 @@ class TemplateRenderer:
         """Render a template by replacing placeholders with values."""
         if not template_name.endswith(".md"):
             template_name += ".md"
-            
+
         file_path = os.path.join(self.templates_dir, template_name)
         if not os.path.exists(file_path):
-            logger.warning(f"Template {template_name} not found in {self.templates_dir}")
+            logger.warning(
+                f"Template {template_name} not found in {self.templates_dir}"
+            )
             return ""
 
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
-            
+
             # Simple placeholder replacement: {{ key }}
             for key, value in kwargs.items():
                 placeholder = f"{{{{ {key} }}}}"
                 content = content.replace(placeholder, str(value))
-            
+
             return content
         except Exception as e:
             logger.error(f"Failed to render template {template_name}: {e}")
@@ -46,5 +50,5 @@ class TemplateRenderer:
             return self.render("macro_news_template.md", **data)
         elif data.get("type") == "market_meta":
             return self.render("market_meta_yearly_template.md", **data)
-        
+
         return str(data)

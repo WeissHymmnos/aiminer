@@ -35,7 +35,9 @@ class TestPdfExpressionValidation(unittest.TestCase):
 
     def test_fallback_expression_is_syntactically_valid(self):
         agent = ReportReproducerAgent.__new__(ReportReproducerAgent)
-        expression = agent._build_fallback_expression(["$close", "$volume", "$vwap"])
+        expression = agent._build_fallback_expression(
+            ["$close", "$volume", "$vwap"]
+        )
         is_valid, msg = LocalMinuteEvaluator.validate_expression_syntax(
             expression,
             allowed_fields=["$close", "$volume", "$vwap"],

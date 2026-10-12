@@ -1,7 +1,9 @@
-import unittest
 import os
+import unittest
+from unittest.mock import MagicMock, patch
+
 import pandas as pd
-from unittest.mock import patch, MagicMock
+
 from aiminer.agents.summary_agent import SummaryAgent
 from aiminer.core.settings import AiminerSettings
 
@@ -27,7 +29,11 @@ class TestSummaryAgent(unittest.TestCase):
             "id": "test_alpha_001",
             "hypothesis": "Test Hypothesis",
             "code": "Rank($close)",
-            "metrics": {"information_coefficient": 0.03, "rank_ic": 0.04, "rre": 0.8},
+            "metrics": {
+                "information_coefficient": 0.03,
+                "rank_ic": 0.04,
+                "rre": 0.8,
+            },
             "returns": dummy_returns,
         }
 
@@ -36,7 +42,8 @@ class TestSummaryAgent(unittest.TestCase):
 
         # 验证文件是否存在
         self.assertTrue(
-            os.path.exists(report_path), "Markdown report file should be created."
+            os.path.exists(report_path),
+            "Markdown report file should be created.",
         )
         self.assertTrue(
             os.path.exists("results/charts/test_alpha_001_curve.png"),
@@ -60,12 +67,16 @@ class TestSummaryAgent(unittest.TestCase):
 
 def test_summary_agent_uses_settings_paths_and_dict_returns(tmp_path):
     settings = AiminerSettings(results_dir=str(tmp_path / "results"))
-    with patch("aiminer.agents.summary_agent.get_llm", return_value=MagicMock()):
+    with patch(
+        "aiminer.agents.summary_agent.get_llm", return_value=MagicMock()
+    ):
         agent = SummaryAgent(settings=settings)
 
     mock_chain = MagicMock()
     mock_chain.invoke.return_value.content = "Mocked economic analysis."
-    with patch("aiminer.agents.summary_agent.ChatPromptTemplate") as mock_prompt:
+    with patch(
+        "aiminer.agents.summary_agent.ChatPromptTemplate"
+    ) as mock_prompt:
         mock_prompt.from_messages.return_value.__or__.return_value = mock_chain
         report_path = agent.generate_markdown_report(
             {

@@ -1,4 +1,4 @@
-import { Separator } from "react-resizable-panels";
+import { Separator } from 'react-resizable-panels';
 
 export function ResizeHandle() {
   return (

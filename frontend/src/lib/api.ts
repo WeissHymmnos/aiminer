@@ -5,15 +5,15 @@ import type {
   SwarmRunSummary,
   WikiGraphEdge,
   WikiGraphNode,
-} from "../types";
-import { buildAuthHeaders } from "./authHeaders.js";
+} from '../types';
+import { buildAuthHeaders } from './authHeaders.js';
 
-export { buildAuthHeaders, getBearerlessToken } from "./authHeaders.js";
+export { buildAuthHeaders, getBearerlessToken } from './authHeaders.js';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 const PAGE_LIMIT = 200;
-export const TOKEN_STORAGE_KEY = "aiminer.apiToken";
-export const TOKEN_CHANGED_EVENT = "aiminer:api-token-changed";
+export const TOKEN_STORAGE_KEY = 'aiminer.apiToken';
+export const TOKEN_CHANGED_EVENT = 'aiminer:api-token-changed';
 
 type PaginationParams = {
   offset?: number;
@@ -41,9 +41,12 @@ export class ApiError extends Error {
   detail: string;
   retryable: boolean;
 
-  constructor(message: string, options: { status: number; detail?: string; retryable: boolean }) {
+  constructor(
+    message: string,
+    options: { status: number; detail?: string; retryable: boolean },
+  ) {
     super(message);
-    this.name = "ApiError";
+    this.name = 'ApiError';
     this.status = options.status;
     this.detail = options.detail ?? message;
     this.retryable = options.retryable;
@@ -51,14 +54,18 @@ export class ApiError extends Error {
 }
 
 export function getStoredToken() {
-  if (typeof window === "undefined") {
-    return (import.meta.env.VITE_API_AUTH_TOKEN ?? "").trim();
+  if (typeof window === 'undefined') {
+    return (import.meta.env.VITE_API_AUTH_TOKEN ?? '').trim();
   }
-  return (window.localStorage.getItem(TOKEN_STORAGE_KEY) ?? import.meta.env.VITE_API_AUTH_TOKEN ?? "").trim();
+  return (
+    window.localStorage.getItem(TOKEN_STORAGE_KEY) ??
+    import.meta.env.VITE_API_AUTH_TOKEN ??
+    ''
+  ).trim();
 }
 
 export function setStoredToken(value: string) {
-  if (typeof window === "undefined") {
+  if (typeof window === 'undefined') {
     return;
   }
   const previous = getStoredToken();
@@ -70,7 +77,9 @@ export function setStoredToken(value: string) {
   }
   const next = getStoredToken();
   if (next !== previous) {
-    window.dispatchEvent(new CustomEvent(TOKEN_CHANGED_EVENT, { detail: { token: next } }));
+    window.dispatchEvent(
+      new CustomEvent(TOKEN_CHANGED_EVENT, { detail: { token: next } }),
+    );
   }
 }
 
@@ -78,11 +87,14 @@ function withBase(path: string) {
   return `${API_BASE_URL}${path}`;
 }
 
-function withQuery(path: string, params: Record<string, string | number | boolean | null | undefined>) {
-  const [pathname, search = ""] = path.split("?");
+function withQuery(
+  path: string,
+  params: Record<string, string | number | boolean | null | undefined>,
+) {
+  const [pathname, search = ''] = path.split('?');
   const query = new URLSearchParams(search);
   for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === null || value === "") {
+    if (value === undefined || value === null || value === '') {
       continue;
     }
     query.set(key, String(value));
@@ -92,12 +104,12 @@ function withQuery(path: string, params: Record<string, string | number | boolea
 }
 
 function extractErrorDetail(payload: unknown) {
-  if (typeof payload === "string") {
+  if (typeof payload === 'string') {
     return payload;
   }
-  if (payload && typeof payload === "object" && "detail" in payload) {
+  if (payload && typeof payload === 'object' && 'detail' in payload) {
     const detail = (payload as { detail?: unknown }).detail;
-    if (typeof detail === "string") {
+    if (typeof detail === 'string') {
       return detail;
     }
     if (detail !== undefined) {
@@ -108,7 +120,7 @@ function extractErrorDetail(payload: unknown) {
       }
     }
   }
-  return "";
+  return '';
 }
 
 function toApiError(status: number, detail: string) {
@@ -124,13 +136,13 @@ function resolveRunScopedPagination(
   value?: string | RunScopedPaginationParams,
   page?: PaginationParams,
 ): RunScopedPaginationParams {
-  if (typeof value === "string") {
+  if (typeof value === 'string') {
     return { runId: value, ...(page ?? {}) };
   }
   return value ?? {};
 }
 
-export function getErrorMessage(error: unknown, fallback = "Request failed.") {
+export function getErrorMessage(error: unknown, fallback = 'Request failed.') {
   if (error instanceof ApiError) {
     return error.detail || error.message || fallback;
   }
@@ -141,10 +153,10 @@ export function getErrorMessage(error: unknown, fallback = "Request failed.") {
 }
 
 export function getRunStatusView(
-  run: Pick<SwarmRunSummary, "status" | "is_active"> | null | undefined,
+  run: Pick<SwarmRunSummary, 'status' | 'is_active'> | null | undefined,
   options: { stopRequested?: boolean } = {},
 ): RunStatusView {
-  const rawStatus = String(run?.status ?? "loading").toLowerCase();
+  const rawStatus = String(run?.status ?? 'loading').toLowerCase();
   const isActive = Boolean(run?.is_active);
   const stopRequested = Boolean(options.stopRequested);
 
@@ -153,22 +165,26 @@ export function getRunStatusView(
       canStop: false,
       isStopping: false,
       isTerminal: false,
-      label: "loading",
+      label: 'loading',
       showDelete: false,
     };
   }
 
-  if (stopRequested || rawStatus === "stopping" || (rawStatus === "stopped" && isActive)) {
+  if (
+    stopRequested ||
+    rawStatus === 'stopping' ||
+    (rawStatus === 'stopped' && isActive)
+  ) {
     return {
       canStop: false,
       isStopping: true,
       isTerminal: false,
-      label: "stopping",
+      label: 'stopping',
       showDelete: false,
     };
   }
 
-  if (["completed", "failed", "stopped"].includes(rawStatus)) {
+  if (['completed', 'failed', 'stopped'].includes(rawStatus)) {
     return {
       canStop: false,
       isStopping: false,
@@ -178,7 +194,7 @@ export function getRunStatusView(
     };
   }
 
-  if (["pending", "running"].includes(rawStatus)) {
+  if (['pending', 'running'].includes(rawStatus)) {
     return {
       canStop: true,
       isStopping: false,
@@ -199,8 +215,8 @@ export function getRunStatusView(
 
 export function deskFetch(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
-  if (init.body && !headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
+  if (init.body && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
   }
   const storedToken = getStoredToken();
   for (const [key, value] of Object.entries(buildAuthHeaders(storedToken))) {
@@ -211,8 +227,8 @@ export function deskFetch(path: string, init: RequestInit = {}) {
 
 async function request<T>(input: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
-  if (!headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
   }
 
   const storedToken = getStoredToken();
@@ -225,8 +241,8 @@ async function request<T>(input: string, init?: RequestInit): Promise<T> {
     headers,
   });
   if (!response.ok) {
-    const contentType = response.headers.get("content-type") ?? "";
-    if (contentType.includes("application/json")) {
+    const contentType = response.headers.get('content-type') ?? '';
+    if (contentType.includes('application/json')) {
       try {
         const payload = (await response.json()) as unknown;
         throw toApiError(response.status, extractErrorDetail(payload));
@@ -239,8 +255,8 @@ async function request<T>(input: string, init?: RequestInit): Promise<T> {
     const text = await response.text();
     throw toApiError(response.status, text);
   }
-  const contentType = response.headers.get("content-type") ?? "";
-  if (contentType.includes("application/json")) {
+  const contentType = response.headers.get('content-type') ?? '';
+  if (contentType.includes('application/json')) {
     return response.json() as Promise<T>;
   }
   return response.text() as Promise<T>;
@@ -251,9 +267,15 @@ async function requestAllPages<T>(path: string): Promise<T[]> {
   let offset = 0;
 
   for (;;) {
-    const page = await request<Paginated<T>>(withQuery(path, { offset, limit: PAGE_LIMIT }));
+    const page = await request<Paginated<T>>(
+      withQuery(path, { offset, limit: PAGE_LIMIT }),
+    );
     items.push(...page.items);
-    if (!page.items.length || page.next_offset <= offset || page.next_offset >= page.total) {
+    if (
+      !page.items.length ||
+      page.next_offset <= offset ||
+      page.next_offset >= page.total
+    ) {
       break;
     }
     offset = page.next_offset;
@@ -264,16 +286,26 @@ async function requestAllPages<T>(path: string): Promise<T[]> {
 
 export const api = {
   listTrace: (limit = 20) =>
-    request<{ items: Record<string, unknown>[]; count: number }>(withQuery("/api/v1/trace", { limit })),
+    request<{ items: Record<string, unknown>[]; count: number }>(
+      withQuery('/api/v1/trace', { limit }),
+    ),
   manualBacktestChartUrl: (jobId: string, cacheKey?: string | number) =>
     withBase(withQuery(`/api/charts/${jobId}`, { t: cacheKey })),
   listRuns: (params: PaginationParams = {}) =>
-    request<Paginated<SwarmRunSummary>>(withQuery("/api/swarm/runs", params)),
-  getRun: (runId: string) => request<SwarmRunSummary>(`/api/swarm/runs/${runId}`),
-  listAllRuns: () => requestAllPages<SwarmRunSummary>("/api/swarm/runs"),
-  getRunLogs: (runId: string, paramsOrOffset: RunLogParams | number = 0, limit = 200, tail = false) => {
+    request<Paginated<SwarmRunSummary>>(withQuery('/api/swarm/runs', params)),
+  getRun: (runId: string) =>
+    request<SwarmRunSummary>(`/api/swarm/runs/${runId}`),
+  listAllRuns: () => requestAllPages<SwarmRunSummary>('/api/swarm/runs'),
+  getRunLogs: (
+    runId: string,
+    paramsOrOffset: RunLogParams | number = 0,
+    limit = 200,
+    tail = false,
+  ) => {
     const params =
-      typeof paramsOrOffset === "number" ? { offset: paramsOrOffset, limit, tail } : paramsOrOffset;
+      typeof paramsOrOffset === 'number'
+        ? { offset: paramsOrOffset, limit, tail }
+        : paramsOrOffset;
     return request<Paginated<Record<string, unknown>>>(
       withQuery(`/api/swarm/runs/${runId}/logs`, {
         offset: params.offset,
@@ -283,29 +315,42 @@ export const api = {
     );
   },
   startRun: (payload: Record<string, unknown>) =>
-    request<{ status: string; run_id: string }>("/api/swarm/runs", {
-      method: "POST",
+    request<{ status: string; run_id: string }>('/api/swarm/runs', {
+      method: 'POST',
       body: JSON.stringify(payload),
     }),
   stopRun: (runId: string) =>
-    request<{ status: string; run_id: string }>(`/api/swarm/runs/${runId}/stop`, {
-      method: "POST",
-    }),
+    request<{ status: string; run_id: string }>(
+      `/api/swarm/runs/${runId}/stop`,
+      {
+        method: 'POST',
+      },
+    ),
   deleteRun: (runId: string) =>
     request<{ status: string; run_id: string }>(`/api/swarm/runs/${runId}`, {
-      method: "DELETE",
+      method: 'DELETE',
     }),
   swarmStatus: () =>
-    request<{ running_count: number; active_run_ids: string[]; max_concurrent: number }>(
-      "/api/swarm/status",
-    ),
-  listFactors: (options?: string | RunScopedPaginationParams, page?: PaginationParams) => {
+    request<{
+      running_count: number;
+      active_run_ids: string[];
+      max_concurrent: number;
+    }>('/api/swarm/status'),
+  listFactors: (
+    options?: string | RunScopedPaginationParams,
+    page?: PaginationParams,
+  ) => {
     const { runId, offset, limit } = resolveRunScopedPagination(options, page);
-    return request<Paginated<FactorSummary>>(withQuery("/api/results", { run_id: runId, offset, limit }));
+    return request<Paginated<FactorSummary>>(
+      withQuery('/api/results', { run_id: runId, offset, limit }),
+    );
   },
   listAllFactors: (runId?: string) =>
-    requestAllPages<FactorSummary>(withQuery("/api/results", { run_id: runId })),
-  getFactor: (factorId: string) => request<Record<string, unknown>>(`/api/factors/${factorId}`),
+    requestAllPages<FactorSummary>(
+      withQuery('/api/results', { run_id: runId }),
+    ),
+  getFactor: (factorId: string) =>
+    request<Record<string, unknown>>(`/api/factors/${factorId}`),
   crossoverFactors: (payload: {
     factor_ids?: string[];
     crossover_iterations?: number;
@@ -317,71 +362,97 @@ export const api = {
     local_data_path?: string;
     local_data_layout?: string;
   }) =>
-    request<Record<string, unknown>>("/api/factors/crossover", {
-      method: "POST",
+    request<Record<string, unknown>>('/api/factors/crossover', {
+      method: 'POST',
       body: JSON.stringify(payload),
     }),
-  getBacktest: (jobId: string) => request<Record<string, unknown>>(`/api/backtest/${jobId}`),
+  getBacktest: (jobId: string) =>
+    request<Record<string, unknown>>(`/api/backtest/${jobId}`),
   runBacktest: (payload: Record<string, unknown>) =>
-    request<Record<string, unknown>>("/api/backtest/run", {
-      method: "POST",
+    request<Record<string, unknown>>('/api/backtest/run', {
+      method: 'POST',
       body: JSON.stringify(payload),
     }),
   validateBacktest: (payload: Record<string, unknown>) =>
-    request<{ ok: boolean; message: string }>("/api/backtest/validate", {
-      method: "POST",
+    request<{ ok: boolean; message: string }>('/api/backtest/validate', {
+      method: 'POST',
       body: JSON.stringify(payload),
     }),
-  backtestHistory: () => request<Record<string, unknown>[]>("/api/backtest/history"),
+  backtestHistory: () =>
+    request<Record<string, unknown>[]>('/api/backtest/history'),
   deleteBacktest: (jobId: string) =>
     request<{ status: string; job_id: string }>(`/api/backtest/${jobId}`, {
-      method: "DELETE",
+      method: 'DELETE',
     }),
-  getStrategies: (options?: string | RunScopedPaginationParams, page?: PaginationParams) => {
+  getStrategies: (
+    options?: string | RunScopedPaginationParams,
+    page?: PaginationParams,
+  ) => {
     const { runId, offset, limit } = resolveRunScopedPagination(options, page);
     return request<Paginated<StrategySummary>>(
-      withQuery("/api/strategies", { run_id: runId, offset, limit }),
+      withQuery('/api/strategies', { run_id: runId, offset, limit }),
     );
   },
   listAllStrategies: (runId?: string) =>
-    requestAllPages<StrategySummary>(withQuery("/api/strategies", { run_id: runId })),
+    requestAllPages<StrategySummary>(
+      withQuery('/api/strategies', { run_id: runId }),
+    ),
   getStrategy: (strategyId: string) =>
     request<Record<string, unknown>>(`/api/strategies/${strategyId}`),
   runStrategy: (payload: Record<string, unknown>) =>
-    request<Record<string, unknown>>("/api/strategy/run", {
-      method: "POST",
+    request<Record<string, unknown>>('/api/strategy/run', {
+      method: 'POST',
       body: JSON.stringify(payload),
     }),
-  strategyHistory: () => request<Record<string, unknown>[]>("/api/strategy/history"),
+  strategyHistory: () =>
+    request<Record<string, unknown>[]>('/api/strategy/history'),
   deleteStrategy: (strategyId: string) =>
-    request<{ status: string; strategy_id: string }>(`/api/strategy/${strategyId}`, {
-      method: "DELETE",
-    }),
+    request<{ status: string; strategy_id: string }>(
+      `/api/strategy/${strategyId}`,
+      {
+        method: 'DELETE',
+      },
+    ),
   wikiIndex: (params: PaginationParams = {}) =>
-    request<Paginated<Record<string, unknown>>>(withQuery("/api/wiki/index", params)),
-  wikiIndexAll: () => requestAllPages<Record<string, unknown>>("/api/wiki/index"),
+    request<Paginated<Record<string, unknown>>>(
+      withQuery('/api/wiki/index', params),
+    ),
+  wikiIndexAll: () =>
+    requestAllPages<Record<string, unknown>>('/api/wiki/index'),
   wikiPage: (slug: string) => request<string>(`/api/wiki/page/${slug}`),
   updateWikiPage: (slug: string, content: string) =>
-    request<{ status: string; slug: string; bytes: number }>(`/api/wiki/page/${slug}`, {
-      method: "PUT",
-      body: JSON.stringify({ content }),
-    }),
-  wikiGraph: () => request<{ nodes: WikiGraphNode[]; edges: WikiGraphEdge[] }>("/api/wiki/graph"),
+    request<{ status: string; slug: string; bytes: number }>(
+      `/api/wiki/page/${slug}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ content }),
+      },
+    ),
+  wikiGraph: () =>
+    request<{ nodes: WikiGraphNode[]; edges: WikiGraphEdge[] }>(
+      '/api/wiki/graph',
+    ),
   wikiLint: (staleDays = 30) =>
-    request<Record<string, unknown>>(withQuery("/api/wiki/lint", { stale_days: staleDays }), {
-      method: "POST",
-    }),
+    request<Record<string, unknown>>(
+      withQuery('/api/wiki/lint', { stale_days: staleDays }),
+      {
+        method: 'POST',
+      },
+    ),
   wikiMigrate: (dryRun = true) =>
-    request<Record<string, unknown>>(withQuery("/api/wiki/migrate", { dry_run: dryRun }), {
-      method: "POST",
-    }),
+    request<Record<string, unknown>>(
+      withQuery('/api/wiki/migrate', { dry_run: dryRun }),
+      {
+        method: 'POST',
+      },
+    ),
   adminReset: (payload: {
     scopes?: string[];
     confirm?: boolean;
     reset_token?: string;
   }) =>
-    request<Record<string, unknown>>("/api/admin/reset", {
-      method: "POST",
+    request<Record<string, unknown>>('/api/admin/reset', {
+      method: 'POST',
       body: JSON.stringify(payload),
     }),
 };

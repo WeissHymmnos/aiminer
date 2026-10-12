@@ -1,12 +1,13 @@
 # --- Imports & Auth ---
 
+import ast
 import os
+from typing import List, Optional
+
+from dotenv import load_dotenv
+from loguru import logger
 import numpy as np
 import pandas as pd
-from typing import List, Optional
-from loguru import logger
-from dotenv import load_dotenv
-import ast
 
 try:
     import rqdatac as rq
@@ -29,6 +30,7 @@ load_dotenv()
 
 # --- AST Safety Transformer ---
 
+
 class SafeEvalTransformer(ast.NodeTransformer):
     def __init__(self, known_names):
         self.known_names = set(known_names)
@@ -39,7 +41,10 @@ class SafeEvalTransformer(ast.NodeTransformer):
         node.keywords = [self.visit(kw) for kw in node.keywords]
 
         # If the function name itself is unknown, we handle it
-        if isinstance(node.func, ast.Name) and node.func.id not in self.known_names:
+        if (
+            isinstance(node.func, ast.Name)
+            and node.func.id not in self.known_names
+        ):
             logger.warning(
                 f"Function '{node.func.id}' is unknown. It might fail or needs a fallback."
             )
@@ -106,7 +111,9 @@ def init_rq_auth():
             logger.error(f"RiceQuant Password Auth failed: {e}")
             raise
 
-    raise ValueError("RiceQuant Auth Failed: No valid credentials found or accepted.")
+    raise ValueError(
+        "RiceQuant Auth Failed: No valid credentials found or accepted."
+    )
 
 
 try:
@@ -116,6 +123,7 @@ except ImportError:
     font_manager = None  # type: ignore[assignment]
     plt = None  # type: ignore[assignment]
 from pathlib import Path
+
 
 class RiceQuantEval:
     """
@@ -164,6 +172,7 @@ class RiceQuantEval:
     @staticmethod
     def _daily_rank_ic(all_data: pd.DataFrame) -> pd.Series:
         """Compute per-date Spearman rank IC with sparse cross-section guards."""
+
         def _corr(group: pd.DataFrame) -> float:
             factor = group["factor"].replace([np.inf, -np.inf], np.nan)
             label = group["label"].replace([np.inf, -np.inf], np.nan)
@@ -201,45 +210,68 @@ class RiceQuantEval:
             if len(x) < effective_groups:
                 return pd.Series(np.nan, index=x.index)
             try:
-                return pd.qcut(x.rank(method="first"), effective_groups, labels=labels)
+                return pd.qcut(
+                    x.rank(method="first"), effective_groups, labels=labels
+                )
             except ValueError:
                 return pd.Series(np.nan, index=x.index)
 
         all_data = all_data.copy()
-        all_data['group'] = all_data.groupby('datetime', group_keys=False)['factor'].apply(assign_groups)
-        layer_ret = all_data.groupby(['datetime', 'group'])['label'].mean().unstack('group')
+        all_data["group"] = all_data.groupby("datetime", group_keys=False)[
+            "factor"
+        ].apply(assign_groups)
+        layer_ret = (
+            all_data.groupby(["datetime", "group"])["label"]
+            .mean()
+            .unstack("group")
+        )
 
         return layer_ret
 
     def generate_plots(self, daily_ret, layer_ret, factor_name):
         """Generate and save backtest plots."""
-        safe_name = "".join([c if (c.isalnum() or c in "._-") else "_" for c in factor_name])[:50]
+        safe_name = "".join(
+            [c if (c.isalnum() or c in "._-") else "_" for c in factor_name]
+        )[:50]
         plot_paths = {}
 
         # 1. Cumulative Returns (Equity Curve)
         plt.figure(figsize=(10, 5))
         cum_ret = (1 + daily_ret.fillna(0)).cumprod()
         cum_ret.plot(title=f"Factor Equity Curve: {factor_name}")
-        plt.axvline(x=pd.to_datetime(self.oos_split_date), color='r', linestyle='--', label='OOS Split')
+        plt.axvline(
+            x=pd.to_datetime(self.oos_split_date),
+            color="r",
+            linestyle="--",
+            label="OOS Split",
+        )
         plt.legend()
         plt.grid(True, alpha=0.3)
         eq_path = self.output_dir / f"{safe_name}_equity.png"
         plt.savefig(eq_path, dpi=120)
         plt.close()
-        plot_paths['equity'] = str(eq_path.resolve())
+        plot_paths["equity"] = str(eq_path.resolve())
 
         # 2. Layered Returns
-        if not layer_ret.empty and not layer_ret.select_dtypes(include=[np.number]).empty:
+        if (
+            not layer_ret.empty
+            and not layer_ret.select_dtypes(include=[np.number]).empty
+        ):
             plt.figure(figsize=(10, 5))
             layer_cum = (1 + layer_ret.fillna(0)).cumprod()
             layer_cum.plot(title="Layered Cumulative Returns")
-            plt.axvline(x=pd.to_datetime(self.oos_split_date), color='r', linestyle='--', label='OOS Split')
+            plt.axvline(
+                x=pd.to_datetime(self.oos_split_date),
+                color="r",
+                linestyle="--",
+                label="OOS Split",
+            )
             plt.legend()
             plt.grid(True, alpha=0.3)
             lay_path = self.output_dir / f"{safe_name}_layers.png"
             plt.savefig(lay_path, dpi=120)
             plt.close()
-            plot_paths['layers'] = str(lay_path.resolve())
+            plot_paths["layers"] = str(lay_path.resolve())
 
         return plot_paths
 
@@ -287,17 +319,25 @@ class RiceQuantEval:
         # We MUST shift within each instrument to avoid cross-instrument leak
         # and to ensure the last date for each instrument is NaN.
         df_sorted = df.sort_index(level=["instrument", "datetime"])
-        label_s = (
-            df_sorted.groupby(level="instrument", group_keys=False)["close"]
-            .apply(lambda x: x.shift(-1) / x - 1)
+        label_s = df_sorted.groupby(level="instrument", group_keys=False)[
+            "close"
+        ].apply(lambda x: x.shift(-1) / x - 1)
+        self.label_data = (
+            label_s.to_frame(name="label")
+            .reorder_levels(["datetime", "instrument"])
+            .sort_index()
         )
-        self.label_data = label_s.to_frame(name="label").reorder_levels(["datetime", "instrument"]).sort_index()
-        
+
         # Ensure consistent datetime type
-        if not pd.api.types.is_datetime64_any_dtype(self.label_data.index.get_level_values("datetime")):
+        if not pd.api.types.is_datetime64_any_dtype(
+            self.label_data.index.get_level_values("datetime")
+        ):
             idx = self.label_data.index
             new_dt = pd.to_datetime(idx.get_level_values("datetime"))
-            self.label_data.index = pd.MultiIndex.from_arrays([new_dt, idx.get_level_values("instrument")], names=["datetime", "instrument"])
+            self.label_data.index = pd.MultiIndex.from_arrays(
+                [new_dt, idx.get_level_values("instrument")],
+                names=["datetime", "instrument"],
+            )
 
         logger.info("Data fetching done.")
 
@@ -311,7 +351,7 @@ class RiceQuantEval:
             )
         return df.fillna(0)
 
-# --- Factor Computation ---
+    # --- Factor Computation ---
     def compute_factors(self):
         """
         Compute factors using unstacked matrix operations for Qlib-style expressions.
@@ -329,9 +369,9 @@ class RiceQuantEval:
 
         # Add vwap: total_turnover / volume
         if "total_turnover" in fields and "volume" in fields:
-            fields["vwap"] = fields["total_turnover"] / fields["volume"].replace(
-                0, np.nan
-            )
+            fields["vwap"] = fields["total_turnover"] / fields[
+                "volume"
+            ].replace(0, np.nan)
             fields["vwap"] = fields["vwap"].ffill().fillna(fields["close"])
 
         ref_field = fields["close"]
@@ -339,7 +379,9 @@ class RiceQuantEval:
         def _ensure_df(value):
             if isinstance(value, (int, float, np.integer, np.floating)):
                 return pd.DataFrame(
-                    float(value), index=ref_field.index, columns=ref_field.columns
+                    float(value),
+                    index=ref_field.index,
+                    columns=ref_field.columns,
                 )
             return value
 
@@ -504,7 +546,8 @@ class RiceQuantEval:
             # Simple winsorization on cross-section
             return df.apply(
                 lambda x: x.clip(
-                    lower=x.quantile(float(pct)), upper=x.quantile(1 - float(pct))
+                    lower=x.quantile(float(pct)),
+                    upper=x.quantile(1 - float(pct)),
                 ),
                 axis=1,
             )
@@ -518,7 +561,9 @@ class RiceQuantEval:
             if df is None:
                 c = fields["close"].shape[1]
                 return pd.DataFrame(
-                    c, index=fields["close"].index, columns=fields["close"].columns
+                    c,
+                    index=fields["close"].index,
+                    columns=fields["close"].columns,
                 )
             df = _ensure_df(df)
             return df.rolling(max(1, _get_n(n))).count()
@@ -554,7 +599,10 @@ class RiceQuantEval:
             weights = np.arange(1, nn + 1, dtype=float)
             weights /= weights.sum()
             return df.rolling(nn, min_periods=1).apply(
-                lambda x: np.dot(x[-len(weights):], weights[-len(x):]) / weights[-len(x):].sum(),
+                lambda x: (
+                    np.dot(x[-len(weights) :], weights[-len(x) :])
+                    / weights[-len(x) :].sum()
+                ),
                 raw=True,
             )
 
@@ -566,7 +614,11 @@ class RiceQuantEval:
             def _row(x):
                 if len(x) < nn:
                     return np.nan
-                return float(np.nanargmax(x)) if not np.all(np.isnan(x)) else np.nan
+                return (
+                    float(np.nanargmax(x))
+                    if not np.all(np.isnan(x))
+                    else np.nan
+                )
 
             return df.rolling(nn, min_periods=1).apply(_row, raw=True)
 
@@ -577,7 +629,11 @@ class RiceQuantEval:
             def _row(x):
                 if len(x) < nn:
                     return np.nan
-                return float(np.nanargmin(x)) if not np.all(np.isnan(x)) else np.nan
+                return (
+                    float(np.nanargmin(x))
+                    if not np.all(np.isnan(x))
+                    else np.nan
+                )
 
             return df.rolling(nn, min_periods=1).apply(_row, raw=True)
 
@@ -710,7 +766,9 @@ class RiceQuantEval:
                             f"Field {uf} not found in database. Falling back to default values."
                         )
                         if "vol" in uf.lower():
-                            safe_expr = safe_expr.replace(uf, "fields['volume']")
+                            safe_expr = safe_expr.replace(
+                                uf, "fields['volume']"
+                            )
                         elif "share" in uf.lower():
                             safe_expr = safe_expr.replace(
                                 uf, "1.0"
@@ -748,7 +806,9 @@ class RiceQuantEval:
         factor_df.index.names = ["datetime", "instrument"]
 
         self.factor_data = self._normalize_factors(factor_df)
-        self.alphacombo = self.factor_data.dot(self.weights).to_frame(name="alphacombo")
+        self.alphacombo = self.factor_data.dot(self.weights).to_frame(
+            name="alphacombo"
+        )
         logger.info("Factor computation completed.")
 
     def compute_factors_polars(self):
@@ -757,6 +817,7 @@ class RiceQuantEval:
         """
         logger.info("Computing factors using Polars Engine...")
         import polars as pl
+
         from .polars_engine import PolarsEngine
 
         # 1. Prepare Polars DataFrame from raw_data
@@ -765,12 +826,16 @@ class RiceQuantEval:
 
         # Ensure datetime is string or date for engine processing
         if pl_df["datetime"].dtype == pl.Datetime:
-            pl_df = pl_df.with_columns(pl.col("datetime").dt.to_string("%Y-%m-%d"))
+            pl_df = pl_df.with_columns(
+                pl.col("datetime").dt.to_string("%Y-%m-%d")
+            )
 
         # Add vwap
         if "total_turnover" in pl_df.columns and "volume" in pl_df.columns:
             pl_df = pl_df.with_columns(
-                vwap=(pl.col("total_turnover") / pl.col("volume").replace(0, None))
+                vwap=(
+                    pl.col("total_turnover") / pl.col("volume").replace(0, None)
+                )
             ).with_columns(
                 vwap=pl.col("vwap")
                 .forward_fill()
@@ -789,19 +854,23 @@ class RiceQuantEval:
                 ["datetime", "instrument"] + self.factor_expressions
             )
         except Exception as e:
-            raise RuntimeError(f"Factor computation failed (Polars): {e}") from e
+            raise RuntimeError(
+                f"Factor computation failed (Polars): {e}"
+            ) from e
 
         # Convert back to Pandas for normalization and downstream
         factor_df = result_df.to_pandas()
-        
+
         # Ensure datetime is back to datetime64[ns] to match label_data
         if not pd.api.types.is_datetime64_any_dtype(factor_df["datetime"]):
             factor_df["datetime"] = pd.to_datetime(factor_df["datetime"])
-            
+
         factor_df = factor_df.set_index(["datetime", "instrument"]).sort_index()
 
         self.factor_data = self._normalize_factors(factor_df)
-        self.alphacombo = self.factor_data.dot(self.weights).to_frame(name="alphacombo")
+        self.alphacombo = self.factor_data.dot(self.weights).to_frame(
+            name="alphacombo"
+        )
         logger.info("Polars Factor computation completed.")
 
     def get_market_regime(
@@ -846,9 +915,15 @@ class RiceQuantEval:
 
             # 1. Trend Analysis
             ma20 = (
-                close.rolling(20).mean().iloc[-1] if len(close) >= 20 else close.mean()
+                close.rolling(20).mean().iloc[-1]
+                if len(close) >= 20
+                else close.mean()
             )
-            ma5 = close.rolling(5).mean().iloc[-1] if len(close) >= 5 else close.mean()
+            ma5 = (
+                close.rolling(5).mean().iloc[-1]
+                if len(close) >= 5
+                else close.mean()
+            )
             last_close = close.iloc[-1]
 
             if last_close > ma20:
@@ -863,7 +938,9 @@ class RiceQuantEval:
             vol_state = (
                 "High Volatility"
                 if real_vol > 0.25
-                else ("Low Volatility" if real_vol < 0.15 else "Normal Volatility")
+                else (
+                    "Low Volatility" if real_vol < 0.15 else "Normal Volatility"
+                )
             )
 
             skew = returns.skew()
@@ -946,7 +1023,9 @@ class RiceQuantEval:
             self.rre = 0.0
         else:
             # We care about the magnitude of IC retention
-            self.rre = max(0.0, min(1.0, noisy_ic / orig_ic)) if orig_ic > 0 else 0.0
+            self.rre = (
+                max(0.0, min(1.0, noisy_ic / orig_ic)) if orig_ic > 0 else 0.0
+            )
 
         logger.info(
             f"Robustness Test - Original IC: {orig_ic}, Noisy IC: {noisy_ic}, RRE: {self.rre:.4f}"
@@ -958,30 +1037,35 @@ class RiceQuantEval:
         # Simple long-short return calculation
         daily_ret = all_data.groupby(level="datetime").apply(
             lambda x: (
-                (x["factor"] * x["label"]).sum() / (x["factor"].abs().sum() + 1e-8)
+                (x["factor"] * x["label"]).sum()
+                / (x["factor"].abs().sum() + 1e-8)
             )
         )
 
         self.daily_returns_series = daily_ret
-        self.sharpe = (
-            daily_ret.mean() / (daily_ret.std() + 1e-8)
-        ) * np.sqrt(TRADING_DAYS_PER_YEAR)
+        self.sharpe = (daily_ret.mean() / (daily_ret.std() + 1e-8)) * np.sqrt(
+            TRADING_DAYS_PER_YEAR
+        )
 
         cum_ret = (1 + daily_ret).cumprod()
         self.max_dd = (cum_ret / cum_ret.cummax() - 1).min()
 
         return daily_ret
 
-# --- Backtest Execution ---
+    # --- Backtest Execution ---
     def run(self):
         self.fetch_data()
         self.compute_factors()
 
         if self.alphacombo.replace([np.inf, -np.inf], np.nan).dropna().empty:
-            raise ValueError("Factor computation produced no valid non-NaN/Inf values.")
+            raise ValueError(
+                "Factor computation produced no valid non-NaN/Inf values."
+            )
 
         if self.label_data.dropna().empty:
-            raise ValueError("Label data (returns) is entirely NaN — check test dates and market data availability.")
+            raise ValueError(
+                "Label data (returns) is entirely NaN — check test dates and market data availability."
+            )
 
         # Ensure index names match before joining
         self.alphacombo.index.names = ["datetime", "instrument"]
@@ -995,14 +1079,16 @@ class RiceQuantEval:
             raise ValueError("Combined factor and label data is empty.")
 
         # Core Metrics (IC Series)
-        ic_series = all_data.groupby(level="datetime").apply(
-            lambda x: x["factor"].corr(x["label"])
-        ).fillna(0)
+        ic_series = (
+            all_data.groupby(level="datetime")
+            .apply(lambda x: x["factor"].corr(x["label"]))
+            .fillna(0)
+        )
         rank_ic_series = self._daily_rank_ic(all_data).fillna(0)
 
         self.ic = round(float(ic_series.mean()), 4)
         self.rankic = round(float(rank_ic_series.mean()), 4)
-        
+
         # OOS IC calculation
         oos_mask = ic_series.index >= pd.to_datetime(self.oos_split_date)
         if oos_mask.any():
@@ -1020,7 +1106,9 @@ class RiceQuantEval:
         # Layered Analysis & Plots
         try:
             layer_ret = self.calculate_layered_returns(all_data)
-            self.plot_paths = self.generate_plots(daily_ret, layer_ret, self.factor_expressions[0])
+            self.plot_paths = self.generate_plots(
+                daily_ret, layer_ret, self.factor_expressions[0]
+            )
         except Exception as e:
             logger.warning(f"Failed to generate backtest plots: {e}")
             self.plot_paths = {}
@@ -1029,7 +1117,7 @@ class RiceQuantEval:
             f"RiceQuant Evaluation - IC: {self.ic}, OOS IC: {self.oos_ic}, Sharpe: {self.sharpe:.2f}"
         )
 
-# --- Expression Parsing ---
+    # --- Expression Parsing ---
     @staticmethod
     def dry_run(expr: str) -> tuple:
         """
@@ -1074,7 +1162,11 @@ class RiceQuantEval:
 
             def _ensure_df(x):
                 if isinstance(x, (int, float, np.integer, np.floating)):
-                    return pd.DataFrame(float(x), index=_ref_field.index, columns=_ref_field.columns)
+                    return pd.DataFrame(
+                        float(x),
+                        index=_ref_field.index,
+                        columns=_ref_field.columns,
+                    )
                 return x
 
             # Robust variadic operators
@@ -1096,19 +1188,23 @@ class RiceQuantEval:
                 "pd": pd,
                 "Rank": lambda df, *args: df.rank(axis=1, pct=True),
                 "CSRank": lambda df, *args: df.rank(axis=1, pct=True),
-                "CSZScore": lambda df, *args: df.sub(df.mean(axis=1), axis=0).div(
-                    df.std(axis=1).replace(0, 1), axis=0
-                ),
+                "CSZScore": lambda df, *args: df.sub(
+                    df.mean(axis=1), axis=0
+                ).div(df.std(axis=1).replace(0, 1), axis=0),
                 "Mean": lambda df, n=20: df.rolling(max(1, _get_n(n))).mean(),
                 "Std": lambda df, n=20: df.rolling(max(1, _get_n(n))).std(),
-                "Median": lambda df, n=20: df.rolling(max(1, _get_n(n))).median(),
+                "Median": lambda df, n=20: df.rolling(
+                    max(1, _get_n(n))
+                ).median(),
                 "EMA": lambda df, n=20: df.ewm(span=max(1, _get_n(n))).mean(),
                 "Abs": np.abs,
                 "Log": lambda df: np.log(_ensure_df(df).replace(0, np.nan)),
                 "Sum": lambda df, n=20: df.rolling(max(1, _get_n(n))).sum(),
                 "Ref": lambda df, n=1: df.shift(_get_n(n)),
                 "Delta": lambda df, n=1: df.diff(_get_n(n)),
-                "Corr": lambda df1, df2, n=20: df1.rolling(max(1, _get_n(n))).corr(df2),
+                "Corr": lambda df1, df2, n=20: df1.rolling(
+                    max(1, _get_n(n))
+                ).corr(df2),
                 "Correlation": lambda df1, df2, n=20: df1.rolling(
                     max(1, _get_n(n))
                 ).corr(df2),
@@ -1125,7 +1221,8 @@ class RiceQuantEval:
                 ).apply(lambda x: np.percentile(x, float(p))),
                 "Winsorize": lambda df, pct=0.05: _ensure_df(df).apply(
                     lambda x: x.clip(
-                        lower=x.quantile(float(pct)), upper=x.quantile(1 - float(pct))
+                        lower=x.quantile(float(pct)),
+                        upper=x.quantile(1 - float(pct)),
                     ),
                     axis=1,
                 ),
@@ -1157,11 +1254,21 @@ class RiceQuantEval:
                 "Ts_Min": lambda df, n: df.rolling(max(1, _get_n(n))).min(),
                 "Percentile": lambda df, p=50: df.rank(axis=1, pct=True),
                 "GroupNeutral": lambda df: df.sub(df.mean(axis=1), axis=0),
-                "Scale": lambda df, a=1: df.div(df.abs().sum(axis=1), axis=0) * a,
-                "Cov": lambda df1, df2, n=20: df1.rolling(max(1, _get_n(n))).cov(df2),
-                "Ts_ArgMax": lambda df, n=20: df.rolling(max(1, _get_n(n))).apply(lambda x: len(x) - 1 - x.argmax()),
-                "Ts_ArgMin": lambda df, n=20: df.rolling(max(1, _get_n(n))).apply(lambda x: len(x) - 1 - x.argmin()),
-                "Clip": lambda df, lower, upper: _ensure_df(df).clip(lower=lower, upper=upper),
+                "Scale": lambda df, a=1: (
+                    df.div(df.abs().sum(axis=1), axis=0) * a
+                ),
+                "Cov": lambda df1, df2, n=20: df1.rolling(
+                    max(1, _get_n(n))
+                ).cov(df2),
+                "Ts_ArgMax": lambda df, n=20: df.rolling(
+                    max(1, _get_n(n))
+                ).apply(lambda x: len(x) - 1 - x.argmax()),
+                "Ts_ArgMin": lambda df, n=20: df.rolling(
+                    max(1, _get_n(n))
+                ).apply(lambda x: len(x) - 1 - x.argmin()),
+                "Clip": lambda df, lower, upper: _ensure_df(df).clip(
+                    lower=lower, upper=upper
+                ),
                 "Count": lambda df=None, n=20: (
                     pd.DataFrame(
                         _ref_field.shape[1],
@@ -1174,7 +1281,13 @@ class RiceQuantEval:
                 "Exp": lambda df: np.exp(_ensure_df(df).clip(upper=50)),
                 "Ceil": lambda df: np.ceil(df),
                 "Floor": lambda df: np.floor(df),
-                "WMA": lambda df, n=20: df.rolling(max(1, _get_n(n))).apply(lambda x: np.arange(1, len(x) + 1) @ x / np.arange(1, len(x) + 1).sum()),
+                "WMA": lambda df, n=20: df.rolling(max(1, _get_n(n))).apply(
+                    lambda x: (
+                        np.arange(1, len(x) + 1)
+                        @ x
+                        / np.arange(1, len(x) + 1).sum()
+                    )
+                ),
                 "Const": lambda x: x,
             }
 
@@ -1193,7 +1306,7 @@ class RiceQuantEval:
         except Exception as e:
             return False, str(e)
 
-# --- Metrics & Summary ---
+    # --- Metrics & Summary ---
     def summary(self):
         logger.info(f"RiceQuant IC: {self.ic}")
         logger.info(f"RiceQuant RankIC: {self.rankic}")

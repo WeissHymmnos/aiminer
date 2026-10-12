@@ -3,14 +3,20 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from pathlib import Path
 import shutil
 import subprocess
 import sys
 import zipfile
-from pathlib import Path
 
-
-COMMON_REQUIRED_FIELDS = ("open.day.bin", "high.day.bin", "low.day.bin", "close.day.bin", "volume.day.bin", "factor.day.bin")
+COMMON_REQUIRED_FIELDS = (
+    "open.day.bin",
+    "high.day.bin",
+    "low.day.bin",
+    "close.day.bin",
+    "volume.day.bin",
+    "factor.day.bin",
+)
 CN_REQUIRED_FIELDS = COMMON_REQUIRED_FIELDS + ("amount.day.bin", "vwap.day.bin")
 
 ARCHIVE_NAMES = {
@@ -62,7 +68,16 @@ def extract_archive(archive_path: Path, target_dir: Path) -> None:
         with zipfile.ZipFile(archive_path) as archive:
             archive.extractall(target_dir)
         return
-    _run(["tar", "-xzf", str(archive_path), "-C", str(target_dir), "--strip-components=1"])
+    _run(
+        [
+            "tar",
+            "-xzf",
+            str(archive_path),
+            "-C",
+            str(target_dir),
+            "--strip-components=1",
+        ]
+    )
 
 
 def validate_qlib_data(target_dir: Path, *, region: str) -> dict[str, object]:
@@ -70,7 +85,9 @@ def validate_qlib_data(target_dir: Path, *, region: str) -> dict[str, object]:
     features_dir = target_dir / "features"
     instruments_dir = target_dir / "instruments"
     calendar_path = calendars_dir / "day.txt"
-    required_fields = CN_REQUIRED_FIELDS if region == "cn" else COMMON_REQUIRED_FIELDS
+    required_fields = (
+        CN_REQUIRED_FIELDS if region == "cn" else COMMON_REQUIRED_FIELDS
+    )
 
     summary: dict[str, object] = {
         "target_dir": str(target_dir),
@@ -90,13 +107,19 @@ def validate_qlib_data(target_dir: Path, *, region: str) -> dict[str, object]:
     }
 
     if calendar_path.exists():
-        lines = [line.strip() for line in calendar_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        lines = [
+            line.strip()
+            for line in calendar_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
         summary["calendar_count"] = len(lines)
         summary["calendar_first"] = lines[0] if lines else None
         summary["calendar_last"] = lines[-1] if lines else None
 
     if features_dir.exists():
-        feature_dirs = sorted(path for path in features_dir.iterdir() if path.is_dir())
+        feature_dirs = sorted(
+            path for path in features_dir.iterdir() if path.is_dir()
+        )
         summary["feature_instruments"] = len(feature_dirs)
         examples: list[dict[str, object]] = []
         missing_count = 0
@@ -106,14 +129,20 @@ def validate_qlib_data(target_dir: Path, *, region: str) -> dict[str, object]:
             if missing:
                 missing_count += 1
                 if len(examples) < 10:
-                    examples.append({"instrument": path.name, "missing": missing})
+                    examples.append(
+                        {"instrument": path.name, "missing": missing}
+                    )
         summary["missing_required_field_dirs"] = missing_count
         summary["missing_required_field_examples"] = examples
 
     if instruments_dir.exists():
         files_summary: dict[str, int] = {}
         for path in sorted(instruments_dir.glob("*.txt")):
-            lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            lines = [
+                line
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
             files_summary[path.name] = len(lines)
         summary["instrument_files"] = files_summary
 
@@ -134,10 +163,24 @@ def install_region(
     if target_dir and region == "all":
         raise ValueError("--target-dir cannot be used with region=all")
 
-    destination = Path(os.path.expanduser(target_dir)) if target_dir else default_target_dir(region, target_root)
-    resolved_source = "chenditc" if source == "auto" and region == "cn" else "qlib" if source == "auto" else source
+    destination = (
+        Path(os.path.expanduser(target_dir))
+        if target_dir
+        else default_target_dir(region, target_root)
+    )
+    resolved_source = (
+        "chenditc"
+        if source == "auto" and region == "cn"
+        else "qlib"
+        if source == "auto"
+        else source
+    )
     url = download_url(region, release, resolved_source)
-    archive_path = Path(os.path.expanduser(archive)) if archive else destination.parent / ARCHIVE_NAMES[region]
+    archive_path = (
+        Path(os.path.expanduser(archive))
+        if archive
+        else destination.parent / ARCHIVE_NAMES[region]
+    )
 
     print(f"Region: {region}")
     print(f"Target: {destination}")
@@ -156,23 +199,63 @@ def install_region(
     summary = validate_qlib_data(destination, region=region)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
-    if not summary["exists"] or not summary["calendar_exists"] or not summary["features_exists"]:
+    if (
+        not summary["exists"]
+        or not summary["calendar_exists"]
+        or not summary["features_exists"]
+    ):
         return 1
-    if int(summary["feature_instruments"]) <= 0 or int(summary["missing_required_field_dirs"]) > 0:
+    if (
+        int(summary["feature_instruments"]) <= 0
+        or int(summary["missing_required_field_dirs"]) > 0
+    ):
         return 1
     return 0
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Download and validate Qlib binary market data.")
-    parser.add_argument("region", nargs="?", default="cn", choices=("cn", "us", "all"))
-    parser.add_argument("--release", default="latest", help="GitHub release tag, or 'latest'. For --source qlib, latest maps to v2/latest asset names.")
-    parser.add_argument("--source", default="auto", choices=("auto", "chenditc", "qlib"), help="Download source. auto uses chenditc for CN and qlib_dataset for US.")
-    parser.add_argument("--target-root", default=None, help="Root containing cn_data/us_data. Defaults to ~/.qlib/qlib_data.")
-    parser.add_argument("--target-dir", default=None, help="Exact output directory for one region.")
-    parser.add_argument("--archive", default=None, help="Use an existing local tar.gz instead of downloading.")
-    parser.add_argument("--validate-only", action="store_true", help="Only validate existing data.")
-    parser.add_argument("--keep-archive", action="store_true", help="Keep downloaded tar.gz after extraction.")
+    parser = argparse.ArgumentParser(
+        description="Download and validate Qlib binary market data."
+    )
+    parser.add_argument(
+        "region", nargs="?", default="cn", choices=("cn", "us", "all")
+    )
+    parser.add_argument(
+        "--release",
+        default="latest",
+        help="GitHub release tag, or 'latest'. For --source qlib, latest maps to v2/latest asset names.",
+    )
+    parser.add_argument(
+        "--source",
+        default="auto",
+        choices=("auto", "chenditc", "qlib"),
+        help="Download source. auto uses chenditc for CN and qlib_dataset for US.",
+    )
+    parser.add_argument(
+        "--target-root",
+        default=None,
+        help="Root containing cn_data/us_data. Defaults to ~/.qlib/qlib_data.",
+    )
+    parser.add_argument(
+        "--target-dir",
+        default=None,
+        help="Exact output directory for one region.",
+    )
+    parser.add_argument(
+        "--archive",
+        default=None,
+        help="Use an existing local tar.gz instead of downloading.",
+    )
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Only validate existing data.",
+    )
+    parser.add_argument(
+        "--keep-archive",
+        action="store_true",
+        help="Keep downloaded tar.gz after extraction.",
+    )
     return parser
 
 

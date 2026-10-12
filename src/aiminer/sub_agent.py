@@ -1,13 +1,17 @@
 from loguru import logger
+
 from aiminer.app_workflow.graph import build_workflow
+from aiminer.core.agent_checkpoint import load_agent_checkpoints
 from aiminer.core.agent_result import (
     factor_result_view as _factor_result_view,
+)
+from aiminer.core.agent_result import (
     state_to_agent_result,
 )
-from aiminer.core.agent_checkpoint import load_agent_checkpoints
 from aiminer.core.constants import MISSING_IC_SENTINEL
 from aiminer.core.runtime import log_context
 from aiminer.core.settings import AiminerSettings, build_settings
+
 
 class AlphaResearcher:
     def __init__(
@@ -73,6 +77,7 @@ class AlphaResearcher:
 
         # If a log_queue is provided, add a sink to forward logs to the main process
         if log_queue:
+
             def q_sink(message):
                 record = message.record
                 log_data = {
@@ -84,6 +89,7 @@ class AlphaResearcher:
                     "iteration": record["extra"].get("iteration"),
                 }
                 log_queue.put(log_data)
+
             logger.add(q_sink, level="INFO", format="{message}")
 
         logger.info(f"[Sub-Agent] Initializing Role: {self.role_prompt}")
@@ -118,7 +124,9 @@ class AlphaResearcher:
             "best_ic_abs": -1.0,
             "best_factor_snapshot": None,
             "patience_counter": 0,
-            "messages": [f"[System] Starting SubAgent with Role: {self.role_prompt}"],
+            "messages": [
+                f"[System] Starting SubAgent with Role: {self.role_prompt}"
+            ],
         }
 
         final_state = initial_state
@@ -170,12 +178,16 @@ class AlphaResearcher:
         if not self.run_id or not self.agent_id:
             return None
         try:
-            checkpoints = load_agent_checkpoints(self.settings.db_path, self.run_id)
+            checkpoints = load_agent_checkpoints(
+                self.settings.db_path, self.run_id
+            )
         except Exception as exc:
             logger.warning(f"[Sub-Agent] Failed to load checkpoint: {exc}")
             return None
         for checkpoint in checkpoints:
-            if checkpoint.get("agent_id") == self.agent_id and not checkpoint.get("error"):
+            if checkpoint.get(
+                "agent_id"
+            ) == self.agent_id and not checkpoint.get("error"):
                 return checkpoint
         return None
 
@@ -199,10 +211,13 @@ class AlphaResearcher:
             "best_strategy_config": checkpoint.get("best_strategy_config"),
             "best_strategy_metrics": checkpoint.get("best_strategy_metrics"),
             "best_strategy_id": checkpoint.get("best_strategy_id"),
-            "strategy_daily_returns": checkpoint.get("strategy_daily_returns") or {},
+            "strategy_daily_returns": checkpoint.get("strategy_daily_returns")
+            or {},
             "selection_score": checkpoint.get("selection_score", 0.0),
             "execution_style": checkpoint.get("execution_style"),
-            "strategy_failure_reason": checkpoint.get("strategy_failure_reason"),
+            "strategy_failure_reason": checkpoint.get(
+                "strategy_failure_reason"
+            ),
             "is_effective": checkpoint.get("is_effective", False),
             "is_simulated": checkpoint.get("is_simulated", False),
             "ic_direction": checkpoint.get("ic_direction"),

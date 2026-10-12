@@ -1,19 +1,22 @@
 # --- Imports ---
 
 from __future__ import annotations
-import json
-from typing import Dict, Any
-import re
+
 from datetime import datetime
+import json
+import re
+from typing import Any, Dict
+
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
+
 from aiminer.app_workflow.state import AlphaMinerState
 from aiminer.core.hybrid_knowledge import HybridKnowledge
 from aiminer.core.llm import get_llm
 from aiminer.schemas.messages import HypothesisOutput
 
-
 # --- IdeaAgent Class ---
+
 
 class IdeaAgent:
     """
@@ -81,16 +84,23 @@ class IdeaAgent:
         if not macro_context and mode == "ricequant":
             logger.info("[IdeaAgent] Fetching macro events context...")
             macro_query = "What are the major macroeconomic news, central bank policies, and trade data?"
-            macro_context = self.knowledge.rag.retrieve(macro_query, n_results=3)
+            macro_context = self.knowledge.rag.retrieve(
+                macro_query, n_results=3
+            )
 
         # Fetch Dynamic RiceQuant Market Insight if in ricequant mode (Skip if already in state)
         market_regime = state.get("market_regime_summary", "")
         data_backend = state.get("data_backend", mode)
         if not market_regime and data_backend in {"ricequant", "local"}:
             try:
-                from aiminer.core.evaluator_factory import build_evaluator, evaluation_config_from_mapping
+                from aiminer.core.evaluator_factory import (
+                    build_evaluator,
+                    evaluation_config_from_mapping,
+                )
 
-                logger.info("[IdeaAgent] Fetching dynamic market regime analysis...")
+                logger.info(
+                    "[IdeaAgent] Fetching dynamic market regime analysis..."
+                )
 
                 # Use params from state if available
                 m_start = state.get("market_analysis_start_date")
@@ -116,12 +126,18 @@ class IdeaAgent:
                         {
                             "data_backend": data_backend,
                             "evaluation_mode": mode,
-                            "evaluation_engine": state.get("evaluation_engine", "pandas"),
+                            "evaluation_engine": state.get(
+                                "evaluation_engine", "pandas"
+                            ),
                             "market_mode": state.get("market_mode", "single"),
-                            "market_profile": state.get("market_profile", "cn_stock"),
+                            "market_profile": state.get(
+                                "market_profile", "cn_stock"
+                            ),
                             "market_profiles": state.get("market_profiles"),
                             "local_data_path": state.get("local_data_path"),
-                            "local_data_layout": state.get("local_data_layout", "auto"),
+                            "local_data_layout": state.get(
+                                "local_data_layout", "auto"
+                            ),
                             "market_start": m_start,
                             "market_end": effective_end,
                         }
@@ -135,7 +151,9 @@ class IdeaAgent:
                     f"[IdeaAgent] Injected RiceQuant Market Regime into context (Lookback: {m_lookback}d)."
                 )
             except Exception as e:
-                logger.warning(f"[IdeaAgent] Failed to fetch market regime: {e}")
+                logger.warning(
+                    f"[IdeaAgent] Failed to fetch market regime: {e}"
+                )
                 market_regime = (
                     "[Market data temporarily unavailable; "
                     "generate the hypothesis from general quant logic.]"
@@ -174,7 +192,9 @@ class IdeaAgent:
         if previous_improvements and iteration > 1:
             system_msg += f"\n\nFeedback from previous iteration (DO NOT IGNORE THIS): {previous_improvements}"
 
-        user_prompt = f"Propose a new factor hypothesis for iteration {iteration}.\n"
+        user_prompt = (
+            f"Propose a new factor hypothesis for iteration {iteration}.\n"
+        )
         if iteration > 1 and previous_improvements:
             user_prompt += (
                 f"\nCRITICAL FEEDBACK FROM ITERATION {iteration - 1}:\n"
@@ -212,12 +232,16 @@ class IdeaAgent:
                                 f"[IdeaAgent] LLM returned empty response (attempt {attempt + 1}), retrying..."
                             )
                             continue
-                        raise ValueError("LLM returned empty response after all retries")
+                        raise ValueError(
+                            "LLM returned empty response after all retries"
+                        )
 
                     cleaned_json = self._strip_markdown_json(content)
                     result = HypothesisOutput.model_validate_json(cleaned_json)
 
-                    logger.info(f"[IdeaAgent] Hypothesis Generated: {result.hypothesis_name}")
+                    logger.info(
+                        f"[IdeaAgent] Hypothesis Generated: {result.hypothesis_name}"
+                    )
 
                     return {
                         "rag_context": combined_knowledge,

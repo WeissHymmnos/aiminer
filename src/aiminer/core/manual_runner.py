@@ -10,8 +10,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import time
 from pathlib import Path
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 # Headless matplotlib backend — required whenever this module is imported
@@ -95,7 +95,9 @@ def job_id_for(
             "data_backend": data_backend,
             "market_profile": market_profile,
             "market_mode": market_mode,
-            "market_profiles": _profile_key(market_profiles or [market_profile]),
+            "market_profiles": _profile_key(
+                market_profiles or [market_profile]
+            ),
             "local_data_path": _cache_path_key(local_data_path),
             "local_data_layout": local_data_layout,
         }
@@ -122,7 +124,9 @@ def strategy_cache_key_for(
             "data_backend": data_backend,
             "market_profile": market_profile,
             "market_mode": market_mode,
-            "market_profiles": _profile_key(market_profiles or [market_profile]),
+            "market_profiles": _profile_key(
+                market_profiles or [market_profile]
+            ),
             "local_data_path": _cache_path_key(local_data_path),
             "local_data_layout": local_data_layout,
             "signal_multiplier": float(signal_multiplier),
@@ -142,7 +146,13 @@ def strategy_id_for(
 ) -> str:
     has_run_scope = any(
         value not in (None, "")
-        for value in (run_id, source_factor_id, agent_id, candidate_rank, template_name)
+        for value in (
+            run_id,
+            source_factor_id,
+            agent_id,
+            candidate_rank,
+            template_name,
+        )
     )
     scope = (
         {
@@ -156,7 +166,9 @@ def strategy_id_for(
         if has_run_scope
         else {"cache_key": cache_key, "scope": "manual"}
     )
-    return "strategy_" + hashlib.md5(_stable_json(scope).encode()).hexdigest()[:12]
+    return (
+        "strategy_" + hashlib.md5(_stable_json(scope).encode()).hexdigest()[:12]
+    )
 
 
 def persist_job(job_id: str, payload: Dict[str, Any]) -> None:
@@ -191,7 +203,8 @@ def list_jobs(include_returns: bool = False) -> List[Dict[str, Any]]:
         if not include_returns:
             data = {k: v for k, v in data.items() if k != "daily_returns"}
             data["return_points"] = len(
-                (json.loads(p.read_text(encoding="utf-8"))).get("daily_returns") or {}
+                (json.loads(p.read_text(encoding="utf-8"))).get("daily_returns")
+                or {}
             )
         out.append(data)
     out.sort(key=lambda x: x.get("ran_at", ""), reverse=True)
@@ -245,7 +258,8 @@ def list_strategy_jobs(include_returns: bool = False) -> List[Dict[str, Any]]:
         if not include_returns:
             data = {k: v for k, v in data.items() if k != "daily_returns"}
             data["return_points"] = len(
-                (json.loads(p.read_text(encoding="utf-8"))).get("daily_returns") or {}
+                (json.loads(p.read_text(encoding="utf-8"))).get("daily_returns")
+                or {}
             )
         out.append(data)
     out.sort(key=lambda x: x.get("ran_at", ""), reverse=True)
@@ -365,7 +379,10 @@ def run_manual_backtest(
     useful for streaming updates to a live TUI display. Signature:
     ``progress_cb(stage: str, message: str) -> None``.
     """
-    from aiminer.core.evaluator_factory import build_evaluator, evaluation_config_from_mapping
+    from aiminer.core.evaluator_factory import (
+        build_evaluator,
+        evaluation_config_from_mapping,
+    )
 
     def emit(stage: str, message: str) -> None:
         if progress_cb is not None:
@@ -397,7 +414,10 @@ def run_manual_backtest(
         if not ok:
             raise ValueError(f"Invalid expression: {msg}")
 
-    emit("init", f"Instantiating evaluator (backend={data_backend}, engine={engine})…")
+    emit(
+        "init",
+        f"Instantiating evaluator (backend={data_backend}, engine={engine})…",
+    )
     evaluator = build_evaluator(
         factor_expressions=[expression],
         config=evaluation_config_from_mapping(
@@ -484,7 +504,10 @@ def run_manual_strategy_backtest(
     signal_multiplier: float = 1.0,
     progress_cb=None,
 ) -> Dict[str, Any]:
-    from aiminer.core.evaluator_factory import build_evaluator, evaluation_config_from_mapping
+    from aiminer.core.evaluator_factory import (
+        build_evaluator,
+        evaluation_config_from_mapping,
+    )
     from aiminer.core.strategy import (
         StrategyBacktester,
         StrategyConfig,
@@ -528,7 +551,9 @@ def run_manual_strategy_backtest(
         template_name=template_name,
     )
 
-    def materialize_payload(base_payload: Dict[str, Any], *, cache_hit: bool) -> Dict[str, Any]:
+    def materialize_payload(
+        base_payload: Dict[str, Any], *, cache_hit: bool
+    ) -> Dict[str, Any]:
         payload = dict(base_payload)
         payload["strategy_id"] = strategy_id
         payload["cache_key"] = cache_key
@@ -567,7 +592,10 @@ def run_manual_strategy_backtest(
     if not ok:
         raise ValueError(f"Invalid expression: {msg}")
 
-    emit("init", f"Instantiating evaluator (backend={data_backend}, engine={cfg.engine})…")
+    emit(
+        "init",
+        f"Instantiating evaluator (backend={data_backend}, engine={cfg.engine})…",
+    )
     evaluator = build_evaluator(
         factor_expressions=[expression],
         config=evaluation_config_from_mapping(
@@ -587,7 +615,10 @@ def run_manual_strategy_backtest(
         test_end_date=cfg.end_date,
         daily_normalize=True,
     )
-    emit("fetch", f"Fetching {cfg.market} data {cfg.start_date} → {cfg.end_date}…")
+    emit(
+        "fetch",
+        f"Fetching {cfg.market} data {cfg.start_date} → {cfg.end_date}…",
+    )
     evaluator.fetch_data()
     evaluator.compute_factors()
 

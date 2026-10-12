@@ -1,8 +1,10 @@
 import os
 from typing import Dict
-from loguru import logger
-from langchain_openai import ChatOpenAI
+
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_openai import ChatOpenAI
+from loguru import logger
+
 from aiminer.core.settings import detect_llm_provider, provider_api_key
 
 
@@ -74,7 +76,9 @@ def get_llm(
             logger.warning("llm_base_url is ignored when llm_provider='codex'.")
         from aiminer.core.codex_llm import CodexChatModel
 
-        logger.info(f"Using LLM Provider: codex, Model: {model_name or 'gpt-5.4'}")
+        logger.info(
+            f"Using LLM Provider: codex, Model: {model_name or 'gpt-5.4'}"
+        )
         return CodexChatModel(
             model_name=model_name or "gpt-5.4",
             temperature=temperature,
@@ -85,7 +89,9 @@ def get_llm(
         api_key = "openai-compatible"
 
     if not api_key:
-        raise ValueError(f"API key for {provider} is not set in environment variables.")
+        raise ValueError(
+            f"API key for {provider} is not set in environment variables."
+        )
 
     # Defaults and Model Mapping
     if provider == "kimi":
@@ -93,7 +99,9 @@ def get_llm(
         if not model_name:
             model_name = "kimi-k2-turbo-preview"
     elif provider == "qwen":
-        resolved_base_url = base_url or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        resolved_base_url = (
+            base_url or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        )
         if not model_name:
             model_name = "qwen-max"
     elif provider == "glm":
@@ -101,7 +109,11 @@ def get_llm(
         if not model_name:
             model_name = "glm-5"
     elif provider == "openai":
-        resolved_base_url = base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+        resolved_base_url = (
+            base_url
+            or os.getenv("OPENAI_BASE_URL")
+            or "https://api.openai.com/v1"
+        )
         if not model_name:
             model_name = "gpt-4o"
     elif provider == "deepseek":
@@ -124,11 +136,15 @@ def get_llm(
         if not model_name:
             model_name = "llama-3.3-70b-versatile"
     elif provider == "ollama":
-        resolved_base_url = base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+        resolved_base_url = base_url or os.getenv(
+            "OLLAMA_BASE_URL", "http://localhost:11434/v1"
+        )
         if not model_name:
             model_name = "deepseek-r1:14b"
     elif provider == "vllm":
-        resolved_base_url = base_url or os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1")
+        resolved_base_url = base_url or os.getenv(
+            "VLLM_BASE_URL", "http://localhost:8000/v1"
+        )
         if not model_name:
             model_name = "meta-llama/Llama-3-70b-chat-hf"
     elif provider == "lmstudio":

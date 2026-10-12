@@ -1,17 +1,20 @@
 from __future__ import annotations
-from langgraph.graph import StateGraph, END
-from loguru import logger
+
 import time
-from aiminer.app_workflow.state import AlphaMinerState
-from aiminer.agents.idea_agent import IdeaAgent
-from aiminer.agents.factor_agent import FactorAgent
+
+from langgraph.graph import END, StateGraph
+from loguru import logger
+
 from aiminer.agents.eval_agent import EvalAgent
+from aiminer.agents.factor_agent import FactorAgent
+from aiminer.agents.idea_agent import IdeaAgent
 from aiminer.agents.strategy_agent import StrategyAgent
 from aiminer.agents.strategy_critic import (
     DEFAULT_MAX_REFINEMENT_ROUNDS,
     StrategyCritic,
     _improvement_satisfied,
 )
+from aiminer.app_workflow.state import AlphaMinerState
 from aiminer.core.agent_checkpoint import persist_agent_checkpoint
 from aiminer.core.constants import (
     DEFAULT_PATIENCE,
@@ -95,7 +98,9 @@ def route_after_strategy_eval(state: AlphaMinerState) -> str:
         return "wiki_update"
     round_idx = int(state.get("strategy_refinement_round", 0))
     max_rounds = int(
-        state.get("max_strategy_refinement_rounds", DEFAULT_MAX_REFINEMENT_ROUNDS)
+        state.get(
+            "max_strategy_refinement_rounds", DEFAULT_MAX_REFINEMENT_ROUNDS
+        )
     )
     if max_rounds <= 0:
         return "wiki_update"
@@ -133,10 +138,18 @@ def route_after_wiki(state: AlphaMinerState) -> str:
 
     # 1. Early Stopping: High IC achieved — only on real (non-simulated) data
     is_simulated = state.get("is_simulated", False)
-    if current_ic >= EXCEPTIONAL_IC_THRESHOLD and not is_simulated and not disable_early_stop:
+    if (
+        current_ic >= EXCEPTIONAL_IC_THRESHOLD
+        and not is_simulated
+        and not disable_early_stop
+    ):
         logger.success(f"[Early Stop] Exceptional IC reached: {current_ic:.4f}")
         return "end"
-    if current_ic >= EXCEPTIONAL_IC_THRESHOLD and not is_simulated and disable_early_stop:
+    if (
+        current_ic >= EXCEPTIONAL_IC_THRESHOLD
+        and not is_simulated
+        and disable_early_stop
+    ):
         logger.info(
             f"[Router] IC={current_ic:.4f} reached early-stop threshold, "
             "but disable_early_stop=True; continuing."
@@ -310,20 +323,34 @@ def build_workflow(
     workflow.add_node("strategy_agent", strategy_agent)
 
     def strategy_eval_node(state: AlphaMinerState):
-        from aiminer.core.evaluator_factory import build_evaluator, evaluation_config_from_mapping
-        from aiminer.core.strategy import StrategyBacktester, StrategyConfig, selection_score
+        from aiminer.core.evaluator_factory import (
+            build_evaluator,
+            evaluation_config_from_mapping,
+        )
+        from aiminer.core.strategy import (
+            StrategyBacktester,
+            StrategyConfig,
+            selection_score,
+        )
 
         candidates = state.get("strategy_candidates") or []
         if not candidates:
             return _merge_strategy_update_into_best_snapshot(
-                state, {"strategy_results": [], "strategy_failure_reason": "no_candidates"}
+                state,
+                {
+                    "strategy_results": [],
+                    "strategy_failure_reason": "no_candidates",
+                },
             )
 
         expression = state.get("code_expression")
         if not expression:
             return _merge_strategy_update_into_best_snapshot(
                 state,
-                {"strategy_results": [], "strategy_failure_reason": "missing_expression"},
+                {
+                    "strategy_results": [],
+                    "strategy_failure_reason": "missing_expression",
+                },
             )
 
         try:
@@ -331,13 +358,22 @@ def build_workflow(
                 factor_expressions=[expression],
                 config=evaluation_config_from_mapping(
                     {
-                        "data_backend": state.get("data_backend", state.get("evaluation_mode", "ricequant")),
-                        "evaluation_engine": state.get("evaluation_engine", "polars"),
+                        "data_backend": state.get(
+                            "data_backend",
+                            state.get("evaluation_mode", "ricequant"),
+                        ),
+                        "evaluation_engine": state.get(
+                            "evaluation_engine", "polars"
+                        ),
                         "market_mode": state.get("market_mode", "single"),
-                        "market_profile": state.get("market_profile", "cn_stock"),
+                        "market_profile": state.get(
+                            "market_profile", "cn_stock"
+                        ),
                         "market_profiles": state.get("market_profiles"),
                         "local_data_path": state.get("local_data_path"),
-                        "local_data_layout": state.get("local_data_layout", "auto"),
+                        "local_data_layout": state.get(
+                            "local_data_layout", "auto"
+                        ),
                         "market_start": state.get("market_analysis_start_date"),
                         "market_end": state.get("market_analysis_end_date"),
                     }
@@ -353,31 +389,60 @@ def build_workflow(
             # Align on the union of (date, ticker) pairs so unstack() yields
             # matching shapes regardless of per-source coverage gaps.
             common_idx = signal_series.index.union(label_series.index)
-            signal_df = signal_series.reindex(common_idx).unstack().sort_index().sort_index(axis=1)
-            label_df = label_series.reindex(common_idx).unstack().sort_index().sort_index(axis=1)
-            label_df = label_df.reindex(index=signal_df.index, columns=signal_df.columns)
+            signal_df = (
+                signal_series.reindex(common_idx)
+                .unstack()
+                .sort_index()
+                .sort_index(axis=1)
+            )
+            label_df = (
+                label_series.reindex(common_idx)
+                .unstack()
+                .sort_index()
+                .sort_index(axis=1)
+            )
+            label_df = label_df.reindex(
+                index=signal_df.index, columns=signal_df.columns
+            )
         except Exception as exc:
-            logger.warning(f"[StrategyEval] Failed to prepare signal/label panels: {exc}")
+            logger.warning(
+                f"[StrategyEval] Failed to prepare signal/label panels: {exc}"
+            )
             return _merge_strategy_update_into_best_snapshot(
                 state,
                 {
                     "strategy_results": [],
                     "strategy_failure_reason": "panel_construction_failed",
-                    "messages": [f"[StrategyEval] Skipped strategy stage: {exc}"],
+                    "messages": [
+                        f"[StrategyEval] Skipped strategy stage: {exc}"
+                    ],
                 },
             )
         if signal_df.empty or label_df.empty:
             return _merge_strategy_update_into_best_snapshot(
-                state, {"strategy_results": [], "strategy_failure_reason": "empty_panels"}
+                state,
+                {
+                    "strategy_results": [],
+                    "strategy_failure_reason": "empty_panels",
+                },
             )
 
-        factor_ic = float((state.get("backtest_metrics") or {}).get("information_coefficient", 0.0) or 0.0)
+        factor_ic = float(
+            (state.get("backtest_metrics") or {}).get(
+                "information_coefficient", 0.0
+            )
+            or 0.0
+        )
         results = []
         for idx, candidate in enumerate(candidates, start=1):
             cfg = candidate.get("strategy_config") or {}
             try:
-                refinement_round = int(state.get("strategy_refinement_round", 0))
-                backtester = StrategyBacktester(StrategyConfig.model_validate(cfg))
+                refinement_round = int(
+                    state.get("strategy_refinement_round", 0)
+                )
+                backtester = StrategyBacktester(
+                    StrategyConfig.model_validate(cfg)
+                )
                 # Refinement rounds get walk-forward to expose lucky-window
                 # overfits before the critic asks for another lap.
                 if refinement_round >= 1:
@@ -385,8 +450,12 @@ def build_workflow(
                 else:
                     result = backtester.run(signal_df, label_df)
                 metrics = result["metrics"]
-                wf_aggregate = (result.get("walk_forward") or {}).get("aggregate")
-                score = selection_score(metrics, factor_ic, walk_forward=wf_aggregate)
+                wf_aggregate = (result.get("walk_forward") or {}).get(
+                    "aggregate"
+                )
+                score = selection_score(
+                    metrics, factor_ic, walk_forward=wf_aggregate
+                )
                 payload = {
                     "strategy_id": f"{state.get('agent_id') or 'agent'}_r{refinement_round}_cand_{idx}",
                     "run_type": "strategy_backtest",
@@ -419,7 +488,11 @@ def build_workflow(
                 logger.warning(f"[StrategyEval] Candidate {idx} failed: {exc}")
         # Carry the previous round's best into the comparison pool so refinement
         # rounds only "win" when they strictly beat the incumbent.
-        prior_best = state.get("best_strategy_result") if int(state.get("strategy_refinement_round", 0)) > 0 else None
+        prior_best = (
+            state.get("best_strategy_result")
+            if int(state.get("strategy_refinement_round", 0)) > 0
+            else None
+        )
         comparison_pool = list(results)
         if prior_best:
             comparison_pool.append(prior_best)
@@ -432,19 +505,29 @@ def build_workflow(
                     "strategy_failure_reason": "all_candidates_failed",
                 },
             )
-        best = max(comparison_pool, key=lambda item: item.get("selection_score", float("-inf")))
+        best = max(
+            comparison_pool,
+            key=lambda item: item.get("selection_score", float("-inf")),
+        )
         best["is_primary"] = True
-        return _merge_strategy_update_into_best_snapshot(state, {
-            "strategy_results": results,
-            "best_strategy_result": best,
-            "best_strategy_config": best.get("strategy_config", {}),
-            "best_strategy_metrics": best.get("metrics", {}),
-            "best_strategy_id": best.get("strategy_id"),
-            "strategy_daily_returns": best.get("daily_returns", {}),
-            "selection_score": float(best.get("selection_score", 0.0) or 0.0),
-            "strategy_failure_reason": None,
-            "messages": [f"[StrategyEval] Selected {best.get('strategy_id')} score={best.get('selection_score', 0.0):.4f}"],
-        })
+        return _merge_strategy_update_into_best_snapshot(
+            state,
+            {
+                "strategy_results": results,
+                "best_strategy_result": best,
+                "best_strategy_config": best.get("strategy_config", {}),
+                "best_strategy_metrics": best.get("metrics", {}),
+                "best_strategy_id": best.get("strategy_id"),
+                "strategy_daily_returns": best.get("daily_returns", {}),
+                "selection_score": float(
+                    best.get("selection_score", 0.0) or 0.0
+                ),
+                "strategy_failure_reason": None,
+                "messages": [
+                    f"[StrategyEval] Selected {best.get('strategy_id')} score={best.get('selection_score', 0.0):.4f}"
+                ],
+            },
+        )
 
     workflow.add_node("strategy_eval", strategy_eval_node)
 
@@ -460,14 +543,18 @@ def build_workflow(
     # Wiki update node
     def wiki_update_node(state: AlphaMinerState):
         if _state_has_evaluation_failure(state):
-            logger.warning("[Workflow] Skipping Wiki update: evaluation failed.")
+            logger.warning(
+                "[Workflow] Skipping Wiki update: evaluation failed."
+            )
         else:
             logger.info("[Workflow] Updating LLM Wiki with results...")
             knowledge.update_wiki_after_eval(state)
         try:
             persist_agent_checkpoint(settings.db_path, state, settings=settings)
         except Exception as exc:
-            logger.warning(f"[Workflow] Failed to persist agent checkpoint: {exc}")
+            logger.warning(
+                f"[Workflow] Failed to persist agent checkpoint: {exc}"
+            )
         # Also refresh wiki context for next iteration retrieval
         query = f"Alpha factor ideas related to {state.get('role_prompt') or 'quantitative trading factors'}"
         return {"wiki_context": knowledge.wiki.retrieve(query)}
@@ -482,18 +569,34 @@ def build_workflow(
 
     # Add Edges and Routing
     workflow.add_conditional_edges(
-        "idea_agent", route_after_idea, {"factor_agent": "factor_agent", "end": END}
+        "idea_agent",
+        route_after_idea,
+        {"factor_agent": "factor_agent", "end": END},
     )
     workflow.add_conditional_edges(
-        "factor_agent", route_after_factor, {"eval_agent": "eval_agent", "end": END}
+        "factor_agent",
+        route_after_factor,
+        {"eval_agent": "eval_agent", "end": END},
     )
 
     # After eval, go to wiki_update
     workflow.add_conditional_edges(
-        "eval_agent", route_after_eval, {"strategy_agent": "strategy_agent", "wiki_update": "wiki_update", "end": END}
+        "eval_agent",
+        route_after_eval,
+        {
+            "strategy_agent": "strategy_agent",
+            "wiki_update": "wiki_update",
+            "end": END,
+        },
     )
     workflow.add_conditional_edges(
-        "strategy_agent", route_after_strategy, {"strategy_eval": "strategy_eval", "wiki_update": "wiki_update", "end": END}
+        "strategy_agent",
+        route_after_strategy,
+        {
+            "strategy_eval": "strategy_eval",
+            "wiki_update": "wiki_update",
+            "end": END,
+        },
     )
     workflow.add_conditional_edges(
         "strategy_eval",

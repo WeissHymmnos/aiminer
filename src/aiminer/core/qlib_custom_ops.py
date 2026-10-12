@@ -7,43 +7,42 @@ Registration happens after auto_init(), via register_custom_ops().
 
 from __future__ import annotations
 
-import numpy as np
-import pandas as pd
 from typing import List, Type
 
+import numpy as np
+import pandas as pd
 from qlib.data.ops import (
-    ExpressionOps,
-    Expression,
-    ElemOperator,
-    PairOperator,
-    Rolling,
-    Operators,
     Abs,
-    Sign,
-    Log,
-    Not,
-    Power,
     Add,
-    Sub,
-    Mul,
-    Div,
-    Greater,
-    Less,
-    Gt,
-    Ge,
-    Lt,
-    Le,
-    Eq,
-    Ne,
     And,
-    Or,
-    Max,
-    Min,
-    Med,
     Corr,
     Cov,
+    Div,
+    ElemOperator,
+    Eq,
+    Expression,
+    ExpressionOps,
+    Ge,
+    Greater,
+    Gt,
+    Le,
+    Less,
+    Log,
+    Lt,
+    Max,
+    Med,
+    Min,
+    Mul,
+    Ne,
+    Not,
+    Operators,
+    Or,
+    PairOperator,
+    Power,
+    Rolling,
+    Sign,
+    Sub,
 )
-
 
 # ---------------------------------------------------------------------------
 # Unary math operators
@@ -183,7 +182,9 @@ class Ts_Percentile(Rolling):
         self.p = p
 
     def __str__(self):
-        return "{}({},{},{})".format(type(self).__name__, self.feature, self.N, self.p)
+        return "{}({},{},{})".format(
+            type(self).__name__, self.feature, self.N, self.p
+        )
 
     def _load_internal(self, instrument, start_index, end_index, *args):
         series = self.feature.load(instrument, start_index, end_index, *args)
@@ -310,7 +311,9 @@ class Clip(PairOperator):
         return 0, 0
 
     def _load_internal(self, instrument, start_index, end_index, *args):
-        series = self.feature_left.load(instrument, start_index, end_index, *args)
+        series = self.feature_left.load(
+            instrument, start_index, end_index, *args
+        )
         return series.clip(lower=self.lower, upper=self.upper)
 
 

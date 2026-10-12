@@ -1,10 +1,12 @@
 import re
-from aiminer.core.rag import RAGModule
-from aiminer.core.wiki import LLMWiki
-from aiminer.core.template_renderer import TemplateRenderer
-from aiminer.core.settings import AiminerSettings, build_settings
 from typing import Any, Dict, List, Optional
+
 from loguru import logger
+
+from aiminer.core.rag import RAGModule
+from aiminer.core.settings import AiminerSettings, build_settings
+from aiminer.core.template_renderer import TemplateRenderer
+from aiminer.core.wiki import LLMWiki
 
 
 class HybridKnowledge:
@@ -37,7 +39,8 @@ class HybridKnowledge:
             settings=self.settings,
         )
         self.wiki = LLMWiki(
-            embedding_provider=self.settings.embedding_provider, settings=self.settings
+            embedding_provider=self.settings.embedding_provider,
+            settings=self.settings,
         )
         self.templates = TemplateRenderer()
         self.llm_provider = self.settings.llm_provider
@@ -95,7 +98,9 @@ class HybridKnowledge:
     ) -> List[Dict[str, Any]]:
         """Passthrough for callers that want full wiki pages instead of
         the truncated `retrieve()` format — used by the HTTP search API."""
-        return self.wiki.query_pages(query, top_k=top_k, type_filter=type_filter)
+        return self.wiki.query_pages(
+            query, top_k=top_k, type_filter=type_filter
+        )
 
     def lint_wiki(self, stale_days: int = 30) -> Dict[str, Any]:
         """Trigger a wiki lint pass and return the structured report."""
@@ -130,7 +135,9 @@ class HybridKnowledge:
         try:
             # Create a slug from hypothesis name, include iteration to avoid collisions
             raw_name = state.get("hypothesis_name", "Unnamed_Factor")
-            base_slug = "".join([c if c.isalnum() else "_" for c in raw_name]).lower()
+            base_slug = "".join(
+                [c if c.isalnum() else "_" for c in raw_name]
+            ).lower()
             iteration = state.get("iteration", 0)
             slug = (
                 f"{base_slug}_iter{iteration}"
@@ -193,7 +200,9 @@ class HybridKnowledge:
                     "type": "experiment_card",
                     "node_type": "factor_experiment",
                     "status": "active" if is_effective else "failed",
-                    "evidence_level": "simulated" if is_simulated else ("validated" if is_effective else "theory"),
+                    "evidence_level": "simulated"
+                    if is_simulated
+                    else ("validated" if is_effective else "theory"),
                     "summary": summary,
                     "tags": tags,
                     "parents": ["stat_arb_family"],
@@ -201,8 +210,13 @@ class HybridKnowledge:
                         "price_volume_data_source",
                         "cross_sectional_long_short_execution",
                     ],
-                    "risk_flags": ["simulation_only_risk"] if is_simulated else [],
-                    "metrics_ref": ["information_coefficient_metric", "rank_ic_metric"],
+                    "risk_flags": ["simulation_only_risk"]
+                    if is_simulated
+                    else [],
+                    "metrics_ref": [
+                        "information_coefficient_metric",
+                        "rank_ic_metric",
+                    ],
                     "related": related,
                     "ic": ic,
                     "rank_ic": rank_ic,
@@ -212,7 +226,14 @@ class HybridKnowledge:
                 },
             )
             best_strategy = state.get("best_strategy_result") or {}
-            if best_strategy and best_strategy.get("strategy_id") and (best_strategy.get("metrics") or best_strategy.get("strategy_config")):
+            if (
+                best_strategy
+                and best_strategy.get("strategy_id")
+                and (
+                    best_strategy.get("metrics")
+                    or best_strategy.get("strategy_config")
+                )
+            ):
                 strategy_slug = f"{slug}_strategy"
                 strategy_metrics = best_strategy.get("metrics") or {}
                 strategy_summary = (

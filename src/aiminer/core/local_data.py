@@ -6,7 +6,6 @@ from typing import Iterable
 
 import pandas as pd
 
-
 DATA_FILE_SUFFIXES = (".csv", ".parquet", ".pq")
 PRICE_COLUMNS = ("open", "high", "low", "close")
 
@@ -26,7 +25,9 @@ _COLUMN_ALIASES = {
 }
 
 _INSTRUMENT_COLUMN_NAMES = {
-    name for name, canonical in _COLUMN_ALIASES.items() if canonical == "instrument"
+    name
+    for name, canonical in _COLUMN_ALIASES.items()
+    if canonical == "instrument"
 } | {"instrument"}
 
 
@@ -66,16 +67,18 @@ def ohlcv_quality_report(df: pd.DataFrame) -> dict[str, int]:
     price = df[list(PRICE_COLUMNS)].apply(pd.to_numeric, errors="coerce")
     missing_ohlc = price.isna().any(axis=1)
     non_positive_ohlc = price.le(0).any(axis=1)
-    bad_high_low = price["high"].lt(price[["open", "low", "close"]].max(axis=1)) | price[
-        "low"
-    ].gt(price[["open", "high", "close"]].min(axis=1))
+    bad_high_low = price["high"].lt(
+        price[["open", "low", "close"]].max(axis=1)
+    ) | price["low"].gt(price[["open", "high", "close"]].min(axis=1))
     if "volume" in df.columns:
         volume = pd.to_numeric(df["volume"], errors="coerce")
         negative_volume = volume.lt(0) | volume.isna()
     else:
         negative_volume = pd.Series(True, index=df.index)
 
-    invalid_rows = missing_ohlc | non_positive_ohlc | bad_high_low | negative_volume
+    invalid_rows = (
+        missing_ohlc | non_positive_ohlc | bad_high_low | negative_volume
+    )
     return {
         "rows": int(len(df)),
         "invalid_rows": int(invalid_rows.sum()),
@@ -86,7 +89,9 @@ def ohlcv_quality_report(df: pd.DataFrame) -> dict[str, int]:
     }
 
 
-def validate_ohlcv_quality(df: pd.DataFrame, *, source: str = "local data") -> None:
+def validate_ohlcv_quality(
+    df: pd.DataFrame, *, source: str = "local data"
+) -> None:
     report = ohlcv_quality_report(df)
     if report["invalid_rows"] == 0:
         return
@@ -112,9 +117,13 @@ def _ensure_schema(
         df["instrument"] = instrument_override
 
     if "datetime" not in df.columns:
-        raise ValueError("Local data must contain a datetime/date/timestamp column.")
+        raise ValueError(
+            "Local data must contain a datetime/date/timestamp column."
+        )
     if "instrument" not in df.columns:
-        raise ValueError("Local data must contain an instrument/ticker/symbol column.")
+        raise ValueError(
+            "Local data must contain an instrument/ticker/symbol column."
+        )
 
     required_price_cols = {"open", "high", "low", "close", "volume"}
     missing = sorted(required_price_cols - set(df.columns))
@@ -144,9 +153,19 @@ def _ensure_schema(
         else:
             df["vwap"] = df["close"]
     if "total_turnover" not in df.columns:
-        df["total_turnover"] = df["vwap"].fillna(df["close"]) * df["volume"].fillna(0.0)
+        df["total_turnover"] = df["vwap"].fillna(df["close"]) * df[
+            "volume"
+        ].fillna(0.0)
 
-    for col in ("open", "high", "low", "close", "volume", "vwap", "total_turnover"):
+    for col in (
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "vwap",
+        "total_turnover",
+    ):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     validate_ohlcv_quality(df, source=f"local data ({market_profile})")
@@ -189,7 +208,9 @@ def infer_layout(path: Path) -> str:
     if not files:
         raise FileNotFoundError(f"No CSV/Parquet files found under {path}")
     if len(files) == 1:
-        return "panel" if _has_instrument_column(files[0]) else "instrument_files"
+        return (
+            "panel" if _has_instrument_column(files[0]) else "instrument_files"
+        )
 
     has_instrument = [_has_instrument_column(file_path) for file_path in files]
     if all(has_instrument):
@@ -203,7 +224,9 @@ def infer_layout(path: Path) -> str:
     )
 
 
-def resolve_local_profile_path(base_path: str | os.PathLike[str], market_profile: str) -> Path:
+def resolve_local_profile_path(
+    base_path: str | os.PathLike[str], market_profile: str
+) -> Path:
     root = Path(base_path).expanduser()
     if root.is_dir():
         profile_dir = root / market_profile
@@ -236,7 +259,9 @@ def load_local_ohlcv(
         if source.is_dir():
             files = list(_iter_data_files(source))
             if not files:
-                raise FileNotFoundError(f"No local data files found in {source}")
+                raise FileNotFoundError(
+                    f"No local data files found in {source}"
+                )
             for file_path in files:
                 try:
                     frames.append(
@@ -261,7 +286,9 @@ def load_local_ohlcv(
             )
     else:
         if not source.is_dir():
-            raise ValueError("instrument_files layout requires a directory input.")
+            raise ValueError(
+                "instrument_files layout requires a directory input."
+            )
         files = list(_iter_data_files(source))
         if not files:
             raise FileNotFoundError(f"No instrument files found in {source}")

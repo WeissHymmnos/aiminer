@@ -1,15 +1,18 @@
 import unittest
-import pandas as pd
-import numpy as np
 
+import numpy as np
+import pandas as pd
 import pytest
 
-pl = pytest.importorskip("polars", reason="Polars tests require the optional native engine stack")
-pytest.importorskip("rqdatac", reason="RiceQuant evaluator imports the optional rqdatac client")
+pl = pytest.importorskip(
+    "polars", reason="Polars tests require the optional native engine stack"
+)
+pytest.importorskip(
+    "rqdatac", reason="RiceQuant evaluator imports the optional rqdatac client"
+)
 
-from aiminer.core.alphaeval.rq_eval import RiceQuantEval
 from aiminer.core.alphaeval.polars_engine import PolarsEngine
-
+from aiminer.core.alphaeval.rq_eval import RiceQuantEval
 
 pytestmark = pytest.mark.native
 
@@ -43,14 +46,18 @@ class TestPolarsRefactor(unittest.TestCase):
         res = pl_df.with_columns(factor=expr)
 
         # Verify A's rolling mean
-        a_data = res.filter(pl.col("instrument") == "000001.XSHE").sort("datetime")
+        a_data = res.filter(pl.col("instrument") == "000001.XSHE").sort(
+            "datetime"
+        )
         close_vals = a_data["close"].to_list()
         factor_vals = a_data["factor"].to_list()
 
         self.assertAlmostEqual(
             factor_vals[1], (close_vals[0] + close_vals[1]) / 2, places=5
         )
-        self.assertTrue(factor_vals[0] is None or np.isnan(float(factor_vals[0])))
+        self.assertTrue(
+            factor_vals[0] is None or np.isnan(float(factor_vals[0]))
+        )
 
     def test_ricequant_eval_integration(self):
         # We need to bypass the auth in RiceQuantEval for testing

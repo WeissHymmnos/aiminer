@@ -1,9 +1,9 @@
 import json
 import sqlite3
 
-import aiminer.manager as manager
 from aiminer.core.agent_checkpoint import persist_agent_checkpoint
 from aiminer.core.strategy import selection_score
+import aiminer.manager as manager
 
 
 class _DummySummaryAgent:
@@ -102,7 +102,9 @@ def test_run_swarm_caps_parallel_workers(monkeypatch, tmp_path):
         data_backend="local",
         local_data_path=str(tmp_path),
     )
-    monkeypatch.setattr(portfolio_manager, "evaluate_and_combine", lambda results: [])
+    monkeypatch.setattr(
+        portfolio_manager, "evaluate_and_combine", lambda results: []
+    )
     monkeypatch.setattr(portfolio_manager, "evaluate_strategies", lambda: [])
 
     portfolio_manager.run_swarm(parallel=True)
@@ -270,7 +272,9 @@ def test_run_swarm_timeout_recovers_agent_checkpoints(monkeypatch, tmp_path):
     assert captured["results"][0]["perf_metric"] == 0.031
 
 
-def test_run_swarm_process_pool_failure_recovers_agent_checkpoints(monkeypatch, tmp_path):
+def test_run_swarm_process_pool_failure_recovers_agent_checkpoints(
+    monkeypatch, tmp_path
+):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(manager, "SummaryAgent", _DummySummaryAgent)
 
@@ -335,7 +339,9 @@ def test_run_swarm_process_pool_failure_recovers_agent_checkpoints(monkeypatch, 
     assert captured["results"][0]["perf_metric"] == 0.041
 
 
-def test_checkpoint_recovery_replaces_errored_final_result(monkeypatch, tmp_path):
+def test_checkpoint_recovery_replaces_errored_final_result(
+    monkeypatch, tmp_path
+):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(manager, "SummaryAgent", _DummySummaryAgent)
 
@@ -385,10 +391,14 @@ def test_checkpoint_recovery_replaces_errored_final_result(monkeypatch, tmp_path
     assert recovered[0]["perf_metric"] == 0.0278
 
 
-def test_run_swarm_crossover_uses_dedicated_iteration_cap(monkeypatch, tmp_path):
+def test_run_swarm_crossover_uses_dedicated_iteration_cap(
+    monkeypatch, tmp_path
+):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(manager, "SummaryAgent", _DummySummaryAgent)
-    monkeypatch.setattr(manager, "PortfolioAgent", lambda *args, **kwargs: object())
+    monkeypatch.setattr(
+        manager, "PortfolioAgent", lambda *args, **kwargs: object()
+    )
     calls = []
 
     def _fake_run_agent_task(kwargs):
@@ -418,8 +428,8 @@ def test_run_swarm_crossover_uses_dedicated_iteration_cap(monkeypatch, tmp_path)
         data_backend="local",
         local_data_path=str(tmp_path),
     )
-    portfolio_manager.summary_agent.generate_markdown_report = (
-        lambda factor: "report.md"
+    portfolio_manager.summary_agent.generate_markdown_report = lambda factor: (
+        "report.md"
     )
 
     def _seed_alpha_pool(_results):
@@ -449,12 +459,16 @@ def test_run_swarm_crossover_uses_dedicated_iteration_cap(monkeypatch, tmp_path)
         ]
         return portfolio_manager.alpha_pool
 
-    monkeypatch.setattr(portfolio_manager, "evaluate_and_combine", _seed_alpha_pool)
+    monkeypatch.setattr(
+        portfolio_manager, "evaluate_and_combine", _seed_alpha_pool
+    )
     monkeypatch.setattr(portfolio_manager, "evaluate_strategies", lambda: [])
 
     portfolio_manager.run_swarm(parallel=False)
 
-    main_calls = [call for call in calls if call.get("agent_id") != "agent_crossover"]
+    main_calls = [
+        call for call in calls if call.get("agent_id") != "agent_crossover"
+    ]
     crossover_calls = [
         call for call in calls if call.get("agent_id") == "agent_crossover"
     ]
@@ -463,7 +477,9 @@ def test_run_swarm_crossover_uses_dedicated_iteration_cap(monkeypatch, tmp_path)
     assert crossover_calls[0]["max_iterations"] == 1
 
 
-def test_standalone_genetic_crossover_persists_selected_parents(monkeypatch, tmp_path):
+def test_standalone_genetic_crossover_persists_selected_parents(
+    monkeypatch, tmp_path
+):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(manager, "SummaryAgent", _DummySummaryAgent)
     calls = []
@@ -492,7 +508,9 @@ def test_standalone_genetic_crossover_persists_selected_parents(monkeypatch, tmp
         local_data_path=str(tmp_path),
         crossover_iterations=3,
     )
-    portfolio_manager.summary_agent.generate_markdown_report = lambda factor: "report.md"
+    portfolio_manager.summary_agent.generate_markdown_report = lambda factor: (
+        "report.md"
+    )
     parent_factors = [
         {
             "id": "alpha_a",
@@ -595,7 +613,9 @@ def test_evaluate_and_combine_rejects_simulated_factors(monkeypatch, tmp_path):
     assert alpha_pool == []
 
 
-def test_alpha_pool_json_backup_mirrors_sqlite_source_of_truth(monkeypatch, tmp_path):
+def test_alpha_pool_json_backup_mirrors_sqlite_source_of_truth(
+    monkeypatch, tmp_path
+):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(manager, "SummaryAgent", _DummySummaryAgent)
 
@@ -654,7 +674,9 @@ def test_alpha_pool_json_backup_mirrors_sqlite_source_of_truth(monkeypatch, tmp_
     assert all("metrics" in item and "returns" in item for item in payload)
 
 
-def test_evaluate_and_combine_accepts_negative_ic_by_inverting_signal(monkeypatch, tmp_path):
+def test_evaluate_and_combine_accepts_negative_ic_by_inverting_signal(
+    monkeypatch, tmp_path
+):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(manager, "SummaryAgent", _DummySummaryAgent)
 
@@ -688,7 +710,9 @@ def test_evaluate_and_combine_accepts_negative_ic_by_inverting_signal(monkeypatc
     assert all(value == -0.01 for value in factor["returns"].values())
 
 
-def test_evaluate_strategies_reuses_existing_agent_results(monkeypatch, tmp_path):
+def test_evaluate_strategies_reuses_existing_agent_results(
+    monkeypatch, tmp_path
+):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(manager, "SummaryAgent", _DummySummaryAgent)
 
@@ -707,7 +731,11 @@ def test_evaluate_strategies_reuses_existing_agent_results(monkeypatch, tmp_path
                 {
                     "strategy_id": "s_low",
                     "strategy_config": {"label": "low"},
-                    "metrics": {"annualized_return": 0.08, "sharpe": 0.7, "max_drawdown": -0.12},
+                    "metrics": {
+                        "annualized_return": 0.08,
+                        "sharpe": 0.7,
+                        "max_drawdown": -0.12,
+                    },
                     "daily_returns": {"2024-01-01": 0.01},
                     "trade_stats": {},
                     "selection_score": -99.0,
@@ -715,7 +743,11 @@ def test_evaluate_strategies_reuses_existing_agent_results(monkeypatch, tmp_path
                 {
                     "strategy_id": "s_high",
                     "strategy_config": {"label": "high"},
-                    "metrics": {"annualized_return": 0.18, "sharpe": 1.4, "max_drawdown": -0.08},
+                    "metrics": {
+                        "annualized_return": 0.18,
+                        "sharpe": 1.4,
+                        "max_drawdown": -0.08,
+                    },
                     "daily_returns": {"2024-01-01": 0.02},
                     "trade_stats": {},
                     "selection_score": -99.0,
@@ -729,15 +761,25 @@ def test_evaluate_strategies_reuses_existing_agent_results(monkeypatch, tmp_path
     assert len(results) == 2
     best = portfolio_manager.alpha_pool[0]["best_strategy_result"]
     assert best["raw_strategy_id"] == "s_high"
-    assert portfolio_manager.alpha_pool[0]["best_strategy_id"] == best["strategy_id"]
-    assert portfolio_manager.alpha_pool[0]["selection_score"] == selection_score(
+    assert (
+        portfolio_manager.alpha_pool[0]["best_strategy_id"]
+        == best["strategy_id"]
+    )
+    assert portfolio_manager.alpha_pool[0][
+        "selection_score"
+    ] == selection_score(
         {"annualized_return": 0.18, "sharpe": 1.4, "max_drawdown": -0.08},
         factor_ic=0.08,
     )
-    assert any(item["raw_strategy_id"] == "s_high" and item["is_primary"] for item in results)
+    assert any(
+        item["raw_strategy_id"] == "s_high" and item["is_primary"]
+        for item in results
+    )
 
 
-def test_evaluate_strategies_consumes_agent_candidates_before_fallback(monkeypatch, tmp_path):
+def test_evaluate_strategies_consumes_agent_candidates_before_fallback(
+    monkeypatch, tmp_path
+):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(manager, "SummaryAgent", _DummySummaryAgent)
 
@@ -753,7 +795,11 @@ def test_evaluate_strategies_consumes_agent_candidates_before_fallback(monkeypat
             "status": "ok",
             "expression": expression,
             "strategy_config": strategy_config,
-            "metrics": {"annualized_return": 0.12, "sharpe": 1.1, "max_drawdown": -0.09},
+            "metrics": {
+                "annualized_return": 0.12,
+                "sharpe": 1.1,
+                "max_drawdown": -0.09,
+            },
             "daily_returns": {"2024-01-01": 0.01},
             "positions": {},
             "trade_stats": {},
@@ -766,7 +812,9 @@ def test_evaluate_strategies_consumes_agent_candidates_before_fallback(monkeypat
 
     import aiminer.core.manual_runner as manual_runner
 
-    monkeypatch.setattr(manual_runner, "run_manual_strategy_backtest", _fake_backtest)
+    monkeypatch.setattr(
+        manual_runner, "run_manual_strategy_backtest", _fake_backtest
+    )
 
     portfolio_manager = manager.PortfolioManager(roles=[])
     portfolio_manager.alpha_pool = [
@@ -817,8 +865,13 @@ def test_evaluate_strategies_consumes_agent_candidates_before_fallback(monkeypat
     assert results[0]["rationale"] == "Agent-selected execution."
     best = portfolio_manager.alpha_pool[0]["best_strategy_result"]
     assert best["raw_strategy_id"] == "strategy_candidate"
-    assert portfolio_manager.alpha_pool[0]["best_strategy_id"] == best["strategy_id"]
-    assert portfolio_manager.alpha_pool[0]["selection_score"] == selection_score(
+    assert (
+        portfolio_manager.alpha_pool[0]["best_strategy_id"]
+        == best["strategy_id"]
+    )
+    assert portfolio_manager.alpha_pool[0][
+        "selection_score"
+    ] == selection_score(
         {"annualized_return": 0.12, "sharpe": 1.1, "max_drawdown": -0.09},
         factor_ic=0.05,
     )
@@ -847,7 +900,11 @@ def test_evaluate_strategies_caps_parallel_workers(monkeypatch, tmp_path):
             "status": "ok",
             "expression": expression,
             "strategy_config": strategy_config,
-            "metrics": {"annualized_return": 0.11, "sharpe": 1.0, "max_drawdown": -0.1},
+            "metrics": {
+                "annualized_return": 0.11,
+                "sharpe": 1.0,
+                "max_drawdown": -0.1,
+            },
             "daily_returns": {"2024-01-01": 0.01},
             "positions": {},
             "trade_stats": {},
@@ -860,7 +917,9 @@ def test_evaluate_strategies_caps_parallel_workers(monkeypatch, tmp_path):
 
     import aiminer.core.manual_runner as manual_runner
 
-    monkeypatch.setattr(manual_runner, "run_manual_strategy_backtest", _fake_backtest)
+    monkeypatch.setattr(
+        manual_runner, "run_manual_strategy_backtest", _fake_backtest
+    )
 
     portfolio_manager = manager.PortfolioManager(
         roles=[],
@@ -911,7 +970,9 @@ def test_evaluate_strategies_caps_parallel_workers(monkeypatch, tmp_path):
     assert len(results) == 3
 
 
-def test_evaluate_strategies_dedupes_correlated_strategy_returns(monkeypatch, tmp_path):
+def test_evaluate_strategies_dedupes_correlated_strategy_returns(
+    monkeypatch, tmp_path
+):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(manager, "SummaryAgent", _DummySummaryAgent)
 
@@ -935,7 +996,11 @@ def test_evaluate_strategies_dedupes_correlated_strategy_returns(monkeypatch, tm
                 {
                     "strategy_id": "raw_keep",
                     "strategy_config": {"label": "keep"},
-                    "metrics": {"annualized_return": 0.20, "sharpe": 1.5, "max_drawdown": -0.05},
+                    "metrics": {
+                        "annualized_return": 0.20,
+                        "sharpe": 1.5,
+                        "max_drawdown": -0.05,
+                    },
                     "daily_returns": daily_returns,
                     "trade_stats": {},
                 }
@@ -954,7 +1019,11 @@ def test_evaluate_strategies_dedupes_correlated_strategy_returns(monkeypatch, tm
                 {
                     "strategy_id": "raw_drop",
                     "strategy_config": {"label": "drop"},
-                    "metrics": {"annualized_return": 0.10, "sharpe": 0.8, "max_drawdown": -0.08},
+                    "metrics": {
+                        "annualized_return": 0.10,
+                        "sharpe": 0.8,
+                        "max_drawdown": -0.08,
+                    },
                     "daily_returns": daily_returns,
                     "trade_stats": {},
                 }
@@ -964,6 +1033,8 @@ def test_evaluate_strategies_dedupes_correlated_strategy_returns(monkeypatch, tm
 
     results = portfolio_manager.evaluate_strategies()
 
-    assert [factor["id"] for factor in portfolio_manager.alpha_pool] == ["alpha_keep"]
+    assert [factor["id"] for factor in portfolio_manager.alpha_pool] == [
+        "alpha_keep"
+    ]
     assert len(results) == 1
     assert results[0]["source_factor_id"] == "alpha_keep"

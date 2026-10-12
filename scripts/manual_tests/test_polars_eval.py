@@ -35,6 +35,8 @@ def Rank(e):
 # Let's test if we can do nested over():
 # e.g., Rank(Mean(close, 2)) -> pl.col('close').rolling_mean(2).over('instrument').rank().over('datetime')
 
-expr = pl.col("close").rolling_mean(2).over("instrument").rank().over("datetime")
+expr = (
+    pl.col("close").rolling_mean(2).over("instrument").rank().over("datetime")
+)
 res = df.with_columns(factor=expr)
 print(res)

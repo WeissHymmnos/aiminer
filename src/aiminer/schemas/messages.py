@@ -1,5 +1,6 @@
 import math
 from typing import Any, Dict
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -69,16 +70,22 @@ def _is_numeric_dict_value(value) -> bool:
 class StrategyCandidateOutput(BaseModel):
     """Structured output for a single strategy proposal."""
 
-    template_name: str = Field(description="Closest built-in template name or generated strategy family label.")
+    template_name: str = Field(
+        description="Closest built-in template name or generated strategy family label."
+    )
     strategy_mode: str = Field(description="cross_sectional or time_series")
     direction: str = Field(description="long_only, long_short, or long_flat")
-    selection_rule: str | Dict[str, Any] = Field(description="top_n, bottom_n, top_bottom_n, or threshold")
+    selection_rule: str | Dict[str, Any] = Field(
+        description="top_n, bottom_n, top_bottom_n, or threshold"
+    )
     rebalance_freq: str = Field(description="daily, weekly, or monthly")
     thresholds: Dict[str, float] = Field(default_factory=dict)
     counts: Dict[str, int | float] = Field(default_factory=dict)
     holding_constraints: Dict[str, float | int] = Field(default_factory=dict)
     cost_model: Dict[str, float] = Field(default_factory=dict)
-    rationale: str = Field(description="Why this execution style matches the factor.")
+    rationale: str = Field(
+        description="Why this execution style matches the factor."
+    )
 
     @field_validator(
         "template_name",
@@ -122,7 +129,9 @@ class StrategyCandidateOutput(BaseModel):
 class StrategyProposalBatchOutput(BaseModel):
     """Structured output for strategy candidate generation."""
 
-    execution_style: str = Field(description="Short execution summary, e.g. cs_long_short or ts_trend.")
+    execution_style: str = Field(
+        description="Short execution summary, e.g. cs_long_short or ts_trend."
+    )
     candidates: list[StrategyCandidateOutput] = Field(default_factory=list)
 
 

@@ -2,30 +2,46 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
+from datetime import datetime
 import fcntl
 import json
 import multiprocessing
 import os
+from pathlib import Path
 import queue as queue_module
 import re
 import sqlite3
 import threading
 import time
 import traceback
-from collections import deque
-from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import psutil
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
+import psutil
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from aiminer.core import manual_runner  # noqa: F401  (import-for-side-effect)
 from aiminer.core.runtime import new_run_id
@@ -60,17 +76,30 @@ FRONTEND_DIST_CANDIDATES = (
 MAX_CONCURRENT_SWARMS = int(os.getenv("AIMINER_MAX_CONCURRENT_SWARMS", "2"))
 SWARM_QUEUE_MAXSIZE = int(os.getenv("AIMINER_SWARM_QUEUE_MAXSIZE", "2000"))
 STALE_STARTING_SECONDS = int(os.getenv("AIMINER_STALE_STARTING_SECONDS", "120"))
-SWARM_RUN_TIMEOUT_SECONDS = int(os.getenv("AIMINER_SWARM_RUN_TIMEOUT_SECONDS", "3600"))
-SWARM_RUN_HEARTBEAT_SECONDS = int(os.getenv("AIMINER_SWARM_RUN_HEARTBEAT_SECONDS", "15"))
-MANUAL_BACKTEST_TIMEOUT_SECONDS = int(os.getenv("AIMINER_MANUAL_BACKTEST_TIMEOUT_SECONDS", "600"))
-STRATEGY_BACKTEST_TIMEOUT_SECONDS = int(os.getenv("AIMINER_STRATEGY_BACKTEST_TIMEOUT_SECONDS", "900"))
-CROSSOVER_TIMEOUT_SECONDS = int(os.getenv("AIMINER_CROSSOVER_TIMEOUT_SECONDS", "1200"))
+SWARM_RUN_TIMEOUT_SECONDS = int(
+    os.getenv("AIMINER_SWARM_RUN_TIMEOUT_SECONDS", "3600")
+)
+SWARM_RUN_HEARTBEAT_SECONDS = int(
+    os.getenv("AIMINER_SWARM_RUN_HEARTBEAT_SECONDS", "15")
+)
+MANUAL_BACKTEST_TIMEOUT_SECONDS = int(
+    os.getenv("AIMINER_MANUAL_BACKTEST_TIMEOUT_SECONDS", "600")
+)
+STRATEGY_BACKTEST_TIMEOUT_SECONDS = int(
+    os.getenv("AIMINER_STRATEGY_BACKTEST_TIMEOUT_SECONDS", "900")
+)
+CROSSOVER_TIMEOUT_SECONDS = int(
+    os.getenv("AIMINER_CROSSOVER_TIMEOUT_SECONDS", "1200")
+)
 LOG_PAGE_LIMIT_DEFAULT = 100
 LOG_PAGE_LIMIT_MAX = 500
 LIST_PAGE_LIMIT_DEFAULT = 50
 LIST_PAGE_LIMIT_MAX = 200
 AUTH_TOKEN = os.getenv("AIMINER_AUTH_TOKEN")
-AUTH_DISABLED = os.getenv("AIMINER_DISABLE_AUTH", "").lower() in {"1", "true", "yes"} or not AUTH_TOKEN
+AUTH_DISABLED = (
+    os.getenv("AIMINER_DISABLE_AUTH", "").lower() in {"1", "true", "yes"}
+    or not AUTH_TOKEN
+)
 ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.getenv(
@@ -238,7 +267,8 @@ CREATE TABLE IF NOT EXISTS strategy_backtests (
 def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
     try:
         return {
-            str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+            str(row[1])
+            for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
         }
     except sqlite3.OperationalError as exc:
         logger.warning(f"[schema] failed to inspect {table}: {exc}")
@@ -270,14 +300,20 @@ def _ensure_optional_columns(
 def _ensure_alpha_pool_schema(conn: sqlite3.Connection) -> None:
     conn.execute(_ALPHA_POOL_TABLE_SQL)
     _ensure_optional_columns(conn, "alpha_pool", _ALPHA_POOL_OPTIONAL_COLUMNS)
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_alpha_timestamp ON alpha_pool(timestamp)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_alpha_timestamp ON alpha_pool(timestamp)"
+    )
     if "run_id" in _table_columns(conn, "alpha_pool"):
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_alpha_run_id ON alpha_pool(run_id)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_alpha_run_id ON alpha_pool(run_id)"
+        )
 
 
 def _ensure_strategy_backtests_schema(conn: sqlite3.Connection) -> None:
     conn.execute(_STRATEGY_BACKTESTS_TABLE_SQL)
-    _ensure_optional_columns(conn, "strategy_backtests", _STRATEGY_BACKTEST_OPTIONAL_COLUMNS)
+    _ensure_optional_columns(
+        conn, "strategy_backtests", _STRATEGY_BACKTEST_OPTIONAL_COLUMNS
+    )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_strategy_backtests_ran_at ON strategy_backtests(ran_at)"
     )
@@ -311,10 +347,18 @@ def _list_limit(value: int, maximum: int) -> int:
     return max(1, min(value, maximum))
 
 
-def _empty_page(offset: int, limit: int, maximum: int = LIST_PAGE_LIMIT_MAX) -> Dict[str, Any]:
+def _empty_page(
+    offset: int, limit: int, maximum: int = LIST_PAGE_LIMIT_MAX
+) -> Dict[str, Any]:
     start = max(0, offset)
     page_limit = _list_limit(limit, maximum)
-    return {"items": [], "total": 0, "offset": start, "limit": page_limit, "next_offset": start}
+    return {
+        "items": [],
+        "total": 0,
+        "offset": start,
+        "limit": page_limit,
+        "next_offset": start,
+    }
 
 
 # --- Run Manifest & Process Control ---
@@ -446,7 +490,9 @@ def _count_rows(table: str, column: str, value: str) -> int:
             ).fetchone()
             return int(row["c"]) if row else 0
     except sqlite3.OperationalError as exc:
-        logger.warning(f"[counts] failed to count {table}.{column} for {value}: {exc}")
+        logger.warning(
+            f"[counts] failed to count {table}.{column} for {value}: {exc}"
+        )
         return 0
 
 
@@ -458,10 +504,15 @@ def _factor_summary_for_run(run_id: str) -> Dict[str, int]:
 
 
 def _readiness_payload() -> Dict[str, Any]:
-    from aiminer.core.rag import chroma_sqlite_summary, resolve_embedding_model_tag
+    from aiminer.core.rag import (
+        chroma_sqlite_summary,
+        resolve_embedding_model_tag,
+    )
 
     model_tag = resolve_embedding_model_tag(SETTINGS.embedding_provider)
-    rag = chroma_sqlite_summary(str(SETTINGS.data_path / "chroma_db"), model_tag)
+    rag = chroma_sqlite_summary(
+        str(SETTINGS.data_path / "chroma_db"), model_tag
+    )
     wiki = chroma_sqlite_summary(str(SETTINGS.data_path / "wiki_db"), model_tag)
     db_ready = DB_PATH.parent.exists()
     ready = bool(db_ready and rag.get("ready") and wiki.get("ready"))
@@ -498,7 +549,9 @@ def _parse_iso_datetime(value: Any) -> Optional[datetime]:
         return None
 
 
-def _resolve_active_pid(manifest: Dict[str, Any], run_state: Optional["RunState"] = None) -> Optional[int]:
+def _resolve_active_pid(
+    manifest: Dict[str, Any], run_state: Optional["RunState"] = None
+) -> Optional[int]:
     if run_state and run_state.process:
         try:
             if run_state.process.is_alive():
@@ -528,7 +581,9 @@ def _is_stale_starting_run(manifest: Dict[str, Any], is_active: bool) -> bool:
         return False
     if str(manifest.get("status") or "") not in {"starting", "pending"}:
         return False
-    started = _parse_iso_datetime(manifest.get("started_at") or manifest.get("created_at"))
+    started = _parse_iso_datetime(
+        manifest.get("started_at") or manifest.get("created_at")
+    )
     if not started:
         return False
     now = datetime.now(started.tzinfo) if started.tzinfo else datetime.utcnow()
@@ -543,7 +598,11 @@ def _normalized_run_status(manifest: Dict[str, Any], is_active: bool) -> str:
         return "stopping"
     if status == "stopping" and not is_active:
         return "stopped"
-    if status in ACTIVE_RUN_STATUSES and manifest.get("process_pid") and not is_active:
+    if (
+        status in ACTIVE_RUN_STATUSES
+        and manifest.get("process_pid")
+        and not is_active
+    ):
         return "stopped"
     return status
 
@@ -562,9 +621,13 @@ def _annotate_run_manifest(
         stale_starting = _is_stale_starting_run(manifest, is_active)
         if manifest.get("status") != normalized_status:
             patch["status"] = normalized_status
-        if normalized_status in FINAL_RUN_STATUSES and not manifest.get("ended_at"):
+        if normalized_status in FINAL_RUN_STATUSES and not manifest.get(
+            "ended_at"
+        ):
             patch["ended_at"] = _now_iso()
-        elif normalized_status not in FINAL_RUN_STATUSES and manifest.get("ended_at"):
+        elif normalized_status not in FINAL_RUN_STATUSES and manifest.get(
+            "ended_at"
+        ):
             patch["ended_at"] = None
         if stale_starting and not manifest.get("failure_reason"):
             patch["failure_reason"] = "stale starting run recovered by API"
@@ -591,7 +654,10 @@ def _collect_active_run_ids() -> List[str]:
             if not manifest:
                 continue
             run_id = manifest.get("run_id") or path.stem
-            if _resolve_active_pid(manifest, active_states.get(run_id)) is not None:
+            if (
+                _resolve_active_pid(manifest, active_states.get(run_id))
+                is not None
+            ):
                 run_ids.add(run_id)
     return sorted(run_ids)
 
@@ -662,7 +728,12 @@ def _require_actor(
     return Actor(identity="bearer")
 
 
-def _audit(actor: Actor, action: str, target: str, extra: Optional[Dict[str, Any]] = None) -> None:
+def _audit(
+    actor: Actor,
+    action: str,
+    target: str,
+    extra: Optional[Dict[str, Any]] = None,
+) -> None:
     payload = {
         "timestamp": _now_iso(),
         "actor": actor.identity,
@@ -680,7 +751,9 @@ def _service_error(exc: Exception, fallback: str) -> HTTPException:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="RiceQuant disconnected from the remote server. Retry later, or switch Data Backend to local/qlib.",
         )
-    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=message)
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=message
+    )
 
 
 async def broadcast(message: Dict[str, Any]) -> None:
@@ -741,7 +814,11 @@ def _load_run_manifest(run_id: str) -> Dict[str, Any]:
     return _annotate_run_manifest(run_id, manifest, run_state, persist=True)
 
 
-def _list_run_manifests(offset: int = 0, limit: int = LIST_PAGE_LIMIT_DEFAULT, status_filter: Optional[str] = None) -> Dict[str, Any]:
+def _list_run_manifests(
+    offset: int = 0,
+    limit: int = LIST_PAGE_LIMIT_DEFAULT,
+    status_filter: Optional[str] = None,
+) -> Dict[str, Any]:
     manifests: List[Dict[str, Any]] = []
     with state.lock:
         active_states = dict(state.runs)
@@ -758,7 +835,9 @@ def _list_run_manifests(offset: int = 0, limit: int = LIST_PAGE_LIMIT_DEFAULT, s
                 _write_run_manifest(run_id, {"result_counts": counts})
             else:
                 manifest["result_counts"] = _manifest_result_counts(manifest)
-            manifest = _annotate_run_manifest(run_id, manifest, active_states.get(run_id), persist=True)
+            manifest = _annotate_run_manifest(
+                run_id, manifest, active_states.get(run_id), persist=True
+            )
             if status_filter and manifest.get("status") != status_filter:
                 continue
             manifests.append(manifest)
@@ -784,7 +863,10 @@ def _find_run_by_client_key(client_run_key: Optional[str]) -> Optional[str]:
     for path in sorted(SWARM_RUN_DIR.glob("run_*.json"), reverse=True):
         manifest = _load_json(path)
         config = manifest.get("config") if isinstance(manifest, dict) else {}
-        if isinstance(config, dict) and config.get("client_run_key") == client_run_key:
+        if (
+            isinstance(config, dict)
+            and config.get("client_run_key") == client_run_key
+        ):
             return str(manifest.get("run_id") or path.stem)
     return None
 
@@ -863,7 +945,11 @@ def _queue_put(queue: Any, payload: Any, *, required: bool = False) -> None:
         queue.put(payload, timeout=1)
         return
     except queue_module.Full:
-        if not required and isinstance(payload, dict) and payload.get("type") == "log":
+        if (
+            not required
+            and isinstance(payload, dict)
+            and payload.get("type") == "log"
+        ):
             logger.warning("[swarm] log queue full; dropping log record")
             return
         try:
@@ -914,15 +1000,21 @@ def _listen_run_queue(run_id: str, queue: Any) -> None:
                 {
                     "result_counts": {
                         "factor_count": int(record.get("factor_count") or 0),
-                        "strategy_count": int(record.get("strategy_count") or 0),
+                        "strategy_count": int(
+                            record.get("strategy_count") or 0
+                        ),
                     }
                 },
             )
         _emit_event(record)
 
 
-def _swarm_process_target(run_id: str, config: Dict[str, Any], queue: Any) -> None:
-    def queue_log(level: str, message: str, role: str, agent_id: Optional[str] = None) -> None:
+def _swarm_process_target(
+    run_id: str, config: Dict[str, Any], queue: Any
+) -> None:
+    def queue_log(
+        level: str, message: str, role: str, agent_id: Optional[str] = None
+    ) -> None:
         _queue_put(
             queue,
             {
@@ -980,7 +1072,9 @@ def _swarm_process_target(run_id: str, config: Dict[str, Any], queue: Any) -> No
             market_start=config.get("market_start"),
             market_end=config.get("market_end"),
         )
-        manager.run_swarm(parallel=bool(config.get("parallel")), log_queue=queue)
+        manager.run_swarm(
+            parallel=bool(config.get("parallel")), log_queue=queue
+        )
         _queue_put(
             queue,
             {
@@ -1041,7 +1135,9 @@ def _swarm_process_target(run_id: str, config: Dict[str, Any], queue: Any) -> No
         _queue_put(queue, None, required=True)
 
 
-def _wait_run_process(run_id: str, process: multiprocessing.Process, queue: Any) -> None:
+def _wait_run_process(
+    run_id: str, process: multiprocessing.Process, queue: Any
+) -> None:
     process.join()
     manifest = _load_json(_manifest_path(run_id))
     exit_code = process.exitcode
@@ -1059,7 +1155,10 @@ def _wait_run_process(run_id: str, process: multiprocessing.Process, queue: Any)
             failure_reason = manifest.get("failure_reason")
         else:
             next_status = "failed"
-            failure_reason = manifest.get("failure_reason") or f"worker exited with code {exit_code}"
+            failure_reason = (
+                manifest.get("failure_reason")
+                or f"worker exited with code {exit_code}"
+            )
         final_counts = _factor_summary_for_run(run_id)
         _write_run_manifest(
             run_id,
@@ -1115,8 +1214,13 @@ def _watch_swarm_run(run_id: str, process: multiprocessing.Process) -> None:
             return
 
         elapsed = int(time.monotonic() - started_monotonic)
-        if SWARM_RUN_TIMEOUT_SECONDS > 0 and elapsed >= SWARM_RUN_TIMEOUT_SECONDS:
-            failure_reason = f"swarm exceeded timeout of {SWARM_RUN_TIMEOUT_SECONDS}s"
+        if (
+            SWARM_RUN_TIMEOUT_SECONDS > 0
+            and elapsed >= SWARM_RUN_TIMEOUT_SECONDS
+        ):
+            failure_reason = (
+                f"swarm exceeded timeout of {SWARM_RUN_TIMEOUT_SECONDS}s"
+            )
             _write_run_manifest(
                 run_id,
                 {
@@ -1149,7 +1253,9 @@ def _watch_swarm_run(run_id: str, process: multiprocessing.Process) -> None:
         )
 
 
-def _paginate_rows(rows: list[sqlite3.Row], offset: int, limit: int) -> Dict[str, Any]:
+def _paginate_rows(
+    rows: list[sqlite3.Row], offset: int, limit: int
+) -> Dict[str, Any]:
     start = max(0, offset)
     page_limit = _list_limit(limit, LIST_PAGE_LIMIT_MAX)
     end = min(len(rows), start + page_limit)
@@ -1164,7 +1270,11 @@ def _paginate_rows(rows: list[sqlite3.Row], offset: int, limit: int) -> Dict[str
 
 def _row_to_factor_detail(row: sqlite3.Row) -> Dict[str, Any]:
     payload = dict(row)
-    for column in ("metrics_json", "returns_json", "best_strategy_metrics_json"):
+    for column in (
+        "metrics_json",
+        "returns_json",
+        "best_strategy_metrics_json",
+    ):
         raw = payload.pop(column, None)
         target = {
             "metrics_json": "metrics",
@@ -1184,8 +1294,12 @@ def _row_to_factor_detail(row: sqlite3.Row) -> Dict[str, Any]:
     factor_id = payload.get("id")
     chart_file = CHART_DIR / f"{factor_id}_curve.png"
     report_file = REPORT_DIR / f"{factor_id}.md"
-    payload["chart_url"] = f"/api/charts/{factor_id}" if chart_file.exists() else None
-    payload["report_url"] = f"/api/reports/{factor_id}" if report_file.exists() else None
+    payload["chart_url"] = (
+        f"/api/charts/{factor_id}" if chart_file.exists() else None
+    )
+    payload["report_url"] = (
+        f"/api/reports/{factor_id}" if report_file.exists() else None
+    )
     return payload
 
 
@@ -1199,19 +1313,25 @@ def _factor_perf_for_selection(factor: Dict[str, Any]) -> float:
     return value if value is not None else 0.0
 
 
-def _load_crossover_factor_pool(factor_ids: List[str]) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+def _load_crossover_factor_pool(
+    factor_ids: List[str],
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     if not DB_PATH.exists():
         raise HTTPException(404, "db missing")
     with _db_connect() as conn:
         _ensure_db_schema(conn)
-        rows = conn.execute("SELECT * FROM alpha_pool ORDER BY timestamp DESC").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM alpha_pool ORDER BY timestamp DESC"
+        ).fetchall()
     factors = [_row_to_factor_detail(row) for row in rows]
     if not factors:
         raise HTTPException(400, "alpha pool is empty")
 
     if factor_ids:
         by_id = {str(factor.get("id")): factor for factor in factors}
-        missing = [factor_id for factor_id in factor_ids if factor_id not in by_id]
+        missing = [
+            factor_id for factor_id in factor_ids if factor_id not in by_id
+        ]
         if missing:
             raise HTTPException(404, f"factor not found: {', '.join(missing)}")
         parents = [by_id[factor_id] for factor_id in factor_ids]
@@ -1221,26 +1341,44 @@ def _load_crossover_factor_pool(factor_ids: List[str]) -> tuple[List[Dict[str, A
             for factor in factors
             if factor.get("code") and not bool(factor.get("is_simulated"))
         ]
-        parents = sorted(eligible, key=_factor_perf_for_selection, reverse=True)[:2]
+        parents = sorted(
+            eligible, key=_factor_perf_for_selection, reverse=True
+        )[:2]
 
     if len(parents) < 2:
-        raise HTTPException(400, "at least two factors are required for crossover")
-    missing_code = [str(factor.get("id")) for factor in parents if not factor.get("code")]
+        raise HTTPException(
+            400, "at least two factors are required for crossover"
+        )
+    missing_code = [
+        str(factor.get("id")) for factor in parents if not factor.get("code")
+    ]
     if missing_code:
-        raise HTTPException(400, f"parent factor has no code: {', '.join(missing_code)}")
+        raise HTTPException(
+            400, f"parent factor has no code: {', '.join(missing_code)}"
+        )
     return parents, factors
 
 
-def _crossover_manager_kwargs(req: "FactorCrossoverRequest", parents: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _crossover_manager_kwargs(
+    req: "FactorCrossoverRequest", parents: List[Dict[str, Any]]
+) -> Dict[str, Any]:
     base = parents[0] if parents else {}
-    data_backend = req.data_backend or base.get("data_backend") or SETTINGS.data_backend
+    data_backend = (
+        req.data_backend or base.get("data_backend") or SETTINGS.data_backend
+    )
     evaluation_mode = (
         req.mode
         or base.get("evaluation_mode")
         or ("qlib" if data_backend == "qlib" else "ricequant")
     )
-    market_profile = req.market_profile or base.get("market_profile") or SETTINGS.market_profile
-    market_mode = req.market_mode or base.get("market_mode") or SETTINGS.market_mode
+    market_profile = (
+        req.market_profile
+        or base.get("market_profile")
+        or SETTINGS.market_profile
+    )
+    market_mode = (
+        req.market_mode or base.get("market_mode") or SETTINGS.market_mode
+    )
     market_profiles = req.market_profiles or [market_profile]
 
     return {
@@ -1248,17 +1386,22 @@ def _crossover_manager_kwargs(req: "FactorCrossoverRequest", parents: List[Dict[
         "max_iterations": 1,
         "evaluation_mode": evaluation_mode,
         "data_backend": data_backend,
-        "evaluation_engine": req.engine or base.get("evaluation_engine") or SETTINGS.evaluation_engine,
+        "evaluation_engine": req.engine
+        or base.get("evaluation_engine")
+        or SETTINGS.evaluation_engine,
         "llm_provider": req.llm_provider or SETTINGS.llm_provider,
         "llm_model": req.llm_model or SETTINGS.llm_model,
         "llm_base_url": req.llm_base_url or SETTINGS.llm_base_url,
-        "llm_reasoning_effort": req.llm_reasoning_effort or SETTINGS.llm_reasoning_effort,
-        "embedding_provider": req.embedding_provider or SETTINGS.embedding_provider,
+        "llm_reasoning_effort": req.llm_reasoning_effort
+        or SETTINGS.llm_reasoning_effort,
+        "embedding_provider": req.embedding_provider
+        or SETTINGS.embedding_provider,
         "market_mode": market_mode,
         "market_profile": market_profile,
         "market_profiles": market_profiles,
         "local_data_path": req.local_data_path or SETTINGS.local_data_path,
-        "local_data_layout": req.local_data_layout or SETTINGS.local_data_layout,
+        "local_data_layout": req.local_data_layout
+        or SETTINGS.local_data_layout,
         "market_start": req.market_start or SETTINGS.market_start,
         "market_end": req.market_end or SETTINGS.market_end,
         "crossover_iterations": req.crossover_iterations,
@@ -1282,7 +1425,9 @@ def _row_to_strategy_detail(row: sqlite3.Row) -> Dict[str, Any]:
             payload[target] = json.loads(raw) if raw else {}
         except Exception:
             payload[target] = {}
-    payload["expression"] = payload.get("expression_payload", {}).get("expression")
+    payload["expression"] = payload.get("expression_payload", {}).get(
+        "expression"
+    )
     chart_paths = payload.get("chart_paths", {})
     payload["chart_urls"] = {
         kind: f"/api/strategies/{payload['strategy_id']}/charts/{kind}"
@@ -1331,7 +1476,9 @@ def _build_wiki_graph() -> Dict[str, Any]:
             key = (slug, target, "related")
             if key not in edges_seen:
                 edges_seen.add(key)
-                edges.append({"source": slug, "target": target, "kind": "related"})
+                edges.append(
+                    {"source": slug, "target": target, "kind": "related"}
+                )
                 degree_map[slug] += 1
                 degree_map[target] += 1
         for target in page["wikilinks"]:
@@ -1340,7 +1487,9 @@ def _build_wiki_graph() -> Dict[str, Any]:
             key = (slug, target, "wikilink")
             if key not in edges_seen:
                 edges_seen.add(key)
-                edges.append({"source": slug, "target": target, "kind": "wikilink"})
+                edges.append(
+                    {"source": slug, "target": target, "kind": "wikilink"}
+                )
                 degree_map[slug] += 1
                 degree_map[target] += 1
     return {
@@ -1447,7 +1596,9 @@ def _coerce_string_list(value: Any) -> List[str]:
 
 
 class RuntimeRequestModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True, validate_default=True)
+    model_config = ConfigDict(
+        extra="forbid", populate_by_name=True, validate_default=True
+    )
 
     @field_validator("mode", mode="before", check_fields=False)
     @classmethod
@@ -1579,7 +1730,9 @@ class RuntimeRequestModel(BaseModel):
             raise ValueError("embedding_provider='codex' is not supported")
         return provider
 
-    @field_validator("llm_base_url", "local_data_path", mode="before", check_fields=False)
+    @field_validator(
+        "llm_base_url", "local_data_path", mode="before", check_fields=False
+    )
     @classmethod
     def _blank_to_none(cls, value: Any) -> Optional[str]:
         return _normalize_text(value)
@@ -1592,9 +1745,15 @@ class RuntimeRequestModel(BaseModel):
             if getattr(self, "market_mode", None) == "single":
                 setattr(self, "market_profiles", [market_profile])
             elif market_profile not in market_profiles:
-                setattr(self, "market_profiles", [market_profile] + market_profiles)
-        if getattr(self, "data_backend", None) == "local" and not getattr(self, "local_data_path", None):
-            raise ValueError("local_data_path is required when data_backend='local'")
+                setattr(
+                    self, "market_profiles", [market_profile] + market_profiles
+                )
+        if getattr(self, "data_backend", None) == "local" and not getattr(
+            self, "local_data_path", None
+        ):
+            raise ValueError(
+                "local_data_path is required when data_backend='local'"
+            )
         return self
 
 
@@ -1643,7 +1802,9 @@ class SwarmConfig(RuntimeRequestModel):
         if value is None:
             return None
         if len(value) > 80 or not SAFE_ID_RE.match(value):
-            raise ValueError("client_run_key must be 1-80 chars of letters, numbers, '_' or '-'")
+            raise ValueError(
+                "client_run_key must be 1-80 chars of letters, numbers, '_' or '-'"
+            )
         return value
 
 
@@ -1684,7 +1845,9 @@ class StrategyRunRequest(RuntimeRequestModel):
 
 
 class FactorCrossoverRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True, validate_default=True)
+    model_config = ConfigDict(
+        extra="forbid", populate_by_name=True, validate_default=True
+    )
 
     factor_ids: List[str] = Field(
         default_factory=list,
@@ -1722,12 +1885,16 @@ class FactorCrossoverRequest(BaseModel):
         seen = set()
         for factor_id in _coerce_string_list(value):
             if len(factor_id) > 80 or not SAFE_ID_RE.match(factor_id):
-                raise ValueError("factor_ids must contain valid factor identifiers")
+                raise ValueError(
+                    "factor_ids must contain valid factor identifiers"
+                )
             if factor_id not in seen:
                 ids.append(factor_id)
                 seen.add(factor_id)
         if len(ids) == 1:
-            raise ValueError("factor_ids must contain zero ids or at least two ids")
+            raise ValueError(
+                "factor_ids must contain zero ids or at least two ids"
+            )
         return ids
 
     @field_validator("run_id")
@@ -1737,7 +1904,9 @@ class FactorCrossoverRequest(BaseModel):
         if value is None:
             return None
         if len(value) > 80 or not SAFE_ID_RE.match(value):
-            raise ValueError("run_id must be 1-80 chars of letters, numbers, '_' or '-'")
+            raise ValueError(
+                "run_id must be 1-80 chars of letters, numbers, '_' or '-'"
+            )
         return value
 
     @field_validator("mode", mode="before")
@@ -1967,8 +2136,12 @@ def get_results(
         if not existing:
             rows = []
         else:
-            select_cols = _select_projection(existing, _ALPHA_POOL_RESULT_COLUMNS)
-            order_clause = "timestamp DESC" if "timestamp" in existing else "rowid DESC"
+            select_cols = _select_projection(
+                existing, _ALPHA_POOL_RESULT_COLUMNS
+            )
+            order_clause = (
+                "timestamp DESC" if "timestamp" in existing else "rowid DESC"
+            )
             if run_id:
                 if "run_id" not in existing:
                     rows = []
@@ -1991,7 +2164,9 @@ def get_factor_detail(factor_id: str) -> Dict[str, Any]:
         raise HTTPException(404, "db missing")
     with _db_connect() as conn:
         _ensure_db_schema(conn)
-        row = conn.execute("SELECT * FROM alpha_pool WHERE id=?", (factor_id,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM alpha_pool WHERE id=?", (factor_id,)
+        ).fetchone()
         strategy_row = None
         if row and "best_strategy_id" in row.keys() and row["best_strategy_id"]:
             _ensure_strategy_backtests_schema(conn)
@@ -2039,7 +2214,9 @@ def run_factor_crossover(
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     except Exception as exc:
-        logger.error(f"[Factor Crossover] Unhandled error: {exc}\n{traceback.format_exc()}")
+        logger.error(
+            f"[Factor Crossover] Unhandled error: {exc}\n{traceback.format_exc()}"
+        )
         raise _service_error(exc, "factor crossover failed")
 
     factor = result.get("factor") or {}
@@ -2047,7 +2224,9 @@ def run_factor_crossover(
     if result.get("status") == "accepted" and factor_id and DB_PATH.exists():
         with _db_connect() as conn:
             _ensure_db_schema(conn)
-            row = conn.execute("SELECT * FROM alpha_pool WHERE id=?", (factor_id,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM alpha_pool WHERE id=?", (factor_id,)
+            ).fetchone()
         if row:
             result["factor"] = _row_to_factor_detail(row)
     return result
@@ -2141,7 +2320,10 @@ class ResetRequest(BaseModel):
 
 
 class WikiPageUpdateRequest(BaseModel):
-    content: str = Field(min_length=1, description="Full markdown page content including optional frontmatter.")
+    content: str = Field(
+        min_length=1,
+        description="Full markdown page content including optional frontmatter.",
+    )
 
 
 @app.post("/api/admin/reset")
@@ -2170,7 +2352,9 @@ def admin_reset(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    _audit(actor, "admin.reset", ",".join(plan.scopes), {"confirm": req.confirm})
+    _audit(
+        actor, "admin.reset", ",".join(plan.scopes), {"confirm": req.confirm}
+    )
     summary = execute_plan(plan, confirm=req.confirm)
     summary["plan_text"] = render_plan(plan)
     return summary
@@ -2210,7 +2394,11 @@ def wiki_update_page(
     _audit(actor, "wiki.update", slug)
     normalized = req.content.rstrip() + "\n"
     path.write_text(normalized, encoding="utf-8")
-    return {"status": "saved", "slug": slug, "bytes": len(normalized.encode("utf-8"))}
+    return {
+        "status": "saved",
+        "slug": slug,
+        "bytes": len(normalized.encode("utf-8")),
+    }
 
 
 @app.post("/api/wiki/migrate")
@@ -2289,7 +2477,9 @@ async def backtest_run(
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     except Exception as exc:
-        logger.error(f"[Manual BT] Unhandled error: {exc}\n{traceback.format_exc()}")
+        logger.error(
+            f"[Manual BT] Unhandled error: {exc}\n{traceback.format_exc()}"
+        )
         raise _service_error(exc, "backtest failed")
     result["cached"] = False
     return result
@@ -2358,7 +2548,9 @@ async def strategy_run(
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     except Exception as exc:
-        logger.error(f"[Strategy BT] Unhandled error: {exc}\n{traceback.format_exc()}")
+        logger.error(
+            f"[Strategy BT] Unhandled error: {exc}\n{traceback.format_exc()}"
+        )
         raise _service_error(exc, "strategy backtest failed")
     return result
 
@@ -2388,7 +2580,9 @@ def get_strategies(
             rows = []
         else:
             select_cols = _select_projection(existing, _STRATEGY_LIST_COLUMNS)
-            order_clause = "ran_at DESC" if "ran_at" in existing else "rowid DESC"
+            order_clause = (
+                "ran_at DESC" if "ran_at" in existing else "rowid DESC"
+            )
             if run_id:
                 if "run_id" not in existing:
                     rows = []
@@ -2498,7 +2692,9 @@ def list_swarm_runs(
     actor: Actor = Depends(_require_actor),
 ) -> Dict[str, Any]:
     _audit(actor, "swarm.list", "global", {"status": status_filter})
-    return _list_run_manifests(offset=offset, limit=limit, status_filter=status_filter)
+    return _list_run_manifests(
+        offset=offset, limit=limit, status_filter=status_filter
+    )
 
 
 @app.post("/api/swarm/runs")
@@ -2603,10 +2799,17 @@ def get_swarm_run_logs(
     actor: Actor = Depends(_require_actor),
 ) -> Dict[str, Any]:
     run_id = _safe_segment(run_id)
-    _audit(actor, "swarm.logs", run_id, {"offset": offset, "limit": limit, "tail": tail})
+    _audit(
+        actor,
+        "swarm.logs",
+        run_id,
+        {"offset": offset, "limit": limit, "tail": tail},
+    )
     if not _manifest_path(run_id).exists():
         raise HTTPException(404, "run not found")
-    return _load_jsonl_slice(_log_path(run_id), offset=offset, limit=limit, tail=tail)
+    return _load_jsonl_slice(
+        _log_path(run_id), offset=offset, limit=limit, tail=tail
+    )
 
 
 @app.post("/api/swarm/runs/{run_id}/stop")
@@ -2729,7 +2932,9 @@ FRONTEND_DIST_DIR = _resolve_frontend_dist_dir()
 if FRONTEND_DIST_DIR:
     assets_dir = FRONTEND_DIST_DIR / "assets"
     if assets_dir.exists():
-        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+        app.mount(
+            "/assets", StaticFiles(directory=str(assets_dir)), name="assets"
+        )
 
 
 @app.get("/{full_path:path}", response_model=None)
@@ -2744,8 +2949,10 @@ def frontend_fallback(full_path: str):
 
 # --- Application Entry Point ---
 def main():
-    import uvicorn
     import multiprocessing
+
+    import uvicorn
+
     multiprocessing.freeze_support()
     uvicorn.run(app, host="0.0.0.0", port=8000)
 

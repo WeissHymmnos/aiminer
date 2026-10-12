@@ -1,6 +1,6 @@
-import { FormEvent, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { deskFetch } from "../lib/api";
+import { FormEvent, useEffect, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { deskFetch } from '../lib/api';
 
 type CatalogItem = {
   id: string;
@@ -12,7 +12,12 @@ type CatalogItem = {
   tags?: string[];
   lineage?: { source?: string; source_ref?: string; formula_proxy?: boolean };
   metrics?: { ic?: number | null };
-  expression?: { dialect?: string; text?: string; alt_text?: string | null; translatable?: boolean };
+  expression?: {
+    dialect?: string;
+    text?: string;
+    alt_text?: string | null;
+    translatable?: boolean;
+  };
 };
 
 export function CatalogPage() {
@@ -21,7 +26,7 @@ export function CatalogPage() {
   const [detail, setDetail] = useState<CatalogItem | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [direction, setDirection] = useState("to_pool");
+  const [direction, setDirection] = useState('to_pool');
 
   useEffect(() => {
     setError(null);
@@ -36,7 +41,7 @@ export function CatalogPage() {
       return;
     }
     setDetail(null);
-    deskFetch("/api/v1/catalog")
+    deskFetch('/api/v1/catalog')
       .then((r) => {
         if (!r.ok) throw new Error(`catalog ${r.status}`);
         return r.json();
@@ -49,9 +54,9 @@ export function CatalogPage() {
     event.preventDefault();
     if (!id) return;
     setMessage(null);
-    deskFetch("/api/v1/promote", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    deskFetch('/api/v1/promote', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ catalog_id: id, direction }),
     })
       .then(async (r) => {
@@ -62,7 +67,7 @@ export function CatalogPage() {
           return;
         }
         setError(null);
-        setMessage(`queued ${body.promotion_id || ""}`.trim());
+        setMessage(`queued ${body.promotion_id || ''}`.trim());
       })
       .catch((err) => setError(String(err)));
   };
@@ -78,24 +83,31 @@ export function CatalogPage() {
         {detail ? (
           <div className="card">
             <p>
-              {detail.name} · {detail.lineage?.source} · {detail.status} · IC{" "}
-              {detail.metrics?.ic ?? "—"}
+              {detail.name} · {detail.lineage?.source} · {detail.status} · IC{' '}
+              {detail.metrics?.ic ?? '—'}
             </p>
             <p className="muted">
-              {detail.style || "style?"} · {detail.universe || "universe?"} ·{" "}
+              {detail.style || 'style?'} · {detail.universe || 'universe?'} ·{' '}
               {detail.expression?.dialect}
-              {detail.expression?.translatable === false ? " · not translatable" : ""}
-              {detail.lineage?.formula_proxy ? " · formula_proxy" : ""}
-              {detail.universe === "local_panel" ? " · thin_panel" : ""}
+              {detail.expression?.translatable === false
+                ? ' · not translatable'
+                : ''}
+              {detail.lineage?.formula_proxy ? ' · formula_proxy' : ''}
+              {detail.universe === 'local_panel' ? ' · thin_panel' : ''}
             </p>
-            {detail.tags?.includes("synthetic") ? (
+            {detail.tags?.includes('synthetic') ? (
               <p className="muted">Source: discovery (synthetic report)</p>
             ) : null}
-            {detail.expression?.text ? <pre className="code-block">{detail.expression.text}</pre> : null}
+            {detail.expression?.text ? (
+              <pre className="code-block">{detail.expression.text}</pre>
+            ) : null}
             <form onSubmit={promote}>
               <label className="field">
                 Direction
-                <select value={direction} onChange={(e) => setDirection(e.target.value)}>
+                <select
+                  value={direction}
+                  onChange={(e) => setDirection(e.target.value)}
+                >
                   <option value="to_pool">to_pool</option>
                   <option value="to_library">to_library</option>
                 </select>
@@ -124,11 +136,13 @@ export function CatalogPage() {
             <span>
               {item.name} · {item.lineage?.source} · {item.status}
             </span>
-            <span className="factor-row-ic">IC {item.metrics?.ic ?? "—"}</span>
+            <span className="factor-row-ic">IC {item.metrics?.ic ?? '—'}</span>
           </Link>
         ))}
       </div>
-      {items.length === 0 && !error ? <p className="muted">Catalog is empty.</p> : null}
+      {items.length === 0 && !error ? (
+        <p className="muted">Catalog is empty.</p>
+      ) : null}
     </div>
   );
 }

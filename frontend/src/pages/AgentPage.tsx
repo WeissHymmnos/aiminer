@@ -1,8 +1,8 @@
-import { FormEvent, useState } from "react";
-import { deskFetch } from "../lib/api";
+import { FormEvent, useState } from 'react';
+import { deskFetch } from '../lib/api';
 
 export function AgentPage() {
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState('');
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -12,9 +12,9 @@ export function AgentPage() {
     setError(null);
     setFailed(false);
     setResult(null);
-    deskFetch("/api/v1/agent", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    deskFetch('/api/v1/agent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt, max_turns: 16 }),
     })
       .then((r) => {
@@ -25,7 +25,11 @@ export function AgentPage() {
         if (body && body.ok === false) {
           setFailed(true);
           setError(
-            String(body.error_type ? `${body.error_type}: ${body.error}` : body.error || "agent failed"),
+            String(
+              body.error_type
+                ? `${body.error_type}: ${body.error}`
+                : body.error || 'agent failed',
+            ),
           );
           setResult(body.text || null);
           return;
@@ -41,7 +45,9 @@ export function AgentPage() {
   return (
     <div className="page-grid">
       <h2>Agent</h2>
-      <p className="muted">Calls catalog, eval, reproduce, and review. Does not invent backtests.</p>
+      <p className="muted">
+        Calls catalog, eval, reproduce, and review. Does not invent backtests.
+      </p>
       <form onSubmit={onSubmit}>
         <label className="field">
           Request
@@ -56,8 +62,12 @@ export function AgentPage() {
           Run desk
         </button>
       </form>
-      {failed ? <div className="status-block error">failed · {error}</div> : null}
-      {!failed && error ? <div className="status-block error">{error}</div> : null}
+      {failed ? (
+        <div className="status-block error">failed · {error}</div>
+      ) : null}
+      {!failed && error ? (
+        <div className="status-block error">{error}</div>
+      ) : null}
       {result ? <pre className="code-block">{result}</pre> : null}
     </div>
   );

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import uuid
 from typing import Any
+import uuid
 
 
 def new_run_id() -> str:

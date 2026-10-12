@@ -79,7 +79,9 @@ def get_bundle_content(branch_name):
                 content += f"# File: {file_path} (Branch: {branch_name})\n"
                 content += f"```{lang}\n"
                 try:
-                    with open(file_path, "r", encoding="utf-8", errors="ignore") as src:
+                    with open(
+                        file_path, "r", encoding="utf-8", errors="ignore"
+                    ) as src:
                         content += src.read()
                 except Exception as e:
                     content += f"// Error reading file: {e}\n"
@@ -111,7 +113,9 @@ def main():
 
     with open(output_file, "w", encoding="utf-8") as f:
         f.write(final_content)
-    print(f"Done! Bundled {len(branches_to_bundle)} branches into {output_file}")
+    print(
+        f"Done! Bundled {len(branches_to_bundle)} branches into {output_file}"
+    )
 
 
 if __name__ == "__main__":

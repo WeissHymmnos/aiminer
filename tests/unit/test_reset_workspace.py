@@ -1,7 +1,7 @@
 import os
+from pathlib import Path
 import tempfile
 import unittest
-from pathlib import Path
 
 from scripts.reset_workspace import (
     DEFAULT_PURGE_AFTER_DAYS,
@@ -36,9 +36,7 @@ class TestExpandScopes(unittest.TestCase):
         self.assertEqual(expand_scopes(["pool", "pool"]), ["pool"])
 
     def test_comma_separated(self):
-        self.assertEqual(
-            expand_scopes(["pool,memory"]), ["pool", "memory"]
-        )
+        self.assertEqual(expand_scopes(["pool,memory"]), ["pool", "memory"])
 
     def test_unknown_scope_raises(self):
         with self.assertRaises(ValueError):
@@ -124,7 +122,9 @@ class TestExecutePlan(unittest.TestCase):
             reports = _seed_dir(root, "results/reports", files=2)
 
             plan = build_plan(["pool"], root=root)
-            summary = execute_plan(plan, confirm=False, root=root, timestamp="20260101-000000")
+            summary = execute_plan(
+                plan, confirm=False, root=root, timestamp="20260101-000000"
+            )
 
             self.assertFalse(summary["confirm"])
             self.assertTrue(db.exists())
@@ -146,13 +146,17 @@ class TestExecutePlan(unittest.TestCase):
             reports = _seed_dir(root, "results/reports", files=2)
 
             plan = build_plan(["pool"], root=root)
-            summary = execute_plan(plan, confirm=True, root=root, timestamp="20260101-000000")
+            summary = execute_plan(
+                plan, confirm=True, root=root, timestamp="20260101-000000"
+            )
 
             self.assertTrue(summary["confirm"])
             self.assertFalse(db.exists())
             self.assertFalse(reports.exists())
             trash_batch = root / "results" / ".trash" / "20260101-000000"
-            self.assertTrue((trash_batch / "results" / "alpha_miner.db").exists())
+            self.assertTrue(
+                (trash_batch / "results" / "alpha_miner.db").exists()
+            )
             self.assertTrue((trash_batch / "results" / "reports").is_dir())
             # Each moved item carries its destination.
             for item in summary["moved"]:
@@ -175,12 +179,16 @@ class TestExecutePlan(unittest.TestCase):
             # Pre-create a trash file under the path that "all" scope would target
             # (results/strategies). Make sure execute_plan never tries to move
             # things that already live inside .trash.
-            trash_marker = root / "results" / ".trash" / "old-batch" / "marker.txt"
+            trash_marker = (
+                root / "results" / ".trash" / "old-batch" / "marker.txt"
+            )
             trash_marker.parent.mkdir(parents=True, exist_ok=True)
             trash_marker.write_bytes(b"old")
 
             plan = build_plan(["all"], root=root)
-            summary = execute_plan(plan, confirm=True, root=root, timestamp="20260101-000000")
+            summary = execute_plan(
+                plan, confirm=True, root=root, timestamp="20260101-000000"
+            )
 
             # Trash content untouched.
             self.assertTrue(trash_marker.exists())
@@ -201,11 +209,15 @@ class TestPurgeOldTrash(unittest.TestCase):
 
             old_mtime = (
                 # 30 days ago
-                int(__import__("time").time()) - DEFAULT_PURGE_AFTER_DAYS * 86400 - 86400
+                int(__import__("time").time())
+                - DEFAULT_PURGE_AFTER_DAYS * 86400
+                - 86400
             )
             os.utime(old, (old_mtime, old_mtime))
 
-            removed = purge_old_trash(trash, older_than_days=DEFAULT_PURGE_AFTER_DAYS)
+            removed = purge_old_trash(
+                trash, older_than_days=DEFAULT_PURGE_AFTER_DAYS
+            )
             self.assertEqual(len(removed), 1)
             self.assertFalse(old.exists())
             self.assertTrue(new.exists())

@@ -17,9 +17,15 @@ def run_request(req: dict[str, Any]) -> dict[str, Any]:
             "error_type": "EmptyExpression",
             "metrics": {},
         }
-    from aiminer.core.evaluator_factory import EvaluationConfig, build_evaluator, resolve_data_backend
+    from aiminer.core.evaluator_factory import (
+        EvaluationConfig,
+        build_evaluator,
+        resolve_data_backend,
+    )
 
-    backend = resolve_data_backend(req.get("data_backend") or req.get("backend") or "qlib")
+    backend = resolve_data_backend(
+        req.get("data_backend") or req.get("backend") or "qlib"
+    )
     start = req.get("start")
     end = req.get("end")
     config = EvaluationConfig(
@@ -31,7 +37,13 @@ def run_request(req: dict[str, Any]) -> dict[str, Any]:
         local_data_path=req.get("local_data_path"),
         local_data_layout=str(
             req.get("local_data_layout")
-            or ("panel" if str(req.get("local_data_path") or "").endswith((".parquet", ".pq", ".csv")) else "auto")
+            or (
+                "panel"
+                if str(req.get("local_data_path") or "").endswith(
+                    (".parquet", ".pq", ".csv")
+                )
+                else "auto"
+            )
         ),
         market_start=start,
         market_end=end,

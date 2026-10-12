@@ -1,10 +1,12 @@
+import json
 import os
+import re
+from typing import List, Optional
+
+from loguru import logger
 import numpy as np
 import pandas as pd
-import re
-import json
-from typing import List, Optional
-from loguru import logger
+
 from .combo import WeightCalculator
 
 # import warnings
@@ -18,9 +20,13 @@ def zscore(df: pd.DataFrame) -> pd.DataFrame:
     return df.sub(means, axis="columns").div(stds, axis="columns")
 
 
-def resolve_qlib_data_path(region: str, explicit_path: str | None = None) -> str:
+def resolve_qlib_data_path(
+    region: str, explicit_path: str | None = None
+) -> str:
     default_data_path = (
-        "~/.qlib/qlib_data/us_data" if region == "us" else "~/.qlib/qlib_data/cn_data"
+        "~/.qlib/qlib_data/us_data"
+        if region == "us"
+        else "~/.qlib/qlib_data/cn_data"
     )
     region_env = "QLIB_US_DATA_PATH" if region == "us" else "QLIB_CN_DATA_PATH"
     return (
@@ -47,8 +53,8 @@ class AlphaEval:
         qlib_region: str | None = None,
         qlib_data_path: str | None = None,
     ):
-        from qlib.data import D
         from qlib import auto_init
+        from qlib.data import D
 
         self.alphacombo = None
         self.factor_expressions = factor_expressions
@@ -78,7 +84,9 @@ class AlphaEval:
         if instruments is not None:
             self.instruments = instruments
         else:
-            self.instruments = D.instruments(market=qlib_market or ("sp500" if region == "us" else "csi300"))
+            self.instruments = D.instruments(
+                market=qlib_market or ("sp500" if region == "us" else "csi300")
+            )
 
         self._D = D
 
@@ -88,7 +96,10 @@ class AlphaEval:
             self.weights = [1.0]
         else:
             self.weights = WeightCalculator(
-                self.factor_expressions, train_start_date, train_end_date, instruments
+                self.factor_expressions,
+                train_start_date,
+                train_end_date,
+                instruments,
             ).fit()
 
         self.label_expr = "Ref($close, -1)/$close - 1"
@@ -98,7 +109,9 @@ class AlphaEval:
 
         # Resolve package path dynamically for Qlib inst_processors
         noise_mod = (
-            f"{__package__}.noise_proc" if __package__ else "aiminer.core.alphaeval.noise_proc"
+            f"{__package__}.noise_proc"
+            if __package__
+            else "aiminer.core.alphaeval.noise_proc"
         )
 
         self.factor_data = self._D.features(
@@ -172,14 +185,18 @@ class AlphaEval:
             )
 
             self.noise_factor_data1 = (
-                self.noise_factor_data1.groupby(level="datetime", group_keys=False)
+                self.noise_factor_data1.groupby(
+                    level="datetime", group_keys=False
+                )
                 .apply(zscore)
                 .replace([np.inf, -np.inf], np.nan)
                 .replace(np.nan, 0)
             )
 
             self.noise_factor_data2 = (
-                self.noise_factor_data2.groupby(level="datetime", group_keys=False)
+                self.noise_factor_data2.groupby(
+                    level="datetime", group_keys=False
+                )
                 .apply(zscore)
                 .replace([np.inf, -np.inf], np.nan)
                 .replace(np.nan, 0)
@@ -225,7 +242,12 @@ class AlphaEval:
                 long_in = longs - prev_longs
                 short_out = prev_shorts - shorts
                 short_in = shorts - prev_shorts
-                trades = len(long_out) + len(long_in) + len(short_out) + len(short_in)
+                trades = (
+                    len(long_out)
+                    + len(long_in)
+                    + len(short_out)
+                    + len(short_in)
+                )
                 denom = len(prev_longs) + len(prev_shorts)
                 turnover = trades / denom if denom > 0 else float("nan")
 
@@ -328,7 +350,9 @@ class AlphaEval:
             self.llm_explanations.append(item["explanation"])
 
         self.llm_avg_score = (
-            sum(self.llm_scores) / len(self.llm_scores) if self.llm_scores else 0.0
+            sum(self.llm_scores) / len(self.llm_scores)
+            if self.llm_scores
+            else 0.0
         )
 
     def run(self):
@@ -367,7 +391,9 @@ class AlphaEval:
         rre_series = 1 / (1 + rre_series)
         self.ic = round(ic_series.mean(), 3)
         self.rankic = round(rank_ic_series.mean(), 3)
-        self.rre = round(rre_series.mean(), 3) if len(rre_series) > 0 else np.nan
+        self.rre = (
+            round(rre_series.mean(), 3) if len(rre_series) > 0 else np.nan
+        )
         self.pfs1 = round(pfs1_series.mean(), 6)
         self.pfs2 = round(pfs2_series.mean(), 6)
 
@@ -424,12 +450,18 @@ class AlphaEval:
                 probs = ranks.div(ranks.sum(axis=1), axis=0)
                 probs_prev = probs.shift(1)
                 eps = 1e-8
-                kl = (probs * np.log((probs + eps) / (probs_prev + eps))).sum(axis=1)
+                kl = (probs * np.log((probs + eps) / (probs_prev + eps))).sum(
+                    axis=1
+                )
                 rre_series = kl.dropna()
                 rre_series = 1 / (1 + rre_series)
                 ic = round(ic_series.mean(), 3)
                 rankic = round(rank_ic_series.mean(), 3)
-                rre = round(rre_series.mean(), 3) if len(rre_series) > 0 else np.nan
+                rre = (
+                    round(rre_series.mean(), 3)
+                    if len(rre_series) > 0
+                    else np.nan
+                )
                 pfs1 = round(pfs1_series.mean(), 6)
                 pfs2 = round(pfs2_series.mean(), 6)
                 res.append(

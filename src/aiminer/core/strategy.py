@@ -1,18 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Dict, Literal, Optional
-
 import json
+from pathlib import Path
 import sqlite3
+from typing import Any, Dict, Literal, Optional
 
 import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from aiminer.core.constants import TRADING_DAYS_PER_YEAR
-
 
 StrategyMode = Literal["cross_sectional", "time_series"]
 SignalSource = Literal["expression", "factor_combo"]
@@ -50,7 +48,9 @@ class StrategyConfig(BaseModel):
         if self.selection_rule == "top_n" and self.top_n is None:
             raise ValueError("top_n is required when selection_rule='top_n'")
         if self.selection_rule == "bottom_n" and self.bottom_n is None:
-            raise ValueError("bottom_n is required when selection_rule='bottom_n'")
+            raise ValueError(
+                "bottom_n is required when selection_rule='bottom_n'"
+            )
         if self.selection_rule == "top_bottom_n":
             if self.top_n is None or self.bottom_n is None:
                 raise ValueError(
@@ -61,14 +61,21 @@ class StrategyConfig(BaseModel):
                 raise ValueError(
                     "At least one of long_threshold/short_threshold is required when selection_rule='threshold'"
                 )
-        if self.strategy_mode == "cross_sectional" and self.direction == "long_flat":
-            raise ValueError("cross_sectional strategy does not support long_flat")
+        if (
+            self.strategy_mode == "cross_sectional"
+            and self.direction == "long_flat"
+        ):
+            raise ValueError(
+                "cross_sectional strategy does not support long_flat"
+            )
         if self.strategy_mode == "time_series" and self.selection_rule in {
             "top_n",
             "bottom_n",
             "top_bottom_n",
         }:
-            raise ValueError("time_series strategy only supports threshold rule")
+            raise ValueError(
+                "time_series strategy only supports threshold rule"
+            )
         return self
 
 
@@ -223,7 +230,9 @@ def selection_score(
     return base
 
 
-def compute_period_metrics(net_returns: pd.Series) -> Dict[str, Dict[str, float]]:
+def compute_period_metrics(
+    net_returns: pd.Series,
+) -> Dict[str, Dict[str, float]]:
     """Slice the daily net-return series by year and quarter so the critic
     can cite concrete failure windows. Empty inputs return an empty dict."""
     if net_returns is None or net_returns.empty:
@@ -236,13 +245,22 @@ def compute_period_metrics(net_returns: pd.Series) -> Dict[str, Dict[str, float]
 
     def _stats(window: pd.Series) -> Dict[str, float]:
         if window.empty:
-            return {"return": 0.0, "sharpe": 0.0, "max_drawdown": 0.0, "win_rate": 0.0, "n_days": 0}
+            return {
+                "return": 0.0,
+                "sharpe": 0.0,
+                "max_drawdown": 0.0,
+                "win_rate": 0.0,
+                "n_days": 0,
+            }
         cum = (1.0 + window.fillna(0.0)).cumprod()
         sharpe = (
             float(window.mean() / window.std() * np.sqrt(TRADING_DAYS_PER_YEAR))
-            if float(window.std()) > 1e-12 else 0.0
+            if float(window.std()) > 1e-12
+            else 0.0
         )
-        max_dd = float((cum / cum.cummax() - 1.0).min()) if not cum.empty else 0.0
+        max_dd = (
+            float((cum / cum.cummax() - 1.0).min()) if not cum.empty else 0.0
+        )
         return {
             "return": float(cum.iloc[-1] - 1.0),
             "sharpe": sharpe,
@@ -264,7 +282,9 @@ def compute_period_metrics(net_returns: pd.Series) -> Dict[str, Dict[str, float]
         lambda g: float((1.0 + g.fillna(0.0)).prod() - 1.0)
     )
     worst_months = (
-        monthly_returns.nsmallest(3).to_dict() if not monthly_returns.empty else {}
+        monthly_returns.nsmallest(3).to_dict()
+        if not monthly_returns.empty
+        else {}
     )
     return {
         "yearly": yearly,
@@ -289,7 +309,9 @@ def _split_walk_forward_windows(
     sorted_idx = pd.DatetimeIndex(index).sort_values().unique()
     if len(sorted_idx) < min_window_days:
         return []
-    feasible_windows = max(1, min(n_windows, len(sorted_idx) // min_window_days))
+    feasible_windows = max(
+        1, min(n_windows, len(sorted_idx) // min_window_days)
+    )
     edges = np.linspace(0, len(sorted_idx), feasible_windows + 1, dtype=int)
     windows: list[tuple[pd.Timestamp, pd.Timestamp]] = []
     for i in range(feasible_windows):
@@ -300,7 +322,9 @@ def _split_walk_forward_windows(
     return windows
 
 
-def aggregate_walk_forward(window_metrics: list[Dict[str, Any]]) -> Dict[str, Any]:
+def aggregate_walk_forward(
+    window_metrics: list[Dict[str, Any]],
+) -> Dict[str, Any]:
     """Summarize a list of per-window metric dicts into stability indicators
     used by selection_score and the StrategyCritic prompt."""
     if not window_metrics:
@@ -313,7 +337,9 @@ def aggregate_walk_forward(window_metrics: list[Dict[str, Any]]) -> Dict[str, An
             "n_windows": 0,
         }
     sharpes = [float(w.get("sharpe", 0.0) or 0.0) for w in window_metrics]
-    returns = [float(w.get("annualized_return", 0.0) or 0.0) for w in window_metrics]
+    returns = [
+        float(w.get("annualized_return", 0.0) or 0.0) for w in window_metrics
+    ]
     n = len(window_metrics)
     consistency = sum(1 for s in sharpes if s > 0) / n if n else 0.0
     return {
@@ -354,7 +380,9 @@ class StrategyBacktester:
     def __init__(self, config: StrategyConfig):
         self.config = config
 
-    def run(self, signal_df: pd.DataFrame, label_df: pd.DataFrame) -> Dict[str, Any]:
+    def run(
+        self, signal_df: pd.DataFrame, label_df: pd.DataFrame
+    ) -> Dict[str, Any]:
         signal_df = signal_df.sort_index().sort_index(axis=1)
         label_df = label_df.reindex_like(signal_df).fillna(0.0)
 
@@ -364,7 +392,12 @@ class StrategyBacktester:
             else self._build_time_series_positions(signal_df)
         )
         positions, trade_stats = self._apply_rebalance_and_constraints(desired)
-        turnover = positions.diff().abs().sum(axis=1).fillna(positions.abs().sum(axis=1))
+        turnover = (
+            positions.diff()
+            .abs()
+            .sum(axis=1)
+            .fillna(positions.abs().sum(axis=1))
+        )
         gross_returns = (positions * label_df).sum(axis=1)
         cost_rate = (
             self.config.commission_bps + self.config.slippage_bps
@@ -400,25 +433,37 @@ class StrategyBacktester:
             "sharpe": sharpe,
             "max_drawdown": max_dd,
             "turnover": float(turnover.mean()) if not turnover.empty else 0.0,
-            "win_rate": float((net_returns > 0).mean()) if not net_returns.empty else 0.0,
+            "win_rate": float((net_returns > 0).mean())
+            if not net_returns.empty
+            else 0.0,
             "average_holding_period": (
                 float(np.mean(holding_lengths)) if holding_lengths else 0.0
             ),
             "gross_exposure": (
-                float(positions.abs().sum(axis=1).mean()) if not positions.empty else 0.0
+                float(positions.abs().sum(axis=1).mean())
+                if not positions.empty
+                else 0.0
             ),
             "net_exposure": (
-                float(positions.sum(axis=1).mean()) if not positions.empty else 0.0
+                float(positions.sum(axis=1).mean())
+                if not positions.empty
+                else 0.0
             ),
             "cost_drag": float(costs.sum()),
-            "gross_return": float(gross_returns.sum()) if not gross_returns.empty else 0.0,
-            "net_return": float(net_returns.sum()) if not net_returns.empty else 0.0,
+            "gross_return": float(gross_returns.sum())
+            if not gross_returns.empty
+            else 0.0,
+            "net_return": float(net_returns.sum())
+            if not net_returns.empty
+            else 0.0,
         }
 
         snapshot = positions.tail(5).replace({np.nan: 0.0})
         positions_dict = {
             str(idx.date() if hasattr(idx, "date") else idx): {
-                col: float(val) for col, val in row.items() if abs(float(val)) > 1e-12
+                col: float(val)
+                for col, val in row.items()
+                if abs(float(val)) > 1e-12
             }
             for idx, row in snapshot.iterrows()
         }
@@ -432,7 +477,9 @@ class StrategyBacktester:
             "positions": positions_dict,
             "trade_stats": {
                 **trade_stats,
-                "avg_turnover": float(turnover.mean()) if not turnover.empty else 0.0,
+                "avg_turnover": float(turnover.mean())
+                if not turnover.empty
+                else 0.0,
                 "total_cost": float(costs.sum()),
                 "rebalance_days": int((turnover > 0).sum()),
             },
@@ -459,7 +506,9 @@ class StrategyBacktester:
         """
         full = self.run(signal_df, label_df)
         sorted_index = pd.DatetimeIndex(signal_df.index).sort_values().unique()
-        windows = _split_walk_forward_windows(sorted_index, n_windows, min_window_days)
+        windows = _split_walk_forward_windows(
+            sorted_index, n_windows, min_window_days
+        )
         per_window: list[Dict[str, Any]] = []
         for start, end in windows:
             sig_slice = signal_df.loc[start:end]
@@ -480,7 +529,9 @@ class StrategyBacktester:
         }
         return full
 
-    def _build_cross_sectional_positions(self, signal_df: pd.DataFrame) -> pd.DataFrame:
+    def _build_cross_sectional_positions(
+        self, signal_df: pd.DataFrame
+    ) -> pd.DataFrame:
         cfg = self.config
         frames = []
         for _, row in signal_df.iterrows():
@@ -494,7 +545,9 @@ class StrategyBacktester:
                 pos.loc[selected] = 1.0
             elif cfg.selection_rule == "bottom_n":
                 selected = ordered.head(cfg.bottom_n or 0).index
-                pos.loc[selected] = -1.0 if cfg.direction == "long_short" else 1.0
+                pos.loc[selected] = (
+                    -1.0 if cfg.direction == "long_short" else 1.0
+                )
             elif cfg.selection_rule == "top_bottom_n":
                 long_idx = ordered.tail(cfg.top_n or 0).index
                 short_idx = ordered.head(cfg.bottom_n or 0).index
@@ -503,17 +556,28 @@ class StrategyBacktester:
             else:
                 if cfg.long_threshold is not None:
                     pos.loc[row >= cfg.long_threshold] = 1.0
-                if cfg.short_threshold is not None and cfg.direction == "long_short":
+                if (
+                    cfg.short_threshold is not None
+                    and cfg.direction == "long_short"
+                ):
                     pos.loc[row <= cfg.short_threshold] = -1.0
             if cfg.direction == "long_only":
                 pos = pos.clip(lower=0.0)
-            frames.append(_normalize_positions(pos, cfg.max_weight_per_position))
-        result = pd.DataFrame(frames, index=signal_df.index, columns=signal_df.columns)
+            frames.append(
+                _normalize_positions(pos, cfg.max_weight_per_position)
+            )
+        result = pd.DataFrame(
+            frames, index=signal_df.index, columns=signal_df.columns
+        )
         return result.fillna(0.0)
 
-    def _build_time_series_positions(self, signal_df: pd.DataFrame) -> pd.DataFrame:
+    def _build_time_series_positions(
+        self, signal_df: pd.DataFrame
+    ) -> pd.DataFrame:
         cfg = self.config
-        positions = pd.DataFrame(0.0, index=signal_df.index, columns=signal_df.columns)
+        positions = pd.DataFrame(
+            0.0, index=signal_df.index, columns=signal_df.columns
+        )
         for col in signal_df.columns:
             current = 0.0
             held = 0
@@ -521,18 +585,29 @@ class StrategyBacktester:
             for idx, value in series.items():
                 desired = current
                 if cfg.direction == "long_flat":
-                    if cfg.long_threshold is not None and value >= cfg.long_threshold:
+                    if (
+                        cfg.long_threshold is not None
+                        and value >= cfg.long_threshold
+                    ):
                         desired = 1.0
                     elif (
-                        cfg.exit_threshold is not None and value <= cfg.exit_threshold
+                        cfg.exit_threshold is not None
+                        and value <= cfg.exit_threshold
                     ) or (
-                        cfg.long_threshold is not None and value < cfg.long_threshold
+                        cfg.long_threshold is not None
+                        and value < cfg.long_threshold
                     ):
                         desired = 0.0
                 elif cfg.direction == "long_short":
-                    if cfg.long_threshold is not None and value >= cfg.long_threshold:
+                    if (
+                        cfg.long_threshold is not None
+                        and value >= cfg.long_threshold
+                    ):
                         desired = 1.0
-                    elif cfg.short_threshold is not None and value <= cfg.short_threshold:
+                    elif (
+                        cfg.short_threshold is not None
+                        and value <= cfg.short_threshold
+                    ):
                         desired = -1.0
                     elif (
                         cfg.exit_threshold is not None
@@ -545,10 +620,17 @@ class StrategyBacktester:
                         if current < 0 and value > cfg.exit_threshold:
                             desired = 0.0
                 else:
-                    if cfg.long_threshold is not None and value >= cfg.long_threshold:
+                    if (
+                        cfg.long_threshold is not None
+                        and value >= cfg.long_threshold
+                    ):
                         desired = 1.0
 
-                if desired != current and current != 0.0 and held < cfg.min_holding_days:
+                if (
+                    desired != current
+                    and current != 0.0
+                    and held < cfg.min_holding_days
+                ):
                     desired = current
                 if desired == current and current != 0.0:
                     held += 1
@@ -558,12 +640,15 @@ class StrategyBacktester:
                 positions.at[idx, col] = current
 
         if cfg.max_positions:
-            ranked = signal_df.where(positions != 0.0).abs().rank(
-                axis=1, ascending=False, method="first"
+            ranked = (
+                signal_df.where(positions != 0.0)
+                .abs()
+                .rank(axis=1, ascending=False, method="first")
             )
             positions = positions.where(ranked <= cfg.max_positions, 0.0)
         return positions.apply(
-            lambda row: _normalize_positions(row, cfg.max_weight_per_position), axis=1
+            lambda row: _normalize_positions(row, cfg.max_weight_per_position),
+            axis=1,
         ).fillna(0.0)
 
     def _apply_rebalance_and_constraints(
@@ -571,7 +656,9 @@ class StrategyBacktester:
     ) -> tuple[pd.DataFrame, Dict[str, Any]]:
         cfg = self.config
         rebalance = _rebalance_mask(desired.index, cfg.rebalance_freq)
-        positions = pd.DataFrame(0.0, index=desired.index, columns=desired.columns)
+        positions = pd.DataFrame(
+            0.0, index=desired.index, columns=desired.columns
+        )
         holding_days = {col: 0 for col in desired.columns}
         holding_lengths: list[int] = []
 
@@ -586,7 +673,10 @@ class StrategyBacktester:
                 non_zero = candidate[candidate != 0.0]
                 if len(non_zero) > cfg.max_positions:
                     keep = (
-                        non_zero.abs().sort_values(ascending=False).head(cfg.max_positions).index
+                        non_zero.abs()
+                        .sort_values(ascending=False)
+                        .head(cfg.max_positions)
+                        .index
                     )
                     candidate.loc[~candidate.index.isin(keep)] = 0.0
             for col in candidate.index:
@@ -603,7 +693,9 @@ class StrategyBacktester:
                     holding_days[col] = 0
                 elif candidate[col] != 0.0 and prev[col] == 0.0:
                     holding_days[col] = 1
-            candidate = _normalize_positions(candidate, cfg.max_weight_per_position)
+            candidate = _normalize_positions(
+                candidate, cfg.max_weight_per_position
+            )
             positions.loc[dt] = candidate
             prev = candidate
         return positions.fillna(0.0), {"holding_lengths": holding_lengths}
@@ -647,20 +739,47 @@ def ensure_strategy_table(db_path: str | Path) -> None:
             """
         )
         for column, ddl in [
-            ("template_name", "ALTER TABLE strategy_backtests ADD COLUMN template_name TEXT"),
-            ("rationale", "ALTER TABLE strategy_backtests ADD COLUMN rationale TEXT"),
+            (
+                "template_name",
+                "ALTER TABLE strategy_backtests ADD COLUMN template_name TEXT",
+            ),
+            (
+                "rationale",
+                "ALTER TABLE strategy_backtests ADD COLUMN rationale TEXT",
+            ),
             ("run_id", "ALTER TABLE strategy_backtests ADD COLUMN run_id TEXT"),
             (
                 "source_factor_id",
                 "ALTER TABLE strategy_backtests ADD COLUMN source_factor_id TEXT",
             ),
-            ("agent_id", "ALTER TABLE strategy_backtests ADD COLUMN agent_id TEXT"),
-            ("candidate_rank", "ALTER TABLE strategy_backtests ADD COLUMN candidate_rank INTEGER"),
-            ("selection_score", "ALTER TABLE strategy_backtests ADD COLUMN selection_score REAL"),
-            ("is_primary", "ALTER TABLE strategy_backtests ADD COLUMN is_primary INTEGER"),
-            ("market_profile", "ALTER TABLE strategy_backtests ADD COLUMN market_profile TEXT"),
-            ("data_backend", "ALTER TABLE strategy_backtests ADD COLUMN data_backend TEXT"),
-            ("cache_key", "ALTER TABLE strategy_backtests ADD COLUMN cache_key TEXT"),
+            (
+                "agent_id",
+                "ALTER TABLE strategy_backtests ADD COLUMN agent_id TEXT",
+            ),
+            (
+                "candidate_rank",
+                "ALTER TABLE strategy_backtests ADD COLUMN candidate_rank INTEGER",
+            ),
+            (
+                "selection_score",
+                "ALTER TABLE strategy_backtests ADD COLUMN selection_score REAL",
+            ),
+            (
+                "is_primary",
+                "ALTER TABLE strategy_backtests ADD COLUMN is_primary INTEGER",
+            ),
+            (
+                "market_profile",
+                "ALTER TABLE strategy_backtests ADD COLUMN market_profile TEXT",
+            ),
+            (
+                "data_backend",
+                "ALTER TABLE strategy_backtests ADD COLUMN data_backend TEXT",
+            ),
+            (
+                "cache_key",
+                "ALTER TABLE strategy_backtests ADD COLUMN cache_key TEXT",
+            ),
         ]:
             try:
                 conn.execute(ddl)
@@ -678,7 +797,9 @@ def ensure_strategy_table(db_path: str | Path) -> None:
         conn.commit()
 
 
-def persist_strategy_result(db_path: str | Path, payload: Dict[str, Any]) -> None:
+def persist_strategy_result(
+    db_path: str | Path, payload: Dict[str, Any]
+) -> None:
     ensure_strategy_table(db_path)
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute(
@@ -699,10 +820,17 @@ def persist_strategy_result(db_path: str | Path, payload: Dict[str, Any]) -> Non
                 payload.get("run_type"),
                 payload.get("strategy_config", {}).get("strategy_mode"),
                 payload.get("strategy_config", {}).get("signal_source"),
-                json.dumps({"expression": payload.get("expression")}, ensure_ascii=False),
-                json.dumps(payload.get("strategy_config", {}), ensure_ascii=False),
+                json.dumps(
+                    {"expression": payload.get("expression")},
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    payload.get("strategy_config", {}), ensure_ascii=False
+                ),
                 json.dumps(payload.get("metrics", {}), ensure_ascii=False),
-                json.dumps(payload.get("daily_returns", {}), ensure_ascii=False),
+                json.dumps(
+                    payload.get("daily_returns", {}), ensure_ascii=False
+                ),
                 json.dumps(payload.get("positions", {}), ensure_ascii=False),
                 json.dumps(payload.get("trade_stats", {}), ensure_ascii=False),
                 json.dumps(payload.get("chart_paths", {}), ensure_ascii=False),

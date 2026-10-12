@@ -1,9 +1,10 @@
 import os
+from typing import Dict, List, Optional
+
+from loguru import logger
 import numpy as np
 import pandas as pd
 from scipy.optimize import differential_evolution
-from typing import Dict, List, Optional
-from loguru import logger
 
 # import warnings
 # warnings.filterwarnings("ignore")
@@ -104,14 +105,22 @@ class WeightCalculator:
         ic = 0.0 if (not isinstance(ic, float) or np.isnan(ic)) else ic
         return ic
 
-    def train_optimal_weights(self, X: pd.DataFrame, y: pd.DataFrame, maxiter: int = 1):
+    def train_optimal_weights(
+        self, X: pd.DataFrame, y: pd.DataFrame, maxiter: int = 1
+    ):
         def obj(u: np.ndarray) -> float:
             w = u / np.sum(np.abs(u))
             return -1 * self.compute_mean_ic(X, y, w)
 
         bounds = [(-1, 1)] * X.shape[1]
         result = differential_evolution(
-            obj, bounds, maxiter=maxiter, popsize=20, tol=1e-6, polish=False, disp=True
+            obj,
+            bounds,
+            maxiter=maxiter,
+            popsize=20,
+            tol=1e-6,
+            polish=False,
+            disp=True,
         )
         u_opt = result.x
         w_opt = u_opt / np.sum(np.abs(u_opt))

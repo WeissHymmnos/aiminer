@@ -1,5 +1,5 @@
-import { FormEvent, useState } from "react";
-import { deskFetch } from "../lib/api";
+import { FormEvent, useState } from 'react';
+import { deskFetch } from '../lib/api';
 
 type JobBody = {
   id?: string;
@@ -9,7 +9,7 @@ type JobBody = {
 };
 
 export function ReproducePage() {
-  const [pdfPath, setPdfPath] = useState("");
+  const [pdfPath, setPdfPath] = useState('');
   const [job, setJob] = useState<JobBody | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -17,9 +17,9 @@ export function ReproducePage() {
     event.preventDefault();
     setError(null);
     setJob(null);
-    deskFetch("/api/v1/reproduce", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    deskFetch('/api/v1/reproduce', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pdf_path: pdfPath, sync: false }),
     })
       .then((r) => {
@@ -30,7 +30,7 @@ export function ReproducePage() {
         setJob(body);
         const jobId = body.id;
         if (!jobId) {
-          setError("reproduce did not return a job id");
+          setError('reproduce did not return a job id');
           return;
         }
         const tick = () => {
@@ -41,10 +41,10 @@ export function ReproducePage() {
             })
             .then((next: JobBody) => {
               setJob(next);
-              if (next.status === "error") {
-                setError(String(next.error || "reproduce failed"));
+              if (next.status === 'error') {
+                setError(String(next.error || 'reproduce failed'));
               }
-              if (next.status === "running" || next.status === "queued") {
+              if (next.status === 'running' || next.status === 'queued') {
                 window.setTimeout(tick, 1500);
               }
             })
@@ -56,14 +56,14 @@ export function ReproducePage() {
   };
 
   const resultStatus = job?.result?.status;
-  const noFactors = resultStatus === "no_factors";
+  const noFactors = resultStatus === 'no_factors';
 
   return (
     <div className="page-grid">
       <h2>Reproduce</h2>
       <p className="muted">
-        PDF path must sit under FINAINCE_PDF_ROOT. Job poll uses the same id. Desk
-        token required.
+        PDF path must sit under FINAINCE_PDF_ROOT. Job poll uses the same id.
+        Desk token required.
       </p>
       <form onSubmit={onSubmit}>
         <label className="field">
@@ -85,9 +85,13 @@ export function ReproducePage() {
         </p>
       ) : null}
       {noFactors ? (
-        <div className="status-block">no_factors — extraction found nothing honest to backtest.</div>
+        <div className="status-block">
+          no_factors — extraction found nothing honest to backtest.
+        </div>
       ) : null}
-      {resultStatus && !noFactors ? <p className="muted">result: {resultStatus}</p> : null}
+      {resultStatus && !noFactors ? (
+        <p className="muted">result: {resultStatus}</p>
+      ) : null}
     </div>
   );
 }

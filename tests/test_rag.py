@@ -1,5 +1,5 @@
-import unittest
 import tempfile
+import unittest
 from unittest.mock import patch
 
 from aiminer.core.rag import RAGModule

@@ -1,11 +1,13 @@
-import urllib.request
-import urllib.parse
-import xml.etree.ElementTree as ET
 import os
 import ssl
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
 
 
-def fetch_arxiv_papers(query, max_results=50, output_dir="data/rag_docs/academic"):
+def fetch_arxiv_papers(
+    query, max_results=50, output_dir="data/rag_docs/academic"
+):
     os.makedirs(output_dir, exist_ok=True)
 
     # URL encode the query
@@ -27,7 +29,9 @@ def fetch_arxiv_papers(query, max_results=50, output_dir="data/rag_docs/academic
         count = 0
         for entry in root.findall("atom:entry", ns):
             title = entry.find("atom:title", ns).text.replace("\n", " ").strip()
-            summary = entry.find("atom:summary", ns).text.replace("\n", " ").strip()
+            summary = (
+                entry.find("atom:summary", ns).text.replace("\n", " ").strip()
+            )
             published = entry.find("atom:published", ns).text
             authors = [
                 author.find("atom:name", ns).text
@@ -36,7 +40,9 @@ def fetch_arxiv_papers(query, max_results=50, output_dir="data/rag_docs/academic
             link = entry.find("atom:id", ns).text
 
             # Clean filename
-            safe_title = "".join([c if c.isalnum() else "_" for c in title])[:50]
+            safe_title = "".join([c if c.isalnum() else "_" for c in title])[
+                :50
+            ]
             filename = os.path.join(output_dir, f"{safe_title}.md")
 
             with open(filename, "w", encoding="utf-8") as f:
@@ -47,7 +53,9 @@ def fetch_arxiv_papers(query, max_results=50, output_dir="data/rag_docs/academic
                 f.write(f"## Abstract\n\n{summary}\n")
             count += 1
 
-        print(f"Successfully downloaded {count} paper abstracts to {output_dir}")
+        print(
+            f"Successfully downloaded {count} paper abstracts to {output_dir}"
+        )
     except Exception as e:
         print(f"Failed to fetch papers: {e}")
 

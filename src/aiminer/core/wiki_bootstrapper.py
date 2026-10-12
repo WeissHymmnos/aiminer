@@ -1,10 +1,13 @@
 from __future__ import annotations
+
 from typing import List, Optional
-from loguru import logger
-from aiminer.core.wiki import LLMWiki
-from aiminer.core.rag import RAGModule
-from aiminer.core.llm import get_llm
+
 from langchain_core.prompts import ChatPromptTemplate
+from loguru import logger
+
+from aiminer.core.llm import get_llm
+from aiminer.core.rag import RAGModule
+from aiminer.core.wiki import LLMWiki
 
 
 class WikiBootstrapper:
@@ -36,7 +39,9 @@ class WikiBootstrapper:
             )
             return
 
-        logger.info("Wiki-ifying the shared knowledge base from RAG documents...")
+        logger.info(
+            "Wiki-ifying the shared knowledge base from RAG documents..."
+        )
 
         # 1. Market Regime Baseline
         self._summarize_to_wiki(

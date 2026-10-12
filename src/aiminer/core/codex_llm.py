@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import shlex
 import shutil
 import subprocess
 import tempfile
-from pathlib import Path
 from typing import Any
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from pydantic import Field, model_validator
-
 
 SUPPORTED_CODEX_REASONING_EFFORTS = ("low", "medium", "high", "xhigh")
 
@@ -68,9 +67,13 @@ class CodexChatModel(BaseChatModel):
     model_name: str = "gpt-5.4"
     temperature: float = 0.7
     timeout_seconds: float = Field(
-        default_factory=lambda: float(os.getenv("AIMINER_CODEX_TIMEOUT_SECONDS", "180"))
+        default_factory=lambda: float(
+            os.getenv("AIMINER_CODEX_TIMEOUT_SECONDS", "180")
+        )
     )
-    reasoning_effort: str | None = Field(default_factory=codex_reasoning_effort_from_env)
+    reasoning_effort: str | None = Field(
+        default_factory=codex_reasoning_effort_from_env
+    )
     cwd: str = Field(default_factory=os.getcwd)
     sandbox: str = "read-only"
 
@@ -80,7 +83,9 @@ class CodexChatModel(BaseChatModel):
 
     @model_validator(mode="after")
     def _validate_reasoning_effort(self) -> "CodexChatModel":
-        self.reasoning_effort = normalize_reasoning_effort(self.reasoning_effort)
+        self.reasoning_effort = normalize_reasoning_effort(
+            self.reasoning_effort
+        )
         return self
 
     def _generate(
@@ -101,7 +106,9 @@ class CodexChatModel(BaseChatModel):
             output_path = Path(tmp_dir) / "last_message.txt"
             argv = [*command, "exec"]
             if self.reasoning_effort:
-                argv.extend(["-c", f'model_reasoning_effort="{self.reasoning_effort}"'])
+                argv.extend(
+                    ["-c", f'model_reasoning_effort="{self.reasoning_effort}"']
+                )
             argv.extend(
                 [
                     "--ephemeral",
@@ -136,7 +143,9 @@ class CodexChatModel(BaseChatModel):
                 stderr = (result.stderr or "").strip()
                 stdout = (result.stdout or "").strip()
                 detail = stderr or stdout or "no output"
-                raise RuntimeError(f"Codex CLI failed with exit code {result.returncode}: {detail[-2000:]}")
+                raise RuntimeError(
+                    f"Codex CLI failed with exit code {result.returncode}: {detail[-2000:]}"
+                )
 
             content = ""
             if output_path.exists():
@@ -146,7 +155,9 @@ class CodexChatModel(BaseChatModel):
             if stop:
                 content = self._apply_stop(content, stop)
 
-        return ChatResult(generations=[ChatGeneration(message=AIMessage(content=content))])
+        return ChatResult(
+            generations=[ChatGeneration(message=AIMessage(content=content))]
+        )
 
     @staticmethod
     def _messages_to_prompt(messages: list[BaseMessage]) -> str:
@@ -183,7 +194,9 @@ class CodexChatModel(BaseChatModel):
 
     @staticmethod
     def _fallback_stdout(stdout: str | None) -> str:
-        lines = [line.strip() for line in (stdout or "").splitlines() if line.strip()]
+        lines = [
+            line.strip() for line in (stdout or "").splitlines() if line.strip()
+        ]
         return lines[-1] if lines else ""
 
     @staticmethod

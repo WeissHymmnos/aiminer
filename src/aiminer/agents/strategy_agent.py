@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
 import json
 import re
+from typing import Any, Dict, List
 
 from loguru import logger
 
-from aiminer.core.llm import get_llm
-from aiminer.core.strategy import StrategyConfig, StrategyProposalOutput, strategy_templates
-from aiminer.schemas.messages import StrategyProposalBatchOutput
 from aiminer.app_workflow.state import AlphaMinerState
-
+from aiminer.core.llm import get_llm
+from aiminer.core.strategy import (
+    StrategyConfig,
+    StrategyProposalOutput,
+    strategy_templates,
+)
+from aiminer.schemas.messages import StrategyProposalBatchOutput
 
 # --- Normalization Utilities ---
+
 
 def _normalized_token(value: Any) -> str:
     text = "" if value is None else str(value)
@@ -29,7 +33,9 @@ def _text_contains_any(value: Any, needles: tuple[str, ...]) -> bool:
 
 def _strategy_mode_hint(value: Any) -> str | None:
     token = _normalized_token(value)
-    if token.startswith(("cs_", "cross_sectional", "cross_section", "crosssectional")):
+    if token.startswith(
+        ("cs_", "cross_sectional", "cross_section", "crosssectional")
+    ):
         return "cross_sectional"
     if token.endswith("_cs") or "_cs_" in token:
         return "cross_sectional"
@@ -41,7 +47,9 @@ def _strategy_mode_hint(value: Any) -> str | None:
         "cross_sectional",
         "cross_section",
         "crosssectional",
-    } or _text_contains_any(value, ("cross_sectional", "cross_section", "cross-sectional")):
+    } or _text_contains_any(
+        value, ("cross_sectional", "cross_section", "cross-sectional")
+    ):
         return "cross_sectional"
     if token in {"time_series", "timeseries"} or _text_contains_any(
         value, ("time_series", "time-series", "timeseries")
@@ -84,7 +92,9 @@ def _fraction_from_count_alias(value: Any) -> float | None:
     return fraction if 0 < fraction < 1 else None
 
 
-def _thresholds_from_quantile_counts(values: Dict[str, Any] | None) -> Dict[str, float]:
+def _thresholds_from_quantile_counts(
+    values: Dict[str, Any] | None,
+) -> Dict[str, float]:
     thresholds: Dict[str, float] = {}
     for key, value in (values or {}).items():
         token = _normalized_token(key)
@@ -130,7 +140,14 @@ def _merge_structured_selection_rule(payload: Dict[str, Any]) -> Dict[str, Any]:
     method = None
     for key, value in selection_rule.items():
         token = _normalized_token(key)
-        if token in {"method", "rule", "selection_rule", "type", "mode", "name"}:
+        if token in {
+            "method",
+            "rule",
+            "selection_rule",
+            "type",
+            "mode",
+            "name",
+        }:
             if value not in (None, ""):
                 method = value
             continue
@@ -215,7 +232,9 @@ def _merge_structured_selection_rule(payload: Dict[str, Any]) -> Dict[str, Any]:
     return merged
 
 
-def _clean_holding_constraints(values: Dict[str, Any] | None) -> Dict[str, float | int]:
+def _clean_holding_constraints(
+    values: Dict[str, Any] | None,
+) -> Dict[str, float | int]:
     cleaned: Dict[str, float | int] = {}
     raw = values or {}
 
@@ -263,7 +282,9 @@ def _normalize_strategy_mode(
 ) -> str:
     token = _normalized_token(value)
     hinted_mode = _strategy_mode_hint(context_hint)
-    if token.startswith(("cross_sectional", "cross_section", "crosssectional", "cs_")):
+    if token.startswith(
+        ("cross_sectional", "cross_section", "crosssectional", "cs_")
+    ):
         return "cross_sectional"
     if token.startswith(("time_series", "timeseries", "ts_")):
         return "time_series"
@@ -408,7 +429,9 @@ def _normalize_strategy_mode(
     }:
         if hinted_mode:
             return hinted_mode
-        return "time_series" if market_profile == "futures" else "cross_sectional"
+        return (
+            "time_series" if market_profile == "futures" else "cross_sectional"
+        )
     if _text_contains_any(
         value,
         (
@@ -424,7 +447,9 @@ def _normalize_strategy_mode(
             "timeseries",
         ),
     ):
-        return "time_series" if market_profile == "futures" else "cross_sectional"
+        return (
+            "time_series" if market_profile == "futures" else "cross_sectional"
+        )
     if hinted_mode:
         return hinted_mode
     return str(value)
@@ -445,7 +470,9 @@ def _selection_mentions_short(value: Any) -> bool:
     )
 
 
-def _normalize_direction(value: Any, strategy_mode: str, selection_rule_text: Any) -> str:
+def _normalize_direction(
+    value: Any, strategy_mode: str, selection_rule_text: Any
+) -> str:
     raw_text = "" if value is None else str(value).strip().lower()
     token = _normalized_token(value)
     if token in {
@@ -486,12 +513,26 @@ def _normalize_direction(value: Any, strategy_mode: str, selection_rule_text: An
         "counter_trend",
         "counter_trend_reversal",
     } or _text_contains_any(
-        value, ("\u591a\u7a7a", "\u53cc\u5411", "\u4e2d\u6027", "long_short", "bidirectional", "neutral")
+        value,
+        (
+            "\u591a\u7a7a",
+            "\u53cc\u5411",
+            "\u4e2d\u6027",
+            "long_short",
+            "bidirectional",
+            "neutral",
+        ),
     ):
         return "long_short"
     if "long" in token and "short" in token:
         return "long_short"
-    if token in {"1", "true", "yes"} or raw_text in {"1.0", "+1", "+1.0", "-1", "-1.0"}:
+    if token in {"1", "true", "yes"} or raw_text in {
+        "1.0",
+        "+1",
+        "+1.0",
+        "-1",
+        "-1.0",
+    }:
         return "long_short"
     if token in {"long_flat", "longflat", "flat"} or _text_contains_any(
         value, ("\u7a7a\u4ed3", "flat")
@@ -500,7 +541,15 @@ def _normalize_direction(value: Any, strategy_mode: str, selection_rule_text: An
     if token in {"0", "false", "no"}:
         return "long_flat" if strategy_mode == "time_series" else "long_only"
     if token in {"short", "short_only", "shortonly"} or _text_contains_any(
-        value, ("\u505a\u7a7a", "\u7a7a\u5934", "\u53ea\u7a7a", "go_short", "short", "short_only")
+        value,
+        (
+            "\u505a\u7a7a",
+            "\u7a7a\u5934",
+            "\u53ea\u7a7a",
+            "go_short",
+            "short",
+            "short_only",
+        ),
     ):
         return "long_short"
     if token in {
@@ -531,10 +580,22 @@ def _normalize_direction(value: Any, strategy_mode: str, selection_rule_text: An
         "long_positive",
         "positive_long",
     } or _text_contains_any(
-        value, ("\u505a\u591a", "\u591a\u5934", "\u53ea\u591a", "go_long", "long", "long_only")
+        value,
+        (
+            "\u505a\u591a",
+            "\u591a\u5934",
+            "\u53ea\u591a",
+            "go_long",
+            "long",
+            "long_only",
+        ),
     ):
         if strategy_mode == "time_series":
-            return "long_short" if _selection_mentions_short(selection_rule_text) else "long_flat"
+            return (
+                "long_short"
+                if _selection_mentions_short(selection_rule_text)
+                else "long_flat"
+            )
         return "long_only"
     return str(value)
 
@@ -790,7 +851,15 @@ def _normalize_rebalance_freq(value: Any) -> str:
         "two_week",
         "two_weeks",
     } or _text_contains_any(
-        value, ("\u6bcf\u5468", "\u5468\u9891", "\u53cc\u5468", "weekly", "weekly_freq", "biweekly")
+        value,
+        (
+            "\u6bcf\u5468",
+            "\u5468\u9891",
+            "\u53cc\u5468",
+            "weekly",
+            "weekly_freq",
+            "biweekly",
+        ),
     ):
         return "weekly"
     if token in {"monthly", "month", "1m", "m"} or _text_contains_any(
@@ -801,6 +870,7 @@ def _normalize_rebalance_freq(value: Any) -> str:
 
 
 # --- Candidate Payload & Config Conversion ---
+
 
 def normalize_strategy_candidate_payload(
     candidate: Dict[str, Any], state: AlphaMinerState
@@ -814,7 +884,9 @@ def normalize_strategy_candidate_payload(
         payload.get("template_name"),
     )
     selection_text = payload.get("selection_rule")
-    direction = _normalize_direction(payload.get("direction"), strategy_mode, selection_text)
+    direction = _normalize_direction(
+        payload.get("direction"), strategy_mode, selection_text
+    )
     selection_rule = _normalize_selection_rule(selection_text, strategy_mode)
     if strategy_mode == "cross_sectional" and direction == "long_flat":
         direction = "long_only"
@@ -825,7 +897,9 @@ def normalize_strategy_candidate_payload(
     for key, value in quantile_thresholds.items():
         thresholds.setdefault(key, value)
     counts = _clean_positive_ints(raw_counts)
-    holding_constraints = _clean_holding_constraints(payload.get("holding_constraints"))
+    holding_constraints = _clean_holding_constraints(
+        payload.get("holding_constraints")
+    )
     cost_model = _clean_cost_model(payload.get("cost_model"))
 
     if (
@@ -845,7 +919,10 @@ def normalize_strategy_candidate_payload(
             selection_rule = "bottom_n"
 
     if selection_rule == "threshold":
-        if thresholds.get("long_threshold") is None and thresholds.get("short_threshold") is None:
+        if (
+            thresholds.get("long_threshold") is None
+            and thresholds.get("short_threshold") is None
+        ):
             if direction == "long_short":
                 thresholds.setdefault("long_threshold", 0.75)
                 thresholds.setdefault("short_threshold", 0.25)
@@ -889,7 +966,9 @@ def candidate_to_strategy_config(
     """
     candidate = normalize_strategy_candidate_payload(candidate, state)
     market_profile = state.get("market_profile", "cn_stock")
-    market_value = "LOCAL_FUTURES" if market_profile == "futures" else market_profile
+    market_value = (
+        "LOCAL_FUTURES" if market_profile == "futures" else market_profile
+    )
     payload = {
         "label": f"{candidate.get('template_name', 'generated')}:{state.get('hypothesis_name') or 'alpha'}",
         "strategy_mode": candidate["strategy_mode"],
@@ -904,18 +983,32 @@ def candidate_to_strategy_config(
         "top_n": candidate.get("counts", {}).get("top_n"),
         "bottom_n": candidate.get("counts", {}).get("bottom_n"),
         "long_threshold": candidate.get("thresholds", {}).get("long_threshold"),
-        "short_threshold": candidate.get("thresholds", {}).get("short_threshold"),
+        "short_threshold": candidate.get("thresholds", {}).get(
+            "short_threshold"
+        ),
         "exit_threshold": candidate.get("thresholds", {}).get("exit_threshold"),
-        "max_positions": candidate.get("holding_constraints", {}).get("max_positions") or None,
-        "max_weight_per_position": candidate.get("holding_constraints", {}).get("max_weight_per_position", 0.1),
-        "min_holding_days": candidate.get("holding_constraints", {}).get("min_holding_days", 1),
-        "commission_bps": candidate.get("cost_model", {}).get("commission_bps", 5.0),
-        "slippage_bps": candidate.get("cost_model", {}).get("slippage_bps", 5.0),
+        "max_positions": candidate.get("holding_constraints", {}).get(
+            "max_positions"
+        )
+        or None,
+        "max_weight_per_position": candidate.get("holding_constraints", {}).get(
+            "max_weight_per_position", 0.1
+        ),
+        "min_holding_days": candidate.get("holding_constraints", {}).get(
+            "min_holding_days", 1
+        ),
+        "commission_bps": candidate.get("cost_model", {}).get(
+            "commission_bps", 5.0
+        ),
+        "slippage_bps": candidate.get("cost_model", {}).get(
+            "slippage_bps", 5.0
+        ),
     }
     return StrategyConfig.model_validate(payload).model_dump(mode="json")
 
 
 # --- StrategyAgent Class ---
+
 
 class StrategyAgent:
     def __init__(
@@ -944,7 +1037,9 @@ class StrategyAgent:
             text = re.sub(r"\s*```$", "", text)
         return text.strip()
 
-    def _fallback_candidates(self, state: AlphaMinerState) -> tuple[str, List[Dict[str, Any]]]:
+    def _fallback_candidates(
+        self, state: AlphaMinerState
+    ) -> tuple[str, List[Dict[str, Any]]]:
         market_profile = state.get("market_profile", "cn_stock")
         templates = strategy_templates()
         if market_profile == "futures":
@@ -974,12 +1069,17 @@ class StrategyAgent:
                     },
                     counts={
                         k: int(v)
-                        for k, v in {"top_n": cfg.top_n, "bottom_n": cfg.bottom_n}.items()
+                        for k, v in {
+                            "top_n": cfg.top_n,
+                            "bottom_n": cfg.bottom_n,
+                        }.items()
                         if v is not None
                     },
                     holding_constraints={
                         "max_positions": cfg.max_positions or 0,
-                        "max_weight_per_position": float(cfg.max_weight_per_position),
+                        "max_weight_per_position": float(
+                            cfg.max_weight_per_position
+                        ),
                         "min_holding_days": int(cfg.min_holding_days),
                     },
                     cost_model={
@@ -991,7 +1091,9 @@ class StrategyAgent:
             )
         return execution_style, candidates
 
-    def _candidate_to_config(self, candidate: Dict[str, Any], state: AlphaMinerState) -> Dict[str, Any]:
+    def _candidate_to_config(
+        self, candidate: Dict[str, Any], state: AlphaMinerState
+    ) -> Dict[str, Any]:
         return candidate_to_strategy_config(candidate, state)
 
     def __call__(self, state: AlphaMinerState) -> Dict[str, Any]:
@@ -1001,7 +1103,9 @@ class StrategyAgent:
         expression = state.get("code_expression", "")
         factor_metrics = state.get("backtest_metrics", {})
 
-        fallback_execution_style, fallback_candidates = self._fallback_candidates(state)
+        fallback_execution_style, fallback_candidates = (
+            self._fallback_candidates(state)
+        )
         system = (
             "You are a quantitative execution researcher. Convert a validated factor into at most 3 tradable strategy candidates. "
             "For cn_stock prefer cross_sectional execution. For futures prefer time_series execution. "
@@ -1015,10 +1119,10 @@ class StrategyAgent:
             f"Factor metrics: {json.dumps(factor_metrics, ensure_ascii=False)}\n\n"
             "Return JSON with keys execution_style and candidates. "
             "Each candidate must include template_name, strategy_mode, direction, selection_rule, rebalance_freq, "
-            "thresholds (dict, e.g. {\"long_threshold\": 0.8, \"short_threshold\": 0.2}), "
-            "counts (dict, e.g. {\"top_n\": 100, \"bottom_n\": 50}), "
-            "holding_constraints (dict, e.g. {\"max_positions\": 200, \"max_weight_per_position\": 0.02}), "
-            "cost_model (dict, e.g. {\"commission_bps\": 5.0, \"slippage_bps\": 2.0}), "
+            'thresholds (dict, e.g. {"long_threshold": 0.8, "short_threshold": 0.2}), '
+            'counts (dict, e.g. {"top_n": 100, "bottom_n": 50}), '
+            'holding_constraints (dict, e.g. {"max_positions": 200, "max_weight_per_position": 0.02}), '
+            'cost_model (dict, e.g. {"commission_bps": 5.0, "slippage_bps": 2.0}), '
             "rationale (string)."
         )
         try:
@@ -1045,11 +1149,15 @@ class StrategyAgent:
                     continue
                 normalized.append({**payload, "strategy_config": config})
             if not normalized:
-                raise ValueError("All LLM candidates failed StrategyConfig validation")
+                raise ValueError(
+                    "All LLM candidates failed StrategyConfig validation"
+                )
             return {
                 "execution_style": parsed.execution_style,
                 "strategy_candidates": normalized,
-                "messages": [f"[StrategyAgent] Generated {len(normalized)} candidates."],
+                "messages": [
+                    f"[StrategyAgent] Generated {len(normalized)} candidates."
+                ],
             }
         except Exception as exc:
             logger.warning(f"[StrategyAgent] Falling back to templates: {exc}")
@@ -1059,7 +1167,9 @@ class StrategyAgent:
                     normalized.append(
                         {
                             **item,
-                            "strategy_config": self._candidate_to_config(item, state),
+                            "strategy_config": self._candidate_to_config(
+                                item, state
+                            ),
                         }
                     )
                 except Exception as cfg_exc:
@@ -1067,14 +1177,20 @@ class StrategyAgent:
                         f"[StrategyAgent] Fallback template {item.get('template_name')!r} invalid: {cfg_exc}"
                     )
             if not normalized:
-                logger.error("[StrategyAgent] No usable strategy candidates after fallback.")
+                logger.error(
+                    "[StrategyAgent] No usable strategy candidates after fallback."
+                )
                 return {
                     "execution_style": fallback_execution_style,
                     "strategy_candidates": [],
-                    "messages": ["[StrategyAgent] No usable strategy candidates."],
+                    "messages": [
+                        "[StrategyAgent] No usable strategy candidates."
+                    ],
                 }
             return {
                 "execution_style": fallback_execution_style,
                 "strategy_candidates": normalized,
-                "messages": [f"[StrategyAgent] Using {len(normalized)} fallback candidates."],
+                "messages": [
+                    f"[StrategyAgent] Using {len(normalized)} fallback candidates."
+                ],
             }

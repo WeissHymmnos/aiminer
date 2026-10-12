@@ -37,7 +37,8 @@ EMBEDDING_API_DEFAULTS: dict[str, dict[str, str]] = {
     },
     "openai": {
         "model_name": "text-embedding-3-large",
-        "api_base": os.getenv("OPENAI_BASE_URL") or "https://api.gptsapi.net/v1",
+        "api_base": os.getenv("OPENAI_BASE_URL")
+        or "https://api.gptsapi.net/v1",
     },
     "ollama": {
         "model_name": "nomic-embed-text",
@@ -56,7 +57,9 @@ def _use_forced_local(embedding_provider: str | None) -> bool:
     return os.getenv("USE_LOCAL_EMBEDDING", "false").lower() == "true"
 
 
-def resolve_embedding_backend(embedding_provider: str | None = None) -> dict[str, Any]:
+def resolve_embedding_backend(
+    embedding_provider: str | None = None,
+) -> dict[str, Any]:
     """Pick a working embedding backend.
 
     Providers without a real embeddings API (notably DeepSeek / CPA chat)

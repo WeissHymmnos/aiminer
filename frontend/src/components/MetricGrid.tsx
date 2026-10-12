@@ -12,7 +12,9 @@ export function MetricGrid({ metrics }: Props) {
       {entries.map(([key, value]) => (
         <div key={key} className="metric">
           <span>{key}</span>
-          <strong>{typeof value === "number" ? value.toFixed(4) : String(value)}</strong>
+          <strong>
+            {typeof value === 'number' ? value.toFixed(4) : String(value)}
+          </strong>
         </div>
       ))}
     </div>

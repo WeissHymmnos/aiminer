@@ -1,20 +1,22 @@
-import os
-import json
+from datetime import datetime
 import glob
-import uuid
+import json
+import os
 import shutil
+import sqlite3
 import subprocess
 import sys
-from datetime import datetime
-from typing import List, Dict, cast, Optional
+from typing import Dict, List, Optional, cast
+import uuid
+
 import chromadb
-import sqlite3
+from dotenv import load_dotenv
 from loguru import logger
+
 from aiminer.core.chroma_lock import chroma_process_lock
 from aiminer.core.interfaces import VectorStore
-from aiminer.core.settings import AiminerSettings, build_settings
 from aiminer.core.llm import get_llm_config
-from dotenv import load_dotenv
+from aiminer.core.settings import AiminerSettings, build_settings
 
 # Load environment variables
 load_dotenv()
@@ -25,7 +27,9 @@ os.environ["OPENAI_TIMEOUT"] = "60"
 os.environ["HTTP_TIMEOUT"] = "60"
 
 
-def resolve_embedding_model_tag(embedding_provider: str = None, *, use_gpu: bool = False) -> str:
+def resolve_embedding_model_tag(
+    embedding_provider: str = None, *, use_gpu: bool = False
+) -> str:
     """Resolve the Chroma subdirectory tag without initializing embeddings."""
     use_local = (embedding_provider == "local") or (
         os.getenv("USE_LOCAL_EMBEDDING", "false").lower() == "true"
@@ -76,11 +80,15 @@ def chroma_sqlite_summary(db_root: str, model_tag: str) -> Dict[str, object]:
             }
             if "collections" in tables:
                 summary["collections"] = int(
-                    conn.execute("SELECT COUNT(*) FROM collections").fetchone()[0]
+                    conn.execute("SELECT COUNT(*) FROM collections").fetchone()[
+                        0
+                    ]
                 )
             if "embeddings" in tables:
                 summary["embeddings"] = int(
-                    conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0]
+                    conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[
+                        0
+                    ]
                 )
         finally:
             conn.close()
@@ -114,7 +122,9 @@ class RAGModule:
         os.makedirs(self.docs_dir, exist_ok=True)
         self.knowledge_cache = []
         self.experience_cache = []
-        self.disable_chroma = os.getenv("AIMINER_DISABLE_CHROMA", "").lower() in {
+        self.disable_chroma = os.getenv(
+            "AIMINER_DISABLE_CHROMA", ""
+        ).lower() in {
             "1",
             "true",
             "yes",
@@ -185,7 +195,9 @@ class RAGModule:
                 },
                 "vllm": {
                     "model_name": "BAAI/bge-large-zh-v1.5",
-                    "api_base": os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1"),
+                    "api_base": os.getenv(
+                        "VLLM_BASE_URL", "http://localhost:8000/v1"
+                    ),
                 },
             }
 
@@ -203,7 +215,9 @@ class RAGModule:
                     api_base=emb_defaults["api_base"],
                 )
                 # Version by provider AND model name to prevent dimension mismatch
-                model_tag = f"{provider}_{emb_defaults['model_name'].replace('/', '_')}"
+                model_tag = (
+                    f"{provider}_{emb_defaults['model_name'].replace('/', '_')}"
+                )
             except (ValueError, KeyError):
                 logger.warning(
                     "No API key or provider found for embeddings. Falling back to LOCAL bge-large."
@@ -242,7 +256,9 @@ class RAGModule:
 
             self._init_knowledge_base()
 
-    def _probe_collection_health(self, collection_name: str, timeout: int = 20) -> bool:
+    def _probe_collection_health(
+        self, collection_name: str, timeout: int = 20
+    ) -> bool:
         """Probe a persisted collection in a child process.
 
         ChromaDB 1.5.x can segfault in native Rust bindings when a persisted
@@ -263,7 +279,13 @@ collection.count()
 """
         try:
             result = subprocess.run(
-                [sys.executable, "-c", probe_code, self.db_dir, collection_name],
+                [
+                    sys.executable,
+                    "-c",
+                    probe_code,
+                    self.db_dir,
+                    collection_name,
+                ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -300,14 +322,22 @@ if sys.argv[2] in names:
 """
         try:
             result = subprocess.run(
-                [sys.executable, "-c", delete_code, self.db_dir, collection_name],
+                [
+                    sys.executable,
+                    "-c",
+                    delete_code,
+                    self.db_dir,
+                    collection_name,
+                ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired:
-            logger.warning(f"Timed out deleting ChromaDB collection: {collection_name}")
+            logger.warning(
+                f"Timed out deleting ChromaDB collection: {collection_name}"
+            )
             return False
 
         if result.returncode == 0:
@@ -382,7 +412,9 @@ if sys.argv[2] in names:
         doc_files = []
         for ext in ("*.md", "*.rst", "*.txt"):
             doc_files.extend(
-                glob.glob(os.path.join(self.docs_dir, "**", ext), recursive=True)
+                glob.glob(
+                    os.path.join(self.docs_dir, "**", ext), recursive=True
+                )
             )
         return doc_files
 
@@ -399,7 +431,9 @@ if sys.argv[2] in names:
                             {"document": chunk, "source": rel_path}
                         )
             except Exception as exc:
-                logger.error(f"Failed to load lexical RAG document {file_path}: {exc}")
+                logger.error(
+                    f"Failed to load lexical RAG document {file_path}: {exc}"
+                )
         logger.info(
             f"Lexical RAG cache initialized with {len(self.knowledge_cache)} chunks."
         )
@@ -440,7 +474,9 @@ if sys.argv[2] in names:
     def _init_knowledge_base(self):
         # Loads actual markdown/rst/txt docs from data/rag_docs into ChromaDB.
         if self.rebuild and self.knowledge_col.count() > 0:
-            logger.info("Rebuilding knowledge base: deleting existing documents...")
+            logger.info(
+                "Rebuilding knowledge base: deleting existing documents..."
+            )
             self.client.delete_collection("knowledge_base")
             self.knowledge_col = self.client.get_or_create_collection(
                 "knowledge_base", embedding_function=self.embedding_fn
@@ -472,9 +508,9 @@ if sys.argv[2] in names:
                 # We look for yearly patterns like 2021-2026
                 rel_path = os.path.relpath(file_path, self.docs_dir)
                 path_parts = rel_path.split(os.sep)
-                
+
                 metadata = {"source": file_path}
-                
+
                 # Simple heuristic for type and year
                 if len(path_parts) >= 1:
                     metadata["type"] = path_parts[0]
@@ -482,7 +518,7 @@ if sys.argv[2] in names:
                     # Check if second part is a year
                     if path_parts[1].isdigit() and len(path_parts[1]) == 4:
                         metadata["year"] = path_parts[1]
-                
+
                 with open(file_path, "r", encoding="utf-8") as f:
                     content = f.read()
 
@@ -491,18 +527,20 @@ if sys.argv[2] in names:
                     if not chunk.strip():
                         continue
                     all_chunks.append(chunk)
-                    
+
                     chunk_metadata = metadata.copy()
                     chunk_metadata["chunk"] = i
                     all_metadatas.append(chunk_metadata)
-                    
+
                     all_ids.append(f"doc_{doc_id_counter}")
                     doc_id_counter += 1
             except Exception as e:
                 logger.error(f"Failed to read/process {file_path}: {e}")
 
         if all_chunks:
-            logger.info(f"Loading {len(all_chunks)} chunks into knowledge base...")
+            logger.info(
+                f"Loading {len(all_chunks)} chunks into knowledge base..."
+            )
             try:
                 # Small batch size to avoid OOM on 11GB GPUs
                 batch_size = 8
@@ -516,9 +554,12 @@ if sys.argv[2] in names:
             except Exception as e:
                 logger.error(f"Failed to populate knowledge base: {e}")
 
-    def _safe_query(self, collection, query: str, n_results: int, max_retries: int = 3):
+    def _safe_query(
+        self, collection, query: str, n_results: int, max_retries: int = 3
+    ):
         # Query a collection safely with retry logic, backoff, and process-level lock protection.
         import time
+
         last_error = None
 
         for attempt in range(max_retries):
@@ -530,14 +571,24 @@ if sys.argv[2] in names:
                     actual_n = min(n_results, count)
 
                     # Executing the query with potential timeout
-                    return collection.query(query_texts=[query], n_results=actual_n)
+                    return collection.query(
+                        query_texts=[query], n_results=actual_n
+                    )
 
             except Exception as e:
                 last_error = e
                 err_msg = str(e).lower()
-                
+
                 # If it's a timeout or locking error, wait and retry
-                if any(x in err_msg for x in ["timeout", "timed out", "rate limit", "database is locked"]):
+                if any(
+                    x in err_msg
+                    for x in [
+                        "timeout",
+                        "timed out",
+                        "rate limit",
+                        "database is locked",
+                    ]
+                ):
                     wait_time = (attempt + 1) * 2
                     logger.warning(
                         f"ChromaDB query timed out or locked (Attempt {attempt + 1}/{max_retries}). "
@@ -545,12 +596,16 @@ if sys.argv[2] in names:
                     )
                     time.sleep(wait_time)
                     continue
-                
+
                 # For other errors, log and return empty
-                logger.warning(f"ChromaDB query failed with non-timeout error: {e}. Returning empty results.")
+                logger.warning(
+                    f"ChromaDB query failed with non-timeout error: {e}. Returning empty results."
+                )
                 return None
-                
-        logger.error(f"ChromaDB query failed after {max_retries} retries. Final error: {last_error}")
+
+        logger.error(
+            f"ChromaDB query failed after {max_retries} retries. Final error: {last_error}"
+        )
         return None
 
     def retrieve(self, query: str, n_results: int = 2) -> str:
@@ -568,14 +623,22 @@ if sys.argv[2] in names:
             context_parts = []
 
             context_parts.append("=== KNOWLEDGE BASE ===")
-            if k_results and k_results["documents"] and k_results["documents"][0]:
+            if (
+                k_results
+                and k_results["documents"]
+                and k_results["documents"][0]
+            ):
                 for doc in k_results["documents"][0]:
                     context_parts.append(f"- {doc}")
             else:
                 context_parts.append("No relevant knowledge found.")
 
             context_parts.append("\n=== PAST EXPERIENCES ===")
-            if e_results and e_results["documents"] and e_results["documents"][0]:
+            if (
+                e_results
+                and e_results["documents"]
+                and e_results["documents"][0]
+            ):
                 for doc in e_results["documents"][0]:
                     context_parts.append(f"- {doc}")
             else:

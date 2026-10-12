@@ -1,5 +1,7 @@
 import asyncio
+
 from aiminer.tui import TUIApp
+
 
 async def test():
     app = TUIApp()
@@ -11,7 +13,7 @@ async def test():
         # Start backtest
         await pilot.click("#btn-run")
         await pilot.pause()
-        
+
         # Check for 10 seconds
         for i in range(10):
             await asyncio.sleep(1)
@@ -21,6 +23,7 @@ async def test():
                 break
         else:
             print("Failed to get metrics")
+
 
 if __name__ == "__main__":
     asyncio.run(test())

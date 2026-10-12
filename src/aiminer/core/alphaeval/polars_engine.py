@@ -1,9 +1,10 @@
-import polars as pl
-import polars_plugins as lib
-from polars.plugins import register_plugin_function
 import math
-from loguru import logger
 import os
+
+from loguru import logger
+import polars as pl
+from polars.plugins import register_plugin_function
+import polars_plugins as lib
 
 
 # Find the binary plugin path
@@ -57,13 +58,17 @@ def register_ts_argmin(expr, window_size):
 def Rank(x, n=None):
     if isinstance(x, (int, float)):
         return pl.lit(0.5)
-    return x.rank(method="average").over("datetime") / x.count().over("datetime")
+    return x.rank(method="average").over("datetime") / x.count().over(
+        "datetime"
+    )
 
 
 def CSRank(x):
     if isinstance(x, (int, float)):
         return pl.lit(0.5)
-    return x.rank(method="average").over("datetime") / x.count().over("datetime")
+    return x.rank(method="average").over("datetime") / x.count().over(
+        "datetime"
+    )
 
 
 def CSZScore(x, n=None):
@@ -79,46 +84,59 @@ def CSZScore(x, n=None):
 def _get_int(n, op_name="Operator"):
     try:
         if isinstance(n, pl.Expr):
-            raise ValueError(f"{op_name} expects a constant integer for the period argument, not a dynamic series. Fix the formula to use a fixed number (e.g., 5, 10, 20).")
+            raise ValueError(
+                f"{op_name} expects a constant integer for the period argument, not a dynamic series. Fix the formula to use a fixed number (e.g., 5, 10, 20)."
+            )
         return int(float(n))
     except (ValueError, TypeError) as e:
-        if "expects a constant" in str(e): raise e
-        raise ValueError(f"Invalid period value '{n}' for {op_name}. Must be an integer.")
+        if "expects a constant" in str(e):
+            raise e
+        raise ValueError(
+            f"Invalid period value '{n}' for {op_name}. Must be an integer."
+        )
 
 
 def Mean(x, n=None):
-    if isinstance(x, (int, float)): return pl.lit(float(x))
+    if isinstance(x, (int, float)):
+        return pl.lit(float(x))
     if n is None:
         return x.mean().over("datetime")
     return x.rolling_mean(window_size=_get_int(n, "Mean")).over("instrument")
 
 
 def Std(x, n=None):
-    if isinstance(x, (int, float)): return pl.lit(0.0)
+    if isinstance(x, (int, float)):
+        return pl.lit(0.0)
     if n is None:
         return x.std().over("datetime")
     return x.rolling_std(window_size=_get_int(n, "Std")).over("instrument")
 
 
 def Median(x, n=None):
-    if isinstance(x, (int, float)): return pl.lit(float(x))
+    if isinstance(x, (int, float)):
+        return pl.lit(float(x))
     if n is None:
         return x.median().over("datetime")
-    return x.rolling_median(window_size=_get_int(n, "Median")).over("instrument")
+    return x.rolling_median(window_size=_get_int(n, "Median")).over(
+        "instrument"
+    )
 
 
 def Sum(x, n):
-    if isinstance(x, (int, float)): return pl.lit(float(x) * _get_int(n, "Sum"))
+    if isinstance(x, (int, float)):
+        return pl.lit(float(x) * _get_int(n, "Sum"))
     return x.rolling_sum(window_size=_get_int(n, "Sum")).over("instrument")
 
 
 def Ref(x, n):
-    if isinstance(x, (int, float)): return pl.lit(float(x))
+    if isinstance(x, (int, float)):
+        return pl.lit(float(x))
     return x.shift(_get_int(n, "Ref")).over("instrument")
 
 
 def Delta(x, n):
-    if isinstance(x, (int, float)): return pl.lit(0.0)
+    if isinstance(x, (int, float)):
+        return pl.lit(0.0)
     return (x - x.shift(_get_int(n, "Delta"))).over("instrument")
 
 
@@ -220,11 +238,15 @@ def Or(*args):
 
 
 def Corr(x, y, n):
-    return pl.rolling_corr(x, y, window_size=_get_int(n, "Corr")).over("instrument")
+    return pl.rolling_corr(x, y, window_size=_get_int(n, "Corr")).over(
+        "instrument"
+    )
 
 
 def Cov(x, y, n):
-    return pl.rolling_cov(x, y, window_size=_get_int(n, "Cov")).over("instrument")
+    return pl.rolling_cov(x, y, window_size=_get_int(n, "Cov")).over(
+        "instrument"
+    )
 
 
 def Var(x, n=None):
@@ -238,7 +260,9 @@ def Skew(x, n):
 
 
 def Kurt(x, n):
-    return x.rolling_kurtosis(window_size=_get_int(n, "Kurt")).over("instrument")
+    return x.rolling_kurtosis(window_size=_get_int(n, "Kurt")).over(
+        "instrument"
+    )
 
 
 def Mad(x, n):
@@ -320,9 +344,9 @@ def Count(x=None):
 
 
 def Ts_Percentile(x, n, p=50):
-    return x.rolling_quantile(quantile=float(p) / 100.0, window_size=int(n)).over(
-        "instrument"
-    )
+    return x.rolling_quantile(
+        quantile=float(p) / 100.0, window_size=int(n)
+    ).over("instrument")
 
 
 # Math aliases
@@ -501,8 +525,12 @@ class PolarsEngine:
             try:
                 result = self._eager_eval(result, e)
             except Exception as exc:
-                logger.warning(f"[PolarsEngine] Failed to evaluate '{e}': {exc}")
-                result = result.with_columns(pl.lit(None).cast(pl.Float64).alias(e))
+                logger.warning(
+                    f"[PolarsEngine] Failed to evaluate '{e}': {exc}"
+                )
+                result = result.with_columns(
+                    pl.lit(None).cast(pl.Float64).alias(e)
+                )
         return result
 
     # ------------------------------------------------------------------ #
@@ -555,7 +583,9 @@ class PolarsEngine:
         try:
             tree = _ast.parse(compiled, mode="eval")
         except SyntaxError as e:
-            raise ValueError(f"Cannot parse expression '{expr_str}': {e}") from e
+            raise ValueError(
+                f"Cannot parse expression '{expr_str}': {e}"
+            ) from e
 
         tmp_cols: list[str] = []
         df_container = [df]
@@ -566,7 +596,9 @@ class PolarsEngine:
         if isinstance(pl_expr, pl.Expr):
             df = df.with_columns(pl_expr.cast(pl.Float64).alias(expr_str))
         else:
-            df = df.with_columns(pl.lit(pl_expr).cast(pl.Float64).alias(expr_str))
+            df = df.with_columns(
+                pl.lit(pl_expr).cast(pl.Float64).alias(expr_str)
+            )
 
         # Drop all intermediate temporary columns
         cols_to_drop = [c for c in tmp_cols if c in df.columns]
@@ -658,10 +690,17 @@ class PolarsEngine:
                 func_name = node.func.id
             elif isinstance(node.func, _ast.Attribute):
                 # e.g. pl.col('close')
-                obj = self._eval_ast_node(node.func.value, df_container, tmp_cols)
-                args = [self._eval_ast_node(a, df_container, tmp_cols) for a in node.args]
+                obj = self._eval_ast_node(
+                    node.func.value, df_container, tmp_cols
+                )
+                args = [
+                    self._eval_ast_node(a, df_container, tmp_cols)
+                    for a in node.args
+                ]
                 kw = {
-                    kw.arg: self._eval_ast_node(kw.value, df_container, tmp_cols)
+                    kw.arg: self._eval_ast_node(
+                        kw.value, df_container, tmp_cols
+                    )
                     for kw in node.keywords
                 }
                 return getattr(obj, node.func.attr)(*args, **kw)
@@ -687,7 +726,9 @@ class PolarsEngine:
                     and not self._is_bare_col(arg_node)
                 ):
                     tmp = f"__cs_arg_{len(tmp_cols)}__"
-                    df_container[0] = df_container[0].with_columns(arg_val.alias(tmp))
+                    df_container[0] = df_container[0].with_columns(
+                        arg_val.alias(tmp)
+                    )
                     tmp_cols.append(tmp)
                     arg_val = pl.col(tmp)
 
@@ -701,7 +742,9 @@ class PolarsEngine:
                     and not self._is_bare_col(arg_node)
                 ):
                     tmp = f"__ts_arg_{len(tmp_cols)}__"
-                    df_container[0] = df_container[0].with_columns(arg_val.alias(tmp))
+                    df_container[0] = df_container[0].with_columns(
+                        arg_val.alias(tmp)
+                    )
                     tmp_cols.append(tmp)
                     arg_val = pl.col(tmp)
 

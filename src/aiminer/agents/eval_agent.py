@@ -1,20 +1,23 @@
 # --- Imports ---
 
 from __future__ import annotations
-from typing import Dict, Any
-from langchain_core.prompts import ChatPromptTemplate
-import random
+
 import hashlib
+import random
 import re
+from typing import Any, Dict
+
+from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
+
 from aiminer.app_workflow.state import AlphaMinerState
 from aiminer.core.constants import MISSING_IC_SENTINEL
 from aiminer.core.hybrid_knowledge import HybridKnowledge
 from aiminer.core.llm import get_llm
 from aiminer.schemas.messages import ReflexiveReviewOutput
 
-
 # --- EvalAgent Class ---
+
 
 class EvalAgent:
     def __init__(
@@ -56,11 +59,7 @@ class EvalAgent:
         sharpe = cls._float_metric(metrics.get("sharpe", 0.0))
         max_drawdown = cls._float_metric(metrics.get("max_drawdown", 0.0))
         is_effective = ic > 0.02 and rank_ic > 0.02
-        threshold_text = (
-            "passes"
-            if is_effective
-            else "does not pass"
-        )
+        threshold_text = "passes" if is_effective else "does not pass"
         return ReflexiveReviewOutput(
             review_summary=(
                 "LLM review unavailable; using deterministic metric review. "
@@ -104,14 +103,20 @@ class EvalAgent:
         try:
             review_chain = review_prompt | self.llm
             raw_review_response = review_chain.invoke(
-                {"hypothesis": hypothesis_desc, "code": code, "metrics": str(metrics)}
+                {
+                    "hypothesis": hypothesis_desc,
+                    "code": code,
+                    "metrics": str(metrics),
+                }
             )
             cleaned_review_json = self._strip_markdown_json(
                 getattr(raw_review_response, "content", "") or ""
             )
             if not cleaned_review_json:
                 raise ValueError("empty LLM review response")
-            return ReflexiveReviewOutput.model_validate_json(cleaned_review_json)
+            return ReflexiveReviewOutput.model_validate_json(
+                cleaned_review_json
+            )
         except Exception as exc:
             logger.warning(
                 "[EvalAgent] Review LLM failed; using deterministic fallback review: "
@@ -119,7 +124,7 @@ class EvalAgent:
             )
             return self._fallback_review_result(metrics=metrics)
 
-# --- Metric Helpers & Fallback ---
+    # --- Metric Helpers & Fallback ---
 
     @staticmethod
     def _simulated_metrics(code: str) -> Dict[str, Any]:
@@ -183,7 +188,9 @@ class EvalAgent:
     def _collect_evaluator_metrics(cls, evaluator: Any) -> Dict[str, Any]:
         metrics = {
             "information_coefficient": getattr(evaluator, "ic", 0.0),
-            "oos_ic": getattr(evaluator, "oos_ic", getattr(evaluator, "ic", 0.0)),
+            "oos_ic": getattr(
+                evaluator, "oos_ic", getattr(evaluator, "ic", 0.0)
+            ),
             "rank_ic": getattr(evaluator, "rankic", 0.0),
             "rre": getattr(evaluator, "rre", 0.0),
             "sharpe": getattr(evaluator, "sharpe", 0.0),
@@ -198,7 +205,10 @@ class EvalAgent:
         if state.get("best_ic_abs") is not None:
             return cls._float_metric(state.get("best_ic_abs"), -1.0)
         best_ic = state.get("best_ic")
-        if best_ic is None or cls._float_metric(best_ic, MISSING_IC_SENTINEL) <= -998.0:
+        if (
+            best_ic is None
+            or cls._float_metric(best_ic, MISSING_IC_SENTINEL) <= -998.0
+        ):
             return -1.0
         return abs(cls._float_metric(best_ic, 0.0))
 
@@ -240,7 +250,7 @@ class EvalAgent:
             "ic_direction_label": metrics.get("ic_direction_label"),
         }
 
-# --- Backtest Execution ---
+    # --- Backtest Execution ---
 
     def _execute_alphaeval_backtest(
         self,
@@ -259,7 +269,10 @@ class EvalAgent:
         )
 
         try:
-            from aiminer.core.evaluator_factory import build_evaluator, evaluation_config_from_mapping
+            from aiminer.core.evaluator_factory import (
+                build_evaluator,
+                evaluation_config_from_mapping,
+            )
 
             evaluator = build_evaluator(
                 factor_expressions=[code],
@@ -284,11 +297,15 @@ class EvalAgent:
             evaluator.run()
         except (FileNotFoundError, ValueError, ImportError) as e:
             logger.error(f"RiceQuant evaluation failed: {e}")
-            logger.info("Returning failed real-evaluation metrics; no simulated fallback.")
+            logger.info(
+                "Returning failed real-evaluation metrics; no simulated fallback."
+            )
             return self._add_ic_direction(self._failed_metrics(e))
         except Exception as e:
             logger.warning(f"RiceQuant backtest unexpected failure: {e}")
-            logger.info("Returning failed real-evaluation metrics; no simulated fallback.")
+            logger.info(
+                "Returning failed real-evaluation metrics; no simulated fallback."
+            )
             return self._add_ic_direction(self._failed_metrics(e))
 
         metrics = self._collect_evaluator_metrics(evaluator)
@@ -297,8 +314,12 @@ class EvalAgent:
             try:
                 robustness_fn()
                 refreshed = self._collect_evaluator_metrics(evaluator)
-                refreshed.setdefault("daily_returns", metrics.get("daily_returns", {}))
-                refreshed.setdefault("plot_paths", metrics.get("plot_paths", {}))
+                refreshed.setdefault(
+                    "daily_returns", metrics.get("daily_returns", {})
+                )
+                refreshed.setdefault(
+                    "plot_paths", metrics.get("plot_paths", {})
+                )
                 metrics = refreshed
             except Exception as e:
                 logger.warning(
@@ -308,7 +329,7 @@ class EvalAgent:
                 metrics["robustness_error"] = str(e)
         return metrics
 
-# --- EvalAgent Entry Point (__call__) ---
+    # --- EvalAgent Entry Point (__call__) ---
 
     def __call__(self, state: AlphaMinerState) -> Dict[str, Any]:
         code = state.get("code_expression", "")
@@ -320,7 +341,9 @@ class EvalAgent:
         self._state_data_backend = state.get("data_backend", mode)
         self._state_market_mode = state.get("market_mode", "single")
         self._state_market_profile = state.get("market_profile", "cn_stock")
-        self._state_market_profiles = state.get("market_profiles") or [self._state_market_profile]
+        self._state_market_profiles = state.get("market_profiles") or [
+            self._state_market_profile
+        ]
         self._state_local_data_path = state.get("local_data_path")
         self._state_local_data_layout = state.get("local_data_layout", "auto")
 
@@ -387,7 +410,9 @@ class EvalAgent:
                 metrics=metrics,
             )
 
-            logger.info(f"[EvalAgent] Review Summary: {review_result.review_summary}")
+            logger.info(
+                f"[EvalAgent] Review Summary: {review_result.review_summary}"
+            )
 
             # 3. Save experience to RAG (Vector fallback) - ONLY if it's real data
             if not is_simulated and not evaluation_failed:
@@ -407,7 +432,9 @@ class EvalAgent:
             # IMPORTANT: Simulated metrics must NOT update best_ic or patience counter —
             # fake high IC from quota-exceeded fallback would otherwise trigger early stop
             # and freeze the patience counter at 0, preventing any real exploration.
-            current_ic = self._float_metric(metrics.get("information_coefficient", 0.0))
+            current_ic = self._float_metric(
+                metrics.get("information_coefficient", 0.0)
+            )
             current_ic_abs = abs(current_ic)
             best_ic = state.get("best_ic", MISSING_IC_SENTINEL)
             best_ic_abs = self._best_ic_abs_from_state(state)

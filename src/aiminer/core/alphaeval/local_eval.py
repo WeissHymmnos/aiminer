@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+from loguru import logger
 import numpy as np
 import pandas as pd
-from loguru import logger
 
 from aiminer.core.alphaeval.rq_eval import RiceQuantEval
 from aiminer.core.constants import TRADING_DAYS_PER_YEAR
@@ -48,7 +48,9 @@ class LocalDataEval(RiceQuantEval):
             skip_auth=True,
         )
 
-    def _load_profile_frame(self, profile: str, *, prefix_instrument: bool) -> pd.DataFrame:
+    def _load_profile_frame(
+        self, profile: str, *, prefix_instrument: bool
+    ) -> pd.DataFrame:
         data_path = resolve_local_profile_path(self.local_data_path, profile)
         return load_local_ohlcv(
             data_path,
@@ -64,8 +66,16 @@ class LocalDataEval(RiceQuantEval):
             f"Loading local data for {self.market_mode} mode from {self.local_data_path}"
         )
 
-        prefix_instruments = self.market_mode in {"mixed", "batch"} and len(self.market_profiles) > 1
-        frames = [self._load_profile_frame(profile, prefix_instrument=prefix_instruments) for profile in self.market_profiles]
+        prefix_instruments = (
+            self.market_mode in {"mixed", "batch"}
+            and len(self.market_profiles) > 1
+        )
+        frames = [
+            self._load_profile_frame(
+                profile, prefix_instrument=prefix_instruments
+            )
+            for profile in self.market_profiles
+        ]
         df = pd.concat(frames).sort_index()
 
         if self.noise_level > 0:
@@ -77,16 +87,19 @@ class LocalDataEval(RiceQuantEval):
                     std = float(df[col].std() or 0.0)
                     if std <= 0:
                         continue
-                    noise = np.random.normal(0, std * self.noise_level, size=len(df))
+                    noise = np.random.normal(
+                        0, std * self.noise_level, size=len(df)
+                    )
                     df[col] = df[col].astype(float) + noise
 
-        self.raw_data = df[["close", "open", "high", "low", "volume", "total_turnover"]].copy()
+        self.raw_data = df[
+            ["close", "open", "high", "low", "volume", "total_turnover"]
+        ].copy()
 
         df_sorted = self.raw_data.sort_index(level=["instrument", "datetime"])
-        label_s = (
-            df_sorted.groupby(level="instrument", group_keys=False)["close"]
-            .apply(lambda x: x.shift(-1) / x - 1)
-        )
+        label_s = df_sorted.groupby(level="instrument", group_keys=False)[
+            "close"
+        ].apply(lambda x: x.shift(-1) / x - 1)
         self.label_data = (
             label_s.to_frame(name="label")
             .reorder_levels(["datetime", "instrument"])
@@ -112,21 +125,30 @@ class LocalDataEval(RiceQuantEval):
         target_start = (
             start_date
             if start_date
-            else (pd.to_datetime(target_end) - pd.Timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+            else (
+                pd.to_datetime(target_end) - pd.Timedelta(days=lookback_days)
+            ).strftime("%Y-%m-%d")
         )
 
         panel = pd.concat(
             [
                 self._load_profile_frame(
                     profile,
-                    prefix_instrument=self.market_mode in {"mixed", "batch"} and len(self.market_profiles) > 1,
+                    prefix_instrument=self.market_mode in {"mixed", "batch"}
+                    and len(self.market_profiles) > 1,
                 )
                 for profile in self.market_profiles
             ]
         )
         panel = panel.loc[
-            (panel.index.get_level_values("datetime") >= pd.Timestamp(target_start))
-            & (panel.index.get_level_values("datetime") <= pd.Timestamp(target_end))
+            (
+                panel.index.get_level_values("datetime")
+                >= pd.Timestamp(target_start)
+            )
+            & (
+                panel.index.get_level_values("datetime")
+                <= pd.Timestamp(target_end)
+            )
         ]
         if panel.empty:
             return (
@@ -139,11 +161,30 @@ class LocalDataEval(RiceQuantEval):
         volume = panel["volume"].unstack().mean(axis=1).dropna()
         returns = close.pct_change().dropna()
 
-        ma20 = close.rolling(20).mean().iloc[-1] if len(close) >= 20 else close.mean()
-        ma5 = close.rolling(5).mean().iloc[-1] if len(close) >= 5 else close.mean()
+        ma20 = (
+            close.rolling(20).mean().iloc[-1]
+            if len(close) >= 20
+            else close.mean()
+        )
+        ma5 = (
+            close.rolling(5).mean().iloc[-1]
+            if len(close) >= 5
+            else close.mean()
+        )
         last_close = close.iloc[-1]
-        trend = "Bullish (Above MA20)" if last_close > ma20 else "Bearish (Below MA20)"
-        momentum = "Strong" if ((last_close > ma20 and ma5 > ma20) or (last_close <= ma20 and ma5 < ma20)) else "Weakening"
+        trend = (
+            "Bullish (Above MA20)"
+            if last_close > ma20
+            else "Bearish (Below MA20)"
+        )
+        momentum = (
+            "Strong"
+            if (
+                (last_close > ma20 and ma5 > ma20)
+                or (last_close <= ma20 and ma5 < ma20)
+            )
+            else "Weakening"
+        )
         real_vol = (
             float(returns.std() * np.sqrt(TRADING_DAYS_PER_YEAR))
             if not returns.empty
@@ -156,10 +197,26 @@ class LocalDataEval(RiceQuantEval):
         )
         skew = float(returns.skew()) if not returns.empty else 0.0
         kurt = float(returns.kurtosis()) if not returns.empty else 0.0
-        period_return = float(close.iloc[-1] / close.iloc[0] - 1.0) if len(close) > 1 else 0.0
-        max_drawdown = float((close / close.cummax() - 1).min()) if not close.empty else 0.0
-        vol_ratio = float(volume.tail(5).mean() / volume.mean()) if not volume.empty and float(volume.mean()) != 0 else 1.0
-        vol_activity = "Expanding" if vol_ratio > 1.2 else ("Shrinking" if vol_ratio < 0.8 else "Stable")
+        period_return = (
+            float(close.iloc[-1] / close.iloc[0] - 1.0)
+            if len(close) > 1
+            else 0.0
+        )
+        max_drawdown = (
+            float((close / close.cummax() - 1).min())
+            if not close.empty
+            else 0.0
+        )
+        vol_ratio = (
+            float(volume.tail(5).mean() / volume.mean())
+            if not volume.empty and float(volume.mean()) != 0
+            else 1.0
+        )
+        vol_activity = (
+            "Expanding"
+            if vol_ratio > 1.2
+            else ("Shrinking" if vol_ratio < 0.8 else "Stable")
+        )
 
         return (
             f"=== LOCAL MARKET ANALYSIS ({','.join(self.market_profiles)}) ===\n"

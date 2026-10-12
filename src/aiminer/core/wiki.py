@@ -1,19 +1,20 @@
+from datetime import datetime, timedelta
 import os
 import re
 import time
-from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, List, Tuple, cast
-from loguru import logger
+from typing import Any, Dict, List, Optional, Tuple, cast
+
 import chromadb
 from chromadb.utils.embedding_functions import (
     OpenAIEmbeddingFunction,
     SentenceTransformerEmbeddingFunction,
 )
+from loguru import logger
+
 from aiminer.core.chroma_lock import chroma_process_lock
 from aiminer.core.interfaces import VectorStore
 from aiminer.core.llm import get_llm_config
 from aiminer.core.settings import AiminerSettings, build_settings
-
 
 # --- Frontmatter Helpers ---
 
@@ -36,22 +37,35 @@ def _parse_frontmatter(text: str) -> Tuple[Dict[str, Any], str]:
         if not k:
             continue
         if v.startswith("[") and v.endswith("]"):
-            items = [s.strip().strip('"').strip("'") for s in v[1:-1].split(",")]
+            items = [
+                s.strip().strip('"').strip("'") for s in v[1:-1].split(",")
+            ]
             meta[k] = [s for s in items if s]
         else:
             meta[k] = v.strip('"').strip("'")
-    return meta, text[m.end():]
+    return meta, text[m.end() :]
 
 
 def _dump_frontmatter(meta: Dict[str, Any]) -> str:
     """Write a minimal, stable YAML-ish frontmatter block."""
     lines = ["---"]
-    for k in ("title", "slug", "type", "status", "summary", "updated", "tags", "related"):
+    for k in (
+        "title",
+        "slug",
+        "type",
+        "status",
+        "summary",
+        "updated",
+        "tags",
+        "related",
+    ):
         if k not in meta:
             continue
         v = meta[k]
         if isinstance(v, (list, tuple)):
-            items = ", ".join(f'"{str(x).replace(chr(34), chr(92) + chr(34))}"' for x in v)
+            items = ", ".join(
+                f'"{str(x).replace(chr(34), chr(92) + chr(34))}"' for x in v
+            )
             lines.append(f"{k}: [{items}]")
         elif isinstance(v, bool):
             lines.append(f"{k}: {str(v).lower()}")
@@ -62,7 +76,16 @@ def _dump_frontmatter(meta: Dict[str, Any]) -> str:
             lines.append(f'{k}: "{safe}"')
     # Preserve any extra keys caller passed (e.g. ic, rank_ic, iteration)
     for k, v in meta.items():
-        if k in {"title", "slug", "type", "status", "summary", "updated", "tags", "related"}:
+        if k in {
+            "title",
+            "slug",
+            "type",
+            "status",
+            "summary",
+            "updated",
+            "tags",
+            "related",
+        }:
             continue
         if isinstance(v, (list, tuple)):
             items = ", ".join(f'"{x}"' for x in v)
@@ -119,9 +142,14 @@ class LLMWiki:
         # Karpathy logic: initialize core metadata files
         self.index_file = os.path.join(self.wiki_vault, "index.md")
         self.log_file = os.path.join(self.wiki_vault, "log.md")
-        self._ensure_file(self.index_file, "# Wiki Index\n\nWelcome to the compiled knowledge base.\n")
+        self._ensure_file(
+            self.index_file,
+            "# Wiki Index\n\nWelcome to the compiled knowledge base.\n",
+        )
         self._ensure_file(self.log_file, "# Wiki Maintenance Log\n\n")
-        self.disable_chroma = os.getenv("AIMINER_DISABLE_CHROMA", "").lower() in {
+        self.disable_chroma = os.getenv(
+            "AIMINER_DISABLE_CHROMA", ""
+        ).lower() in {
             "1",
             "true",
             "yes",
@@ -148,7 +176,9 @@ class LLMWiki:
         if use_local:
             model_name = "Qwen/Qwen3-Embedding-4B"
             model_tag = model_name.replace("/", "_")
-            logger.info(f"Wiki: Initializing LOCAL embedding model ({model_name})...")
+            logger.info(
+                f"Wiki: Initializing LOCAL embedding model ({model_name})..."
+            )
             self.embedding_fn = SentenceTransformerEmbeddingFunction(
                 model_name=model_name, trust_remote_code=True
             )
@@ -183,15 +213,21 @@ class LLMWiki:
                     provider, _EMBEDDING_DEFAULTS["openai"]
                 )
 
-                logger.info(f"Wiki: Initializing API-based embedding ({provider})...")
+                logger.info(
+                    f"Wiki: Initializing API-based embedding ({provider})..."
+                )
                 self.embedding_fn = OpenAIEmbeddingFunction(
                     api_key=api_key,
                     model_name=emb_defaults["model_name"],
                     api_base=emb_defaults["api_base"],
                 )
-                model_tag = f"{provider}_{emb_defaults['model_name'].replace('/', '_')}"
+                model_tag = (
+                    f"{provider}_{emb_defaults['model_name'].replace('/', '_')}"
+                )
             except Exception:
-                logger.warning("Wiki: Falling back to LOCAL bge-large for embeddings.")
+                logger.warning(
+                    "Wiki: Falling back to LOCAL bge-large for embeddings."
+                )
                 model_tag = "bge-large"
                 self.embedding_fn = SentenceTransformerEmbeddingFunction(
                     model_name="BAAI/bge-large-zh-v1.5"
@@ -271,7 +307,9 @@ class LLMWiki:
         text_lower = text.lower()
         return sum(text_lower.count(term) for term in terms)
 
-    def list_pages(self, type_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_pages(
+        self, type_filter: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """List all pages in the wiki."""
         if getattr(self, "disable_chroma", False):
             return [
@@ -288,22 +326,26 @@ class LLMWiki:
         where = {"type": type_filter} if type_filter else None
         results = self._call_chroma_with_retry(
             "list_pages",
-            lambda: self.wiki_col.get(where=where, include=["documents", "metadatas"]),
+            lambda: self.wiki_col.get(
+                where=where, include=["documents", "metadatas"]
+            ),
         )
-        
+
         pages = []
         if results["ids"]:
             for doc, meta in zip(results["documents"], results["metadatas"]):
-                pages.append({
-                    "title": meta.get("title", "Untitled"),
-                    "slug": meta.get("slug", ""),
-                    "type": meta.get("type", "factor_card"),
-                    "last_updated": meta.get("last_updated", ""),
-                    "content": doc
-                })
+                pages.append(
+                    {
+                        "title": meta.get("title", "Untitled"),
+                        "slug": meta.get("slug", ""),
+                        "type": meta.get("type", "factor_card"),
+                        "last_updated": meta.get("last_updated", ""),
+                        "content": doc,
+                    }
+                )
         return pages
 
-# --- Karpathy-Style Write Path ---
+    # --- Karpathy-Style Write Path ---
 
     def add_or_update_page(
         self,
@@ -336,7 +378,8 @@ class LLMWiki:
             "slug": slug,
             "type": metadata.get("type", "factor_card"),
             "status": metadata.get("status", "draft"),
-            "summary": metadata.get("summary", "") or self._derive_summary(content),
+            "summary": metadata.get("summary", "")
+            or self._derive_summary(content),
             "updated": now_iso,
             "tags": list(metadata.get("tags", []) or []),
             "related": list(metadata.get("related", []) or []),
@@ -355,7 +398,11 @@ class LLMWiki:
         # 2. Update the Shadow Index (ChromaDB)
         if not getattr(self, "disable_chroma", False):
             chroma_meta = {
-                **{k: v for k, v in full_meta.items() if isinstance(v, (str, int, float, bool))},
+                **{
+                    k: v
+                    for k, v in full_meta.items()
+                    if isinstance(v, (str, int, float, bool))
+                },
                 "last_updated": now_iso,
                 "tags_str": ",".join(full_meta["tags"]),
                 "related_str": ",".join(full_meta["related"]),
@@ -365,7 +412,9 @@ class LLMWiki:
                     "upsert",
                     lambda: self.wiki_col.upsert(
                         ids=[page_id],
-                        documents=[f"# {title}\n\n{full_meta['summary']}\n\n{content}"],
+                        documents=[
+                            f"# {title}\n\n{full_meta['summary']}\n\n{content}"
+                        ],
                         metadatas=[chroma_meta],
                     ),
                 )
@@ -411,7 +460,9 @@ class LLMWiki:
             return s
         return ""
 
-    def _log_event(self, event: str, slug: str, title: str, extra: Optional[str] = None):
+    def _log_event(
+        self, event: str, slug: str, title: str, extra: Optional[str] = None
+    ):
         """Append a Karpathy-style event record to log.md.
 
         Format: `## [YYYY-MM-DD HH:MM] EVENT | title (slug) [status]`
@@ -423,7 +474,9 @@ class LLMWiki:
         with open(self.log_file, "a", encoding="utf-8") as f:
             f.write(line)
 
-    def _backlink_audit(self, new_slug: str, new_title: str, related_slugs: List[str]):
+    def _backlink_audit(
+        self, new_slug: str, new_title: str, related_slugs: List[str]
+    ):
         """For every slug this new page declares as `related`, reciprocate
         by appending `[[new_slug]]` under a `## Backlinks` section on that
         target page. Idempotent — skips targets that already link back.
@@ -458,12 +511,19 @@ class LLMWiki:
                 next_h2 = re.search(r"\n## ", tail)
                 if next_h2:
                     insert_at = next_h2.start()
-                    new_tail = tail[:insert_at].rstrip() + "\n" + backlink_line + tail[insert_at:]
+                    new_tail = (
+                        tail[:insert_at].rstrip()
+                        + "\n"
+                        + backlink_line
+                        + tail[insert_at:]
+                    )
                 else:
                     new_tail = tail.rstrip() + "\n" + backlink_line
                 new_text = head + "## Backlinks" + new_tail
             else:
-                new_text = text.rstrip() + "\n\n## Backlinks\n\n" + backlink_line
+                new_text = (
+                    text.rstrip() + "\n\n## Backlinks\n\n" + backlink_line
+                )
 
             with open(target_path, "w", encoding="utf-8") as f:
                 f.write(new_text)
@@ -483,7 +543,7 @@ class LLMWiki:
         meta, _ = _parse_frontmatter(text)
         return meta
 
-# --- Compiled Index ---
+    # --- Compiled Index ---
 
     def _recompile_index(self):
         """Rebuild index.md as a content-oriented catalog — pages are
@@ -500,14 +560,16 @@ class LLMWiki:
                 continue
             meta = self._read_page_meta(path)
             slug = fn[:-3]
-            entries.append({
-                "slug": slug,
-                "title": meta.get("title") or slug.replace("_", " "),
-                "type": meta.get("type") or "uncategorized",
-                "status": meta.get("status") or "",
-                "summary": meta.get("summary") or "",
-                "updated": meta.get("updated") or "",
-            })
+            entries.append(
+                {
+                    "slug": slug,
+                    "title": meta.get("title") or slug.replace("_", " "),
+                    "type": meta.get("type") or "uncategorized",
+                    "status": meta.get("status") or "",
+                    "summary": meta.get("summary") or "",
+                    "updated": meta.get("updated") or "",
+                }
+            )
 
         # Group by type
         by_type: Dict[str, List[Dict[str, Any]]] = {}
@@ -540,12 +602,14 @@ class LLMWiki:
             for e in by_type[t]:
                 status = f" · `{e['status']}`" if e["status"] else ""
                 summary = f" — {e['summary']}" if e["summary"] else ""
-                lines.append(f"- [[{e['slug']}]] **{e['title']}**{status}{summary}")
+                lines.append(
+                    f"- [[{e['slug']}]] **{e['title']}**{status}{summary}"
+                )
 
         with open(self.index_file, "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
 
-# --- One-Shot Migration ---
+    # --- One-Shot Migration ---
 
     def migrate_legacy_pages(self, dry_run: bool = False) -> Dict[str, Any]:
         """Rewrite legacy wiki pages (written before the enriched frontmatter
@@ -565,7 +629,16 @@ class LLMWiki:
         exclude = {"index.md", "log.md"}
         touched: List[str] = []
         skipped: List[str] = []
-        canonical = {"title", "slug", "type", "status", "summary", "updated", "tags", "related"}
+        canonical = {
+            "title",
+            "slug",
+            "type",
+            "status",
+            "summary",
+            "updated",
+            "tags",
+            "related",
+        }
 
         for fn in sorted(os.listdir(self.wiki_vault)):
             if not fn.endswith(".md") or fn in exclude:
@@ -594,7 +667,11 @@ class LLMWiki:
             # Infer status
             status = meta.get("status")
             if not status:
-                if page_type in {"market_profile", "technical_ref", "strategy_family"}:
+                if page_type in {
+                    "market_profile",
+                    "technical_ref",
+                    "strategy_family",
+                }:
                     status = "baseline"
                 elif "✅ EFFECTIVE" in body or "Effectiveness: ✅" in body:
                     status = "proven"
@@ -610,10 +687,16 @@ class LLMWiki:
             # baseline so they are not lint-flagged as orphans.
             related = meta.get("related")
             if not related:
-                related = ["strategy_families_base"] if page_type == "factor_card" else []
+                related = (
+                    ["strategy_families_base"]
+                    if page_type == "factor_card"
+                    else []
+                )
 
             tags = meta.get("tags") or []
-            updated = meta.get("updated") or datetime.utcnow().isoformat(timespec="seconds")
+            updated = meta.get("updated") or datetime.utcnow().isoformat(
+                timespec="seconds"
+            )
 
             new_meta: Dict[str, Any] = {
                 "title": title,
@@ -623,7 +706,9 @@ class LLMWiki:
                 "summary": summary,
                 "updated": updated,
                 "tags": list(tags) if isinstance(tags, (list, tuple)) else [],
-                "related": list(related) if isinstance(related, (list, tuple)) else [],
+                "related": list(related)
+                if isinstance(related, (list, tuple))
+                else [],
             }
             # Preserve any extra legacy scalar fields
             for k, v in meta.items():
@@ -646,7 +731,9 @@ class LLMWiki:
             for slug in touched:
                 path = os.path.join(self.wiki_vault, f"{slug}.md")
                 meta = self._read_page_meta(path)
-                self._backlink_audit(slug, meta.get("title", slug), meta.get("related") or [])
+                self._backlink_audit(
+                    slug, meta.get("title", slug), meta.get("related") or []
+                )
 
             self._recompile_index()
             stamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
@@ -666,7 +753,7 @@ class LLMWiki:
             "dry_run": dry_run,
         }
 
-# --- Lint & Health-Check ---
+    # --- Lint & Health-Check ---
 
     def lint(self, stale_days: int = 30) -> Dict[str, Any]:
         """Scan the vault for structural problems. Writes a severity-tiered
@@ -737,7 +824,9 @@ class LLMWiki:
 
             # WARNING: missing summary
             if not meta.get("summary"):
-                warnings.append(f"`{slug}` has no `summary` field in frontmatter.")
+                warnings.append(
+                    f"`{slug}` has no `summary` field in frontmatter."
+                )
 
             # WARNING: stale page
             updated = meta.get("updated")
@@ -749,13 +838,16 @@ class LLMWiki:
                             f"`{slug}` is stale — last updated {updated} ({stale_days}+ days ago)."
                         )
                 except ValueError:
-                    warnings.append(f"`{slug}` has unparseable `updated` field: {updated}")
+                    warnings.append(
+                        f"`{slug}` has unparseable `updated` field: {updated}"
+                    )
 
             # WARNING: factor card with no parent strategy family
             if meta.get("type") == "factor_card":
                 related = meta.get("related") or []
                 has_family = any(
-                    pages.get(r, {}).get("meta", {}).get("type") == "strategy_family"
+                    pages.get(r, {}).get("meta", {}).get("type")
+                    == "strategy_family"
                     for r in related
                 )
                 if not has_family:
@@ -764,7 +856,11 @@ class LLMWiki:
                     )
 
             # INFO: orphan page (no inbound links AND no outbound wikilinks)
-            if not inbound.get(slug) and not p["links"] and meta.get("type") != "market_profile":
+            if (
+                not inbound.get(slug)
+                and not p["links"]
+                and meta.get("type") != "market_profile"
+            ):
                 infos.append(
                     f"`{slug}` is an orphan — no incoming or outgoing wikilinks."
                 )
@@ -821,7 +917,7 @@ class LLMWiki:
         )
         return report
 
-# --- Full-Page Query & Retrieval ---
+    # --- Full-Page Query & Retrieval ---
 
     def query_pages(
         self,
@@ -891,24 +987,28 @@ class LLMWiki:
                 with open(path, "r", encoding="utf-8") as f:
                     raw = f.read()
                 _, body = _parse_frontmatter(raw)
-            out.append({
-                "slug": slug,
-                "title": meta.get("title", slug),
-                "type": meta.get("type", ""),
-                "status": meta.get("status", ""),
-                "summary": meta.get("summary", ""),
-                "last_updated": meta.get("last_updated", ""),
-                "body": body,
-                "chroma_meta": meta,
-                "chroma_doc": doc,
-            })
+            out.append(
+                {
+                    "slug": slug,
+                    "title": meta.get("title", slug),
+                    "type": meta.get("type", ""),
+                    "status": meta.get("status", ""),
+                    "summary": meta.get("summary", ""),
+                    "last_updated": meta.get("last_updated", ""),
+                    "body": body,
+                    "chroma_meta": meta,
+                    "chroma_doc": doc,
+                }
+            )
         return out
 
     def retrieve(
         self, query: str, n_results: int = 3, type_filter: Optional[str] = None
     ) -> str:
         if getattr(self, "disable_chroma", False):
-            pages = self.query_pages(query, top_k=n_results, type_filter=type_filter)
+            pages = self.query_pages(
+                query, top_k=n_results, type_filter=type_filter
+            )
             if not pages:
                 return "No matching content in Wiki."
             parts = ["=== LLM WIKI ==="]
@@ -920,7 +1020,9 @@ class LLMWiki:
                 )
                 body = page.get("body", "")
                 parts.append(f"**{page['title']}** (updated {updated_short})")
-                parts.append(f"Type: {page.get('type', '')}, Status: {page.get('status', '')}")
+                parts.append(
+                    f"Type: {page.get('type', '')}, Status: {page.get('status', '')}"
+                )
                 parts.append(body[:1000] + "..." if len(body) > 1000 else body)
                 parts.append("---")
             return "\n".join(parts)
@@ -944,7 +1046,9 @@ class LLMWiki:
                 return "No matching content in Wiki."
 
             parts = ["=== LLM WIKI ==="]
-            for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
+            for doc, meta in zip(
+                results["documents"][0], results["metadatas"][0]
+            ):
                 meta = meta or {}
                 title = meta.get("title") or meta.get("slug") or "Untitled"
                 updated = meta.get("updated") or meta.get("last_updated") or ""

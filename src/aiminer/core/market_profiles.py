@@ -39,5 +39,7 @@ def get_market_profile(name: str | None) -> MarketProfile:
     key = (name or "cn_stock").strip().lower()
     if key not in MARKET_PROFILES:
         supported = ", ".join(sorted(MARKET_PROFILES))
-        raise ValueError(f"Unsupported market_profile '{name}'. Expected one of: {supported}")
+        raise ValueError(
+            f"Unsupported market_profile '{name}'. Expected one of: {supported}"
+        )
     return MARKET_PROFILES[key]

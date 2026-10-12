@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-import os
 import json
+import os
 from pathlib import Path
 from typing import Any, Mapping
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
-
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    model_validator,
+)
 
 SUPPORTED_LLM_PROVIDERS = (
     "deepseek",
@@ -105,8 +110,12 @@ def _default_local_data_path(data_dir: str, market_profile: str) -> str | None:
                 Path("../llm/data/local_futures/contracts/1d"),
                 data_root / "local_futures" / "dominant" / "1d",
                 data_root / "local_futures" / "contracts" / "1d",
-                Path("src-tauri/resources/market_data/local_futures/dominant/1d"),
-                Path("src-tauri/resources/market_data/local_futures/contracts/1d"),
+                Path(
+                    "src-tauri/resources/market_data/local_futures/dominant/1d"
+                ),
+                Path(
+                    "src-tauri/resources/market_data/local_futures/contracts/1d"
+                ),
                 Path(
                     "local-dist/AIMiner.AppDir/usr/lib/app/market_data/"
                     "local_futures/dominant/1d"
@@ -169,24 +178,36 @@ class AiminerSettings(BaseModel):
                 f"evaluation_mode must be one of: {', '.join(SUPPORTED_EVALUATION_MODES)}"
             )
         if self.evaluation_engine not in {"pandas", "polars"}:
-            raise ValueError("evaluation_engine must be either 'pandas' or 'polars'")
+            raise ValueError(
+                "evaluation_engine must be either 'pandas' or 'polars'"
+            )
         if self.data_backend not in SUPPORTED_DATA_BACKENDS:
             raise ValueError(
                 f"data_backend must be one of: {', '.join(SUPPORTED_DATA_BACKENDS)}"
             )
         if self.data_backend == "qlib" and self.evaluation_mode != "qlib":
-            raise ValueError("data_backend='qlib' requires evaluation_mode='qlib'")
-        if self.data_backend in {"ricequant", "local"} and self.evaluation_mode != "ricequant":
+            raise ValueError(
+                "data_backend='qlib' requires evaluation_mode='qlib'"
+            )
+        if (
+            self.data_backend in {"ricequant", "local"}
+            and self.evaluation_mode != "ricequant"
+        ):
             raise ValueError(
                 f"data_backend='{self.data_backend}' requires evaluation_mode='ricequant'"
             )
-        if self.llm_provider and self.llm_provider not in SUPPORTED_LLM_PROVIDERS:
+        if (
+            self.llm_provider
+            and self.llm_provider not in SUPPORTED_LLM_PROVIDERS
+        ):
             raise ValueError(
                 f"Unsupported llm_provider '{self.llm_provider}'. "
                 f"Expected one of: {', '.join(SUPPORTED_LLM_PROVIDERS)}"
             )
         if self.llm_reasoning_effort:
-            self.llm_reasoning_effort = self.llm_reasoning_effort.strip().lower()
+            self.llm_reasoning_effort = (
+                self.llm_reasoning_effort.strip().lower()
+            )
             if self.llm_reasoning_effort not in SUPPORTED_LLM_REASONING_EFFORTS:
                 raise ValueError(
                     "llm_reasoning_effort must be one of: "
@@ -201,7 +222,9 @@ class AiminerSettings(BaseModel):
                 "Expected 'local' or a supported LLM provider."
             )
         if self.embedding_provider == "codex":
-            raise ValueError("embedding_provider='codex' is not supported; use local or an embedding API provider.")
+            raise ValueError(
+                "embedding_provider='codex' is not supported; use local or an embedding API provider."
+            )
         if self.market_mode not in SUPPORTED_MARKET_MODES:
             raise ValueError(
                 f"market_mode must be one of: {', '.join(SUPPORTED_MARKET_MODES)}"
@@ -210,7 +233,11 @@ class AiminerSettings(BaseModel):
             raise ValueError(
                 f"market_profile must be one of: {', '.join(SUPPORTED_MARKET_PROFILES)}"
             )
-        bad_profiles = [item for item in self.market_profiles if item not in SUPPORTED_MARKET_PROFILES]
+        bad_profiles = [
+            item
+            for item in self.market_profiles
+            if item not in SUPPORTED_MARKET_PROFILES
+        ]
         if bad_profiles:
             raise ValueError(
                 f"Unsupported market_profiles: {', '.join(bad_profiles)}. "
@@ -222,20 +249,30 @@ class AiminerSettings(BaseModel):
             self.market_profiles = [self.market_profile] + self.market_profiles
         if self.data_backend == "ricequant":
             if self.market_mode == "mixed":
-                raise ValueError("ricequant backend does not support market_mode='mixed'")
+                raise ValueError(
+                    "ricequant backend does not support market_mode='mixed'"
+                )
             if any(profile != "cn_stock" for profile in self.market_profiles):
-                raise ValueError("ricequant backend currently supports cn_stock only")
+                raise ValueError(
+                    "ricequant backend currently supports cn_stock only"
+                )
         if self.data_backend == "qlib":
             if self.market_mode == "mixed":
-                raise ValueError("qlib backend does not support market_mode='mixed'")
+                raise ValueError(
+                    "qlib backend does not support market_mode='mixed'"
+                )
             if any(profile == "futures" for profile in self.market_profiles):
-                raise ValueError("qlib backend does not support futures market_profile")
+                raise ValueError(
+                    "qlib backend does not support futures market_profile"
+                )
         if self.local_data_layout not in SUPPORTED_LOCAL_DATA_LAYOUTS:
             raise ValueError(
                 f"local_data_layout must be one of: {', '.join(SUPPORTED_LOCAL_DATA_LAYOUTS)}"
             )
         if self.data_backend == "local" and not self.local_data_path:
-            raise ValueError("local_data_path is required when data_backend='local'")
+            raise ValueError(
+                "local_data_path is required when data_backend='local'"
+            )
         return self
 
     @property
@@ -329,16 +366,22 @@ def detect_llm_provider() -> str | None:
     return None
 
 
-def build_settings(overrides: Mapping[str, Any] | None = None) -> AiminerSettings:
+def build_settings(
+    overrides: Mapping[str, Any] | None = None,
+) -> AiminerSettings:
     load_dotenv()
     overrides = dict(overrides or {})
 
-    provider = _normalize_str(overrides.get("llm_provider")) or detect_llm_provider()
+    provider = (
+        _normalize_str(overrides.get("llm_provider")) or detect_llm_provider()
+    )
     embedding_provider = _normalize_str(overrides.get("embedding_provider"))
     data_backend = _normalize_str(overrides.get("data_backend"))
     if not data_backend:
         data_backend = (
-            _normalize_str(overrides.get("evaluation_mode", overrides.get("mode")))
+            _normalize_str(
+                overrides.get("evaluation_mode", overrides.get("mode"))
+            )
             or "ricequant"
         )
     data_dir = (
@@ -355,17 +398,25 @@ def build_settings(overrides: Mapping[str, Any] | None = None) -> AiminerSetting
     )
     if data_backend == "local" and not local_data_path:
         if explicit_market_profile:
-            local_data_path = _default_local_data_path(data_dir, explicit_market_profile)
+            local_data_path = _default_local_data_path(
+                data_dir, explicit_market_profile
+            )
         else:
             for candidate_profile in ("futures", "cn_stock", "us_stock"):
-                local_data_path = _default_local_data_path(data_dir, candidate_profile)
+                local_data_path = _default_local_data_path(
+                    data_dir, candidate_profile
+                )
                 if local_data_path:
                     market_profile = candidate_profile
                     break
-    market_profiles = _coerce_list(overrides.get("market_profiles")) or [market_profile]
+    market_profiles = _coerce_list(overrides.get("market_profiles")) or [
+        market_profile
+    ]
 
     payload = {
-        "max_iterations": overrides.get("max_iterations", overrides.get("iterations", 1)),
+        "max_iterations": overrides.get(
+            "max_iterations", overrides.get("iterations", 1)
+        ),
         "evaluation_mode": _normalize_str(
             overrides.get("evaluation_mode", overrides.get("mode"))
         )
@@ -380,7 +431,9 @@ def build_settings(overrides: Mapping[str, Any] | None = None) -> AiminerSetting
         "llm_base_url": _normalize_str(overrides.get("llm_base_url"))
         or _normalize_str(os.getenv("LLM_BASE_URL"))
         or _normalize_str(os.getenv("OPENAI_BASE_URL")),
-        "llm_reasoning_effort": _normalize_str(overrides.get("llm_reasoning_effort"))
+        "llm_reasoning_effort": _normalize_str(
+            overrides.get("llm_reasoning_effort")
+        )
         or _normalize_str(os.getenv("AIMINER_CODEX_REASONING_EFFORT"))
         or _normalize_str(os.getenv("AIMINER_LLM_REASONING_EFFORT")),
         "embedding_provider": embedding_provider,
@@ -388,13 +441,18 @@ def build_settings(overrides: Mapping[str, Any] | None = None) -> AiminerSetting
         "market_profile": market_profile,
         "market_profiles": market_profiles,
         "local_data_path": local_data_path,
-        "local_data_layout": _normalize_str(overrides.get("local_data_layout")) or "auto",
+        "local_data_layout": _normalize_str(overrides.get("local_data_layout"))
+        or "auto",
         "market_start": _normalize_str(overrides.get("market_start")),
         "market_end": _normalize_str(overrides.get("market_end")),
         "market_lookback": overrides.get("market_lookback", 60),
         "use_gpu": _coerce_bool(overrides.get("use_gpu"), default=False),
-        "rebuild_rag": _coerce_bool(overrides.get("rebuild_rag"), default=False),
-        "wiki_bootstrap": _coerce_bool(overrides.get("wiki_bootstrap"), default=False),
+        "rebuild_rag": _coerce_bool(
+            overrides.get("rebuild_rag"), default=False
+        ),
+        "wiki_bootstrap": _coerce_bool(
+            overrides.get("wiki_bootstrap"), default=False
+        ),
         "disable_early_stop": _coerce_bool(
             overrides.get("disable_early_stop")
             or os.getenv("AIMINER_DISABLE_EARLY_STOP"),

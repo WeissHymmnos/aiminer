@@ -1,24 +1,28 @@
 import json
 import re
-import pandas as pd
-from typing import List, Dict, Any
+from typing import Any, Dict, List
+
 from loguru import logger
+import pandas as pd
 from pydantic import BaseModel, Field
+
 from aiminer.core.llm import get_llm
+
 
 class PortfolioDecision(BaseModel):
     method: str = Field(
-        ..., 
-        description="The chosen portfolio construction method. Must be one of: 'equal', 'inverse_vol', 'risk_parity'."
+        ...,
+        description="The chosen portfolio construction method. Must be one of: 'equal', 'inverse_vol', 'risk_parity'.",
     )
     rationale: str = Field(
-        ..., 
-        description="Detailed explanation of why this method was chosen based on the factor metrics and correlation matrix."
+        ...,
+        description="Detailed explanation of why this method was chosen based on the factor metrics and correlation matrix.",
     )
+
 
 class PortfolioAgent:
     """
-    PortfolioAgent analyzes the selected top factors, their metrics, and their 
+    PortfolioAgent analyzes the selected top factors, their metrics, and their
     correlation matrix to dynamically recommend the optimal portfolio weighting scheme.
     """
 
@@ -57,7 +61,9 @@ class PortfolioAgent:
     @staticmethod
     def _strip_markdown_json(text: str) -> str:
         text = text.strip()
-        match = re.search(r"```(?:json)?\s*(.*?)```", text, flags=re.DOTALL | re.IGNORECASE)
+        match = re.search(
+            r"```(?:json)?\s*(.*?)```", text, flags=re.DOTALL | re.IGNORECASE
+        )
         if match:
             return match.group(1).strip()
         return text
@@ -88,9 +94,14 @@ class PortfolioAgent:
         lowered = text.lower()
         for method in ("risk_parity", "inverse_vol", "equal"):
             if method in lowered:
-                return PortfolioDecision(method=method, rationale=text[:500] or "Parsed from plain LLM response.")
+                return PortfolioDecision(
+                    method=method,
+                    rationale=text[:500] or "Parsed from plain LLM response.",
+                )
 
-        raise ValueError("Portfolio decision response did not contain a supported method.")
+        raise ValueError(
+            "Portfolio decision response did not contain a supported method."
+        )
 
     @staticmethod
     def _normalize_method(decision: PortfolioDecision) -> PortfolioDecision:
@@ -104,28 +115,36 @@ class PortfolioAgent:
             )
         return decision
 
-    def select_method(self, factors: List[Dict[str, Any]], returns_df: pd.DataFrame) -> PortfolioDecision:
+    def select_method(
+        self, factors: List[Dict[str, Any]], returns_df: pd.DataFrame
+    ) -> PortfolioDecision:
         """
         Evaluate factors and their correlation to select a portfolio construction method.
         """
         if not factors or returns_df.empty:
-            logger.warning("[PortfolioAgent] Empty factors or returns, defaulting to equal weight.")
-            return PortfolioDecision(method="equal", rationale="Fallback due to empty inputs.")
-            
+            logger.warning(
+                "[PortfolioAgent] Empty factors or returns, defaulting to equal weight."
+            )
+            return PortfolioDecision(
+                method="equal", rationale="Fallback due to empty inputs."
+            )
+
         # Calculate correlation matrix
         corr_matrix = returns_df.corr().round(4).to_dict()
-        
+
         # Summarize factor metrics
         factor_summaries = []
         for f in factors:
             fid = f.get("id", "unknown")
             metrics = f.get("metrics", {})
-            factor_summaries.append({
-                "id": fid,
-                "hypothesis": f.get("hypothesis", ""),
-                "ic": metrics.get("information_coefficient", 0.0),
-                "sharpe": metrics.get("sharpe", 0.0)
-            })
+            factor_summaries.append(
+                {
+                    "id": fid,
+                    "hypothesis": f.get("hypothesis", ""),
+                    "ic": metrics.get("information_coefficient", 0.0),
+                    "sharpe": metrics.get("sharpe", 0.0),
+                }
+            )
 
         prompt_text = f"""
 You are an expert quantitative portfolio manager. Your task is to select the optimal portfolio construction method for a given set of alpha factors.
@@ -144,9 +163,11 @@ Here are the selected factors and their key metrics:
 Based on the factor count, their individual performance (IC, Sharpe), and the correlation structure, which method will maximize the out-of-sample risk-adjusted return (e.g., Diversification Ratio and Sharpe)?
 Provide your decision and a concise rationale. Return only JSON with keys "method" and "rationale".
 """
-        
+
         try:
-            logger.info("[PortfolioAgent] Consulting LLM for portfolio construction method...")
+            logger.info(
+                "[PortfolioAgent] Consulting LLM for portfolio construction method..."
+            )
             decision = None
             if self._supports_structured_output():
                 try:
@@ -160,9 +181,17 @@ Provide your decision and a concise rationale. Return only JSON with keys "metho
             if decision is None:
                 decision = self._raw_llm().invoke(prompt_text)
 
-            decision = self._normalize_method(self._parse_decision_response(decision))
-            logger.info(f"[PortfolioAgent] Selected method: {decision.method} | Rationale: {decision.rationale}")
+            decision = self._normalize_method(
+                self._parse_decision_response(decision)
+            )
+            logger.info(
+                f"[PortfolioAgent] Selected method: {decision.method} | Rationale: {decision.rationale}"
+            )
             return decision
         except Exception as e:
-            logger.warning(f"[PortfolioAgent] Failed to select method via LLM, falling back to risk_parity: {e}")
-            return PortfolioDecision(method="risk_parity", rationale="Fallback due to LLM error.")
+            logger.warning(
+                f"[PortfolioAgent] Failed to select method via LLM, falling back to risk_parity: {e}"
+            )
+            return PortfolioDecision(
+                method="risk_parity", rationale="Fallback due to LLM error."
+            )

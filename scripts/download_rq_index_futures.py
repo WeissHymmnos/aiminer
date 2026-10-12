@@ -1,26 +1,26 @@
 from __future__ import annotations
 
 import argparse
-import json
-import re
-import sys
 from dataclasses import dataclass
 from datetime import datetime
+import json
 from pathlib import Path
+import re
+import sys
 from typing import Any, Iterable
 
+from loguru import logger
 import pandas as pd
 import rqdatac as rq
-from loguru import logger
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from aiminer.core.alphaeval.rq_eval import init_rq_auth
-from aiminer.core.local_data import ohlcv_quality_report, validate_ohlcv_quality
 from scripts.test_local_futures_data import run_suite
 
+from aiminer.core.alphaeval.rq_eval import init_rq_auth
+from aiminer.core.local_data import ohlcv_quality_report, validate_ohlcv_quality
 
 DEFAULT_UNDERLYINGS = ("IF", "IH", "IC", "IM")
 DEFAULT_FIELDS = [
@@ -34,8 +34,15 @@ DEFAULT_FIELDS = [
 ]
 
 
-def _is_deliverable_contract_id(order_book_id: str, underlying_symbol: str) -> bool:
-    return bool(re.fullmatch(rf"{re.escape(underlying_symbol.upper())}\d{{4}}", str(order_book_id).upper()))
+def _is_deliverable_contract_id(
+    order_book_id: str, underlying_symbol: str
+) -> bool:
+    return bool(
+        re.fullmatch(
+            rf"{re.escape(underlying_symbol.upper())}\d{{4}}",
+            str(order_book_id).upper(),
+        )
+    )
 
 
 @dataclass(frozen=True)
@@ -86,7 +93,9 @@ def _normalize_price_frame(
 
     df = raw.copy()
     if isinstance(df.index, pd.MultiIndex):
-        index_names = [name or f"level_{i}" for i, name in enumerate(df.index.names)]
+        index_names = [
+            name or f"level_{i}" for i, name in enumerate(df.index.names)
+        ]
         df.index.names = index_names
         df = df.reset_index()
     else:
@@ -132,7 +141,11 @@ def _normalize_price_frame(
     for col in keep:
         if col not in df.columns:
             df[col] = pd.NA
-    return df[keep].sort_values("datetime").drop_duplicates(subset=["datetime"], keep="last")
+    return (
+        df[keep]
+        .sort_values("datetime")
+        .drop_duplicates(subset=["datetime"], keep="last")
+    )
 
 
 def discover_contracts(
@@ -147,12 +160,18 @@ def discover_contracts(
 
     df = instruments.copy()
     if "underlying_symbol" not in df.columns:
-        raise ValueError("rq.all_instruments(type='Future') missing underlying_symbol column.")
+        raise ValueError(
+            "rq.all_instruments(type='Future') missing underlying_symbol column."
+        )
     if "order_book_id" not in df.columns:
-        raise ValueError("rq.all_instruments(type='Future') missing order_book_id column.")
+        raise ValueError(
+            "rq.all_instruments(type='Future') missing order_book_id column."
+        )
 
     df["underlying_symbol"] = df["underlying_symbol"].astype(str).str.upper()
-    df = df[df["underlying_symbol"].isin([item.upper() for item in underlyings])].copy()
+    df = df[
+        df["underlying_symbol"].isin([item.upper() for item in underlyings])
+    ].copy()
     df["order_book_id"] = df["order_book_id"].astype(str).str.upper()
     df = df[
         df.apply(
@@ -170,11 +189,15 @@ def discover_contracts(
     else:
         df["listed_date"] = pd.NaT
     if "de_listed_date" in df.columns:
-        df["de_listed_date"] = pd.to_datetime(df["de_listed_date"], errors="coerce")
+        df["de_listed_date"] = pd.to_datetime(
+            df["de_listed_date"], errors="coerce"
+        )
     else:
         df["de_listed_date"] = pd.NaT
 
-    df = df[(df["de_listed_date"].isna()) | (df["de_listed_date"] >= start_ts)].copy()
+    df = df[
+        (df["de_listed_date"].isna()) | (df["de_listed_date"] >= start_ts)
+    ].copy()
     df = df[(df["listed_date"].isna()) | (df["listed_date"] <= end_ts)].copy()
 
     exchange_col = "exchange"
@@ -188,17 +211,23 @@ def discover_contracts(
             underlying_symbol=str(row.underlying_symbol),
             exchange=str(getattr(row, exchange_col, "") or ""),
             listed_date=_coerce_timestamp(getattr(row, "listed_date", None)),
-            de_listed_date=_coerce_timestamp(getattr(row, "de_listed_date", None)),
+            de_listed_date=_coerce_timestamp(
+                getattr(row, "de_listed_date", None)
+            ),
         )
         for row in df.itertuples(index=False)
     ]
 
 
-def contract_file_path(output_root: Path, frequency: str, instrument: str) -> Path:
+def contract_file_path(
+    output_root: Path, frequency: str, instrument: str
+) -> Path:
     return output_root / "contracts" / frequency / f"{instrument}.parquet"
 
 
-def dominant_file_path(output_root: Path, frequency: str, underlying: str) -> Path:
+def dominant_file_path(
+    output_root: Path, frequency: str, underlying: str
+) -> Path:
     return output_root / "dominant" / frequency / f"{underlying}.parquet"
 
 
@@ -218,7 +247,9 @@ def _existing_max_datetime(path: Path) -> pd.Timestamp | None:
     return pd.Timestamp(dt.max())
 
 
-def _next_start_after(last_dt: pd.Timestamp | None, frequency: str) -> pd.Timestamp | None:
+def _next_start_after(
+    last_dt: pd.Timestamp | None, frequency: str
+) -> pd.Timestamp | None:
     if last_dt is None:
         return None
     if frequency == "1d":
@@ -359,7 +390,9 @@ def download_contract_data(
     }
 
 
-def _dominant_mapping_frame(underlying: str, *, start: str, end: str, rule: int, rank: int) -> pd.DataFrame:
+def _dominant_mapping_frame(
+    underlying: str, *, start: str, end: str, rule: int, rank: int
+) -> pd.DataFrame:
     raw = rq.get_dominant_future(
         underlying,
         start_date=start,
@@ -377,19 +410,37 @@ def _dominant_mapping_frame(underlying: str, *, start: str, end: str, rule: int,
         mapping = raw.copy().reset_index()
         if "dominant_contract" not in mapping.columns:
             if underlying in mapping.columns:
-                mapping = mapping.rename(columns={underlying: "dominant_contract"})
+                mapping = mapping.rename(
+                    columns={underlying: "dominant_contract"}
+                )
             else:
-                value_col = [col for col in mapping.columns if col not in {"date", "datetime", "trading_date"}]
+                value_col = [
+                    col
+                    for col in mapping.columns
+                    if col not in {"date", "datetime", "trading_date"}
+                ]
                 if len(value_col) != 1:
-                    raise ValueError(f"Unable to infer dominant contract column for {underlying}.")
-                mapping = mapping.rename(columns={value_col[0]: "dominant_contract"})
+                    raise ValueError(
+                        f"Unable to infer dominant contract column for {underlying}."
+                    )
+                mapping = mapping.rename(
+                    columns={value_col[0]: "dominant_contract"}
+                )
 
     date_col = _date_column_name(mapping)
     mapping = mapping.rename(columns={date_col: "date"})
-    mapping["date"] = pd.to_datetime(mapping["date"], errors="coerce").dt.normalize()
-    mapping["dominant_contract"] = mapping["dominant_contract"].astype(str).str.strip()
-    mapping = mapping[(mapping["date"].notna()) & (mapping["dominant_contract"] != "")]
-    return mapping[["date", "dominant_contract"]].drop_duplicates(subset=["date"], keep="last")
+    mapping["date"] = pd.to_datetime(
+        mapping["date"], errors="coerce"
+    ).dt.normalize()
+    mapping["dominant_contract"] = (
+        mapping["dominant_contract"].astype(str).str.strip()
+    )
+    mapping = mapping[
+        (mapping["date"].notna()) & (mapping["dominant_contract"] != "")
+    ]
+    return mapping[["date", "dominant_contract"]].drop_duplicates(
+        subset=["date"], keep="last"
+    )
 
 
 def build_dominant_data(
@@ -404,7 +455,9 @@ def build_dominant_data(
     dry_run: bool = False,
 ) -> dict[str, Any]:
     path = dominant_file_path(output_root, frequency, underlying)
-    mapping = _dominant_mapping_frame(underlying, start=start, end=end, rule=rule, rank=rank)
+    mapping = _dominant_mapping_frame(
+        underlying, start=start, end=end, rule=rule, rank=rank
+    )
     if mapping.empty:
         return {
             "underlying": underlying,
@@ -434,7 +487,9 @@ def build_dominant_data(
         contract_df = pd.read_parquet(contract_path)
         if contract_df.empty:
             continue
-        contract_df["datetime"] = pd.to_datetime(contract_df["datetime"], errors="coerce")
+        contract_df["datetime"] = pd.to_datetime(
+            contract_df["datetime"], errors="coerce"
+        )
         contract_df = contract_df[contract_df["datetime"].notna()].copy()
         contract_df["date"] = contract_df["datetime"].dt.normalize()
         contract_df["dominant_contract"] = contract
@@ -450,7 +505,9 @@ def build_dominant_data(
         }
 
     merged = pd.concat(frames, ignore_index=True)
-    merged = merged.merge(mapping, on=["date", "dominant_contract"], how="inner")
+    merged = merged.merge(
+        mapping, on=["date", "dominant_contract"], how="inner"
+    )
     merged["instrument"] = underlying
     keep = [
         "datetime",
@@ -499,7 +556,9 @@ def load_manifest(output_root: Path) -> dict[str, Any]:
 def save_manifest(output_root: Path, payload: dict[str, Any]) -> None:
     path = manifest_file_path(output_root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 def update_manifest(
@@ -532,13 +591,22 @@ def update_manifest(
     for frequency in frequencies:
         payload["frequency_status"][frequency] = {
             "contracts_written": sum(
-                1 for item in contract_results if item.get("frequency") == frequency and item.get("status") == "written"
+                1
+                for item in contract_results
+                if item.get("frequency") == frequency
+                and item.get("status") == "written"
             ),
             "contracts_invalid_ohlcv": sum(
-                1 for item in contract_results if item.get("frequency") == frequency and item.get("status") == "invalid_ohlcv"
+                1
+                for item in contract_results
+                if item.get("frequency") == frequency
+                and item.get("status") == "invalid_ohlcv"
             ),
             "dominant_written": sum(
-                1 for item in dominant_results if item.get("frequency") == frequency and item.get("status") == "written"
+                1
+                for item in dominant_results
+                if item.get("frequency") == frequency
+                and item.get("status") == "written"
             ),
         }
     save_manifest(output_root, payload)
@@ -560,10 +628,14 @@ def run_download(
     dry_run: bool = False,
 ) -> dict[str, Any]:
     if contracts_only and dominant_only:
-        raise ValueError("contracts_only and dominant_only cannot both be true.")
+        raise ValueError(
+            "contracts_only and dominant_only cannot both be true."
+        )
 
     init_rq_auth()
-    contracts = discover_contracts(underlyings=underlyings, start=start, end=end)
+    contracts = discover_contracts(
+        underlyings=underlyings, start=start, end=end
+    )
     contract_results: list[dict[str, Any]] = []
     dominant_results: list[dict[str, Any]] = []
 
@@ -586,7 +658,9 @@ def run_download(
     if not contracts_only:
         for frequency in frequencies:
             for underlying in underlyings:
-                logger.info(f"Building dominant series {underlying} ({frequency})")
+                logger.info(
+                    f"Building dominant series {underlying} ({frequency})"
+                )
                 dominant_results.append(
                     build_dominant_data(
                         output_root=output_root,
@@ -621,10 +695,14 @@ def run_download(
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Download China index futures data from RiceQuant.")
+    parser = argparse.ArgumentParser(
+        description="Download China index futures data from RiceQuant."
+    )
     parser.add_argument("--output", default="data/local_futures")
     parser.add_argument("--start", required=True)
-    parser.add_argument("--end", default=pd.Timestamp.today().strftime("%Y-%m-%d"))
+    parser.add_argument(
+        "--end", default=pd.Timestamp.today().strftime("%Y-%m-%d")
+    )
     parser.add_argument("--frequencies", default="1d,1m")
     parser.add_argument("--underlyings", default=",".join(DEFAULT_UNDERLYINGS))
     parser.add_argument("--contracts-only", action="store_true")
@@ -646,7 +724,12 @@ def main() -> int:
         start=args.start,
         end=args.end,
         frequencies=_parse_csv_arg(args.frequencies, default=["1d", "1m"]),
-        underlyings=[item.upper() for item in _parse_csv_arg(args.underlyings, default=DEFAULT_UNDERLYINGS)],
+        underlyings=[
+            item.upper()
+            for item in _parse_csv_arg(
+                args.underlyings, default=DEFAULT_UNDERLYINGS
+            )
+        ],
         contracts_only=args.contracts_only,
         dominant_only=args.dominant_only,
         dominant_rule=args.dominant_rule,

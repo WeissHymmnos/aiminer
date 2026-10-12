@@ -1,15 +1,18 @@
 import os
 from pathlib import Path
-import pandas as pd
+
 import matplotlib
+import pandas as pd
 
 matplotlib.use("Agg", force=True)
-import matplotlib.pyplot as plt
-from typing import Dict, Any
-from loguru import logger
-from aiminer.core.settings import AiminerSettings, build_settings
-from aiminer.core.llm import get_llm
+from typing import Any, Dict
+
 from langchain_core.prompts import ChatPromptTemplate
+from loguru import logger
+import matplotlib.pyplot as plt
+
+from aiminer.core.llm import get_llm
+from aiminer.core.settings import AiminerSettings, build_settings
 
 
 class SummaryAgent:
@@ -54,7 +57,9 @@ class SummaryAgent:
             try:
                 series = pd.Series(returns, dtype=float)
             except Exception:
-                logger.warning("[SummaryAgent] Could not coerce returns to Series.")
+                logger.warning(
+                    "[SummaryAgent] Could not coerce returns to Series."
+                )
                 return pd.Series(dtype=float)
         series = pd.to_numeric(series, errors="coerce").dropna()
         try:
@@ -96,7 +101,9 @@ class SummaryAgent:
         returns = self._coerce_returns_series(factor_data.get("returns"))
         plot_paths = dict(factor_data.get("plot_paths", {}) or {})
         if returns is not None and not returns.empty:
-            plot_paths.setdefault("equity", self.generate_equity_curve(returns, factor_id))
+            plot_paths.setdefault(
+                "equity", self.generate_equity_curve(returns, factor_id)
+            )
 
         # Build analysis via LLM
         prompt = ChatPromptTemplate.from_messages(
@@ -115,7 +122,11 @@ class SummaryAgent:
         chain = prompt | self.llm
         try:
             analysis = chain.invoke(
-                {"hypothesis": hypothesis, "code": code, "metrics": str(metrics)}
+                {
+                    "hypothesis": hypothesis,
+                    "code": code,
+                    "metrics": str(metrics),
+                }
             ).content
         except Exception as e:
             logger.error(f"Failed to generate LLM summary: {e}")

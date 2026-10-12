@@ -5,19 +5,19 @@ import os
 os.environ.setdefault("MPLBACKEND", "Agg")
 
 import argparse
-import pandas as pd
-from loguru import logger
 import concurrent.futures
 from concurrent.futures.process import BrokenProcessPool
-from dotenv import load_dotenv
+import json
 import multiprocessing
+import random
+import sqlite3
 import threading
 import time
-import random
-
-import sqlite3
-import json
 import uuid
+
+from dotenv import load_dotenv
+from loguru import logger
+import pandas as pd
 
 from aiminer.core.agent_checkpoint import (
     ensure_agent_checkpoint_table,
@@ -128,7 +128,9 @@ def _configured_worker_limit(explicit_value, env_name: str):
     return value if value > 0 else None
 
 
-def _configured_timeout(explicit_value, env_name: str, default: float | None = None):
+def _configured_timeout(
+    explicit_value, env_name: str, default: float | None = None
+):
     raw = explicit_value if explicit_value is not None else os.getenv(env_name)
     if raw in (None, ""):
         return default
@@ -140,7 +142,9 @@ def _configured_timeout(explicit_value, env_name: str, default: float | None = N
     return value if value > 0 else None
 
 
-def _configured_positive_int(explicit_value, env_name: str, default: int) -> int:
+def _configured_positive_int(
+    explicit_value, env_name: str, default: int
+) -> int:
     raw = explicit_value if explicit_value is not None else os.getenv(env_name)
     if raw in (None, ""):
         return default
@@ -156,7 +160,11 @@ def _configured_positive_int(explicit_value, env_name: str, default: int) -> int
 
 
 def _configured_swarm_executor(explicit_value) -> str:
-    raw = explicit_value if explicit_value is not None else os.getenv("AIMINER_SWARM_EXECUTOR")
+    raw = (
+        explicit_value
+        if explicit_value is not None
+        else os.getenv("AIMINER_SWARM_EXECUTOR")
+    )
     value = str(raw or "process").strip().lower()
     aliases = {
         "processes": "process",
@@ -263,7 +271,9 @@ def _factor_return_series(factor: dict) -> pd.Series:
     return series
 
 
-def _series_correlation(left: pd.Series, right: pd.Series, min_overlap: int = 10):
+def _series_correlation(
+    left: pd.Series, right: pd.Series, min_overlap: int = 10
+):
     if left is None or right is None or left.empty or right.empty:
         return None
 
@@ -369,22 +379,32 @@ class PortfolioManager:
         self.kwargs.setdefault("llm_provider", self.settings.llm_provider)
         self.kwargs.setdefault("llm_model", self.settings.llm_model)
         self.kwargs.setdefault("llm_base_url", self.settings.llm_base_url)
-        self.kwargs.setdefault("llm_reasoning_effort", self.settings.llm_reasoning_effort)
-        self.kwargs.setdefault("embedding_provider", self.settings.embedding_provider)
+        self.kwargs.setdefault(
+            "llm_reasoning_effort", self.settings.llm_reasoning_effort
+        )
+        self.kwargs.setdefault(
+            "embedding_provider", self.settings.embedding_provider
+        )
         self.kwargs.setdefault("evaluation_mode", self.settings.evaluation_mode)
-        self.kwargs.setdefault("evaluation_engine", self.settings.evaluation_engine)
+        self.kwargs.setdefault(
+            "evaluation_engine", self.settings.evaluation_engine
+        )
         self.kwargs.setdefault("data_backend", self.settings.data_backend)
         self.kwargs.setdefault("market_mode", self.settings.market_mode)
         self.kwargs.setdefault("market_profile", self.settings.market_profile)
         self.kwargs.setdefault("market_profiles", self.settings.market_profiles)
         self.kwargs.setdefault("local_data_path", self.settings.local_data_path)
-        self.kwargs.setdefault("local_data_layout", self.settings.local_data_layout)
+        self.kwargs.setdefault(
+            "local_data_layout", self.settings.local_data_layout
+        )
         self.kwargs.setdefault("market_start", self.settings.market_start)
         self.kwargs.setdefault("market_end", self.settings.market_end)
         self.kwargs.setdefault("use_gpu", self.settings.use_gpu)
         self.kwargs.setdefault("rebuild_rag", self.settings.rebuild_rag)
         self.kwargs.setdefault("wiki_bootstrap", self.settings.wiki_bootstrap)
-        self.kwargs.setdefault("disable_early_stop", self.settings.disable_early_stop)
+        self.kwargs.setdefault(
+            "disable_early_stop", self.settings.disable_early_stop
+        )
         self.run_id = kwargs.get("run_id") or new_run_id()
         self.max_swarm_workers = _configured_worker_limit(
             kwargs.get("max_swarm_workers"),
@@ -472,31 +492,82 @@ class PortfolioManager:
             # Idempotent migration for pre-existing databases created before
             # the extended schema landed.
             for col, ddl in [
-                ("metrics_json", "ALTER TABLE alpha_pool ADD COLUMN metrics_json TEXT"),
-                ("returns_json", "ALTER TABLE alpha_pool ADD COLUMN returns_json TEXT"),
-                ("is_effective", "ALTER TABLE alpha_pool ADD COLUMN is_effective INTEGER"),
-                ("perf_metric",  "ALTER TABLE alpha_pool ADD COLUMN perf_metric REAL"),
-                ("selection_score", "ALTER TABLE alpha_pool ADD COLUMN selection_score REAL"),
-                ("best_strategy_id", "ALTER TABLE alpha_pool ADD COLUMN best_strategy_id TEXT"),
-                ("best_strategy_metrics_json", "ALTER TABLE alpha_pool ADD COLUMN best_strategy_metrics_json TEXT"),
-                ("execution_style", "ALTER TABLE alpha_pool ADD COLUMN execution_style TEXT"),
+                (
+                    "metrics_json",
+                    "ALTER TABLE alpha_pool ADD COLUMN metrics_json TEXT",
+                ),
+                (
+                    "returns_json",
+                    "ALTER TABLE alpha_pool ADD COLUMN returns_json TEXT",
+                ),
+                (
+                    "is_effective",
+                    "ALTER TABLE alpha_pool ADD COLUMN is_effective INTEGER",
+                ),
+                (
+                    "perf_metric",
+                    "ALTER TABLE alpha_pool ADD COLUMN perf_metric REAL",
+                ),
+                (
+                    "selection_score",
+                    "ALTER TABLE alpha_pool ADD COLUMN selection_score REAL",
+                ),
+                (
+                    "best_strategy_id",
+                    "ALTER TABLE alpha_pool ADD COLUMN best_strategy_id TEXT",
+                ),
+                (
+                    "best_strategy_metrics_json",
+                    "ALTER TABLE alpha_pool ADD COLUMN best_strategy_metrics_json TEXT",
+                ),
+                (
+                    "execution_style",
+                    "ALTER TABLE alpha_pool ADD COLUMN execution_style TEXT",
+                ),
                 ("run_id", "ALTER TABLE alpha_pool ADD COLUMN run_id TEXT"),
                 ("agent_id", "ALTER TABLE alpha_pool ADD COLUMN agent_id TEXT"),
-                ("iteration", "ALTER TABLE alpha_pool ADD COLUMN iteration INTEGER"),
-                ("evaluation_mode", "ALTER TABLE alpha_pool ADD COLUMN evaluation_mode TEXT"),
-                ("evaluation_engine", "ALTER TABLE alpha_pool ADD COLUMN evaluation_engine TEXT"),
-                ("data_backend", "ALTER TABLE alpha_pool ADD COLUMN data_backend TEXT"),
-                ("market_mode", "ALTER TABLE alpha_pool ADD COLUMN market_mode TEXT"),
-                ("market_profile", "ALTER TABLE alpha_pool ADD COLUMN market_profile TEXT"),
-                ("llm_provider", "ALTER TABLE alpha_pool ADD COLUMN llm_provider TEXT"),
-                ("llm_model", "ALTER TABLE alpha_pool ADD COLUMN llm_model TEXT"),
-                ("is_simulated", "ALTER TABLE alpha_pool ADD COLUMN is_simulated INTEGER"),
+                (
+                    "iteration",
+                    "ALTER TABLE alpha_pool ADD COLUMN iteration INTEGER",
+                ),
+                (
+                    "evaluation_mode",
+                    "ALTER TABLE alpha_pool ADD COLUMN evaluation_mode TEXT",
+                ),
+                (
+                    "evaluation_engine",
+                    "ALTER TABLE alpha_pool ADD COLUMN evaluation_engine TEXT",
+                ),
+                (
+                    "data_backend",
+                    "ALTER TABLE alpha_pool ADD COLUMN data_backend TEXT",
+                ),
+                (
+                    "market_mode",
+                    "ALTER TABLE alpha_pool ADD COLUMN market_mode TEXT",
+                ),
+                (
+                    "market_profile",
+                    "ALTER TABLE alpha_pool ADD COLUMN market_profile TEXT",
+                ),
+                (
+                    "llm_provider",
+                    "ALTER TABLE alpha_pool ADD COLUMN llm_provider TEXT",
+                ),
+                (
+                    "llm_model",
+                    "ALTER TABLE alpha_pool ADD COLUMN llm_model TEXT",
+                ),
+                (
+                    "is_simulated",
+                    "ALTER TABLE alpha_pool ADD COLUMN is_simulated INTEGER",
+                ),
             ]:
                 try:
                     cursor.execute(ddl)
                 except sqlite3.OperationalError:
                     pass  # column already exists
-                    
+
             # Portfolio table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS portfolio_pool (
@@ -553,8 +624,12 @@ class PortfolioManager:
                 row = cursor.fetchone()
                 if not row or row[0]:
                     continue  # row missing or already backfilled
-                metrics_json = json.dumps(entry.get("metrics") or {}, ensure_ascii=False)
-                returns_json = json.dumps(entry.get("returns") or {}, ensure_ascii=False)
+                metrics_json = json.dumps(
+                    entry.get("metrics") or {}, ensure_ascii=False
+                )
+                returns_json = json.dumps(
+                    entry.get("returns") or {}, ensure_ascii=False
+                )
                 is_effective = entry.get("is_effective")
                 cursor.execute(
                     """UPDATE alpha_pool
@@ -563,7 +638,9 @@ class PortfolioManager:
                     (
                         metrics_json,
                         returns_json,
-                        int(is_effective) if isinstance(is_effective, bool) else is_effective,
+                        int(is_effective)
+                        if isinstance(is_effective, bool)
+                        else is_effective,
                         entry.get("perf_metric"),
                         fid,
                     ),
@@ -590,7 +667,9 @@ class PortfolioManager:
                     "SELECT * FROM alpha_pool ORDER BY timestamp DESC"
                 ).fetchall()
             except sqlite3.OperationalError as exc:
-                logger.warning(f"[JSON Backup] Failed to read alpha_pool: {exc}")
+                logger.warning(
+                    f"[JSON Backup] Failed to read alpha_pool: {exc}"
+                )
                 return
 
         for row in rows:
@@ -609,7 +688,7 @@ class PortfolioManager:
 
         _atomic_write_json(output_path, records)
 
-# --- Factor Pool Management ---
+    # --- Factor Pool Management ---
 
     def dispatch_tasks(self, log_queue=None):
         """Prepare kwargs for sub-agents to allow pickling in ProcessPoolExecutor."""
@@ -687,9 +766,9 @@ class PortfolioManager:
                 if existing_returns.empty:
                     continue
 
-                same_market = (
-                    new_factor.get("market_profile") == existing_factor.get("market_profile")
-                )
+                same_market = new_factor.get(
+                    "market_profile"
+                ) == existing_factor.get("market_profile")
                 corr = _series_correlation(new_returns, existing_returns)
                 if same_market and corr is not None and corr > 0.7:
                     is_redundant = True
@@ -709,7 +788,9 @@ class PortfolioManager:
         self.alpha_pool = sorted(
             final_pool,
             key=lambda item: (
-                float(item.get("selection_score", float("-inf")) or float("-inf")),
+                float(
+                    item.get("selection_score", float("-inf")) or float("-inf")
+                ),
                 float(item.get("perf_metric", 0.0) or 0.0),
             ),
             reverse=True,
@@ -726,7 +807,9 @@ class PortfolioManager:
         try:
             checkpoints = load_agent_checkpoints(self.db_path, self.run_id)
         except Exception as exc:
-            logger.warning(f"[Checkpoint] Failed to load agent checkpoints: {exc}")
+            logger.warning(
+                f"[Checkpoint] Failed to load agent checkpoints: {exc}"
+            )
             return current_results
 
         if not checkpoints:
@@ -764,7 +847,9 @@ class PortfolioManager:
         ordered = sorted(
             self.alpha_pool,
             key=lambda item: (
-                float(item.get("selection_score", float("-inf")) or float("-inf")),
+                float(
+                    item.get("selection_score", float("-inf")) or float("-inf")
+                ),
                 float(item.get("perf_metric", 0.0) or 0.0),
             ),
             reverse=True,
@@ -775,12 +860,14 @@ class PortfolioManager:
             new_returns = _factor_return_series(factor)
             is_redundant = False
             for existing_factor in final_pool:
-                same_market = (
-                    factor.get("market_profile") == existing_factor.get("market_profile")
-                )
+                same_market = factor.get(
+                    "market_profile"
+                ) == existing_factor.get("market_profile")
                 if not same_market:
                     continue
-                corr = _series_correlation(new_returns, _factor_return_series(existing_factor))
+                corr = _series_correlation(
+                    new_returns, _factor_return_series(existing_factor)
+                )
                 if corr is not None and corr > 0.7:
                     is_redundant = True
                     rejected_ids.add(factor.get("id"))
@@ -812,12 +899,16 @@ class PortfolioManager:
         except (TypeError, ValueError):
             return default
 
-# --- Genetic Crossover ---
+    # --- Genetic Crossover ---
 
-    def _select_crossover_parents(self, factors: list[dict] | None = None) -> tuple[dict, dict]:
+    def _select_crossover_parents(
+        self, factors: list[dict] | None = None
+    ) -> tuple[dict, dict]:
         pool = list(factors if factors is not None else self.alpha_pool)
         if len(pool) < 2:
-            raise ValueError("At least two factors are required for genetic crossover.")
+            raise ValueError(
+                "At least two factors are required for genetic crossover."
+            )
         ranked = sorted(
             pool,
             key=lambda item: self._factor_score(item, "perf_metric"),
@@ -850,7 +941,9 @@ class PortfolioManager:
         crossover_kwargs["role_prompt"] = self._build_crossover_role(top1, top2)
         crossover_kwargs["run_id"] = self.run_id
         crossover_kwargs["agent_id"] = agent_id
-        crossover_kwargs["max_iterations"] = iterations or self.crossover_iterations
+        crossover_kwargs["max_iterations"] = (
+            iterations or self.crossover_iterations
+        )
         return run_agent_task(crossover_kwargs)
 
     def _accept_crossover_result(
@@ -877,7 +970,9 @@ class PortfolioManager:
                 if corr is not None and corr > 0.7:
                     return False, "correlated"
 
-        crossover_result["id"] = crossover_result.get("id") or f"alpha_{uuid.uuid4().hex[:8]}"
+        crossover_result["id"] = (
+            crossover_result.get("id") or f"alpha_{uuid.uuid4().hex[:8]}"
+        )
         self.alpha_pool.append(crossover_result)
         return True, "accepted"
 
@@ -914,7 +1009,9 @@ class PortfolioManager:
                 "[Crossover Failed] Hybrid factor is highly correlated with existing factors in the same market."
             )
         else:
-            logger.warning("[Crossover Failed] Hybrid factor did not meet threshold or errored.")
+            logger.warning(
+                "[Crossover Failed] Hybrid factor did not meet threshold or errored."
+            )
 
         return {
             "status": "accepted" if accepted else "rejected",
@@ -925,19 +1022,27 @@ class PortfolioManager:
 
     # --- Result Persistence ---
 
-    def _persist_alpha_factors(self, factors: list[dict] | None = None) -> list[dict]:
-        factors_to_persist = list(factors if factors is not None else self.alpha_pool)
+    def _persist_alpha_factors(
+        self, factors: list[dict] | None = None
+    ) -> list[dict]:
+        factors_to_persist = list(
+            factors if factors is not None else self.alpha_pool
+        )
         if not factors_to_persist:
             return []
 
-        logger.info(f"Generating reports and persisting {len(factors_to_persist)} factors...")
+        logger.info(
+            f"Generating reports and persisting {len(factors_to_persist)} factors..."
+        )
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             for factor in factors_to_persist:
                 factor.pop("_normalized_return_series", None)
                 if not factor.get("id"):
                     factor["id"] = f"alpha_{uuid.uuid4().hex[:8]}"
-                report_path = factor.get("report_path") or self.summary_agent.generate_markdown_report(factor)
+                report_path = factor.get(
+                    "report_path"
+                ) or self.summary_agent.generate_markdown_report(factor)
                 factor["report_path"] = report_path
 
                 metrics = factor.get("metrics") or {}
@@ -972,7 +1077,10 @@ class PortfolioManager:
                             factor.get("perf_metric"),
                             factor.get("selection_score"),
                             factor.get("best_strategy_id"),
-                            json.dumps(factor.get("best_strategy_metrics") or {}, ensure_ascii=False),
+                            json.dumps(
+                                factor.get("best_strategy_metrics") or {},
+                                ensure_ascii=False,
+                            ),
                             factor.get("execution_style"),
                             factor.get("run_id", self.run_id),
                             factor.get("agent_id"),
@@ -1003,7 +1111,13 @@ class PortfolioManager:
     def run_swarm(self, parallel=False, log_queue=None):
         with logger.contextualize(**log_context(run_id=self.run_id)):
             # 1. Extract global RiceQuant Auth
-            if self.kwargs.get("data_backend", self.kwargs.get("evaluation_mode", "ricequant")) == "ricequant":
+            if (
+                self.kwargs.get(
+                    "data_backend",
+                    self.kwargs.get("evaluation_mode", "ricequant"),
+                )
+                == "ricequant"
+            ):
                 logger.info("Initializing Global RiceQuant Auth...")
                 try:
                     init_rq_auth()
@@ -1024,7 +1138,11 @@ class PortfolioManager:
             worker_log_queue = None
             worker_log_thread = None
             dispatch_log_queue = log_queue
-            if parallel and self.swarm_executor == "process" and log_queue is not None:
+            if (
+                parallel
+                and self.swarm_executor == "process"
+                and log_queue is not None
+            ):
                 worker_log_manager = multiprocessing.Manager()
                 worker_log_queue = worker_log_manager.Queue()
                 worker_log_thread = threading.Thread(
@@ -1073,10 +1191,14 @@ class PortfolioManager:
                                     result = future.result()
                                     all_results.append(result)
                                 except Exception as exc:
-                                    logger.error(f"Agent generated an exception: {exc}")
+                                    logger.error(
+                                        f"Agent generated an exception: {exc}"
+                                    )
                         except concurrent.futures.TimeoutError:
                             timed_out = True
-                            pending_count = _cancel_pending_futures(futures, completed)
+                            pending_count = _cancel_pending_futures(
+                                futures, completed
+                            )
                             logger.error(
                                 f"Parallel agent swarm exceeded global timeout "
                                 f"{self.swarm_global_timeout}s; cancelled {pending_count} pending agent(s)."
@@ -1109,7 +1231,9 @@ class PortfolioManager:
                             completed = set()
                             try:
                                 futures = {
-                                    executor.submit(run_agent_task, kwargs): kwargs
+                                    executor.submit(
+                                        run_agent_task, kwargs
+                                    ): kwargs
                                     for kwargs in self.researchers
                                 }
                                 for future in concurrent.futures.as_completed(
@@ -1128,9 +1252,11 @@ class PortfolioManager:
                                                     "role_prompt", "unknown"
                                                 )
                                             )
-                                            pending_count = _cancel_pending_futures(
-                                                futures,
-                                                completed,
+                                            pending_count = (
+                                                _cancel_pending_futures(
+                                                    futures,
+                                                    completed,
+                                                )
                                             )
                                             _terminate_process_pool(executor)
                                             logger.error(
@@ -1243,7 +1369,9 @@ class PortfolioManager:
                         provider=self.kwargs.get("llm_provider"),
                         model=self.kwargs.get("llm_model"),
                         base_url=self.kwargs.get("llm_base_url"),
-                        reasoning_effort=self.kwargs.get("llm_reasoning_effort"),
+                        reasoning_effort=self.kwargs.get(
+                            "llm_reasoning_effort"
+                        ),
                     )
                     returns_dict = {}
                     factors_for_portfolio = []
@@ -1253,30 +1381,53 @@ class PortfolioManager:
                         if fid and not ret.empty:
                             returns_dict[fid] = ret
                             factors_for_portfolio.append(factor)
-                            
+
                     if len(returns_dict) >= 2:
                         returns_df = pd.DataFrame(returns_dict)
                         # Ensure numeric index for correlation if needed, or date parsing
-                        decision = portfolio_agent.select_method(factors_for_portfolio, returns_df)
-                        portfolio_result = construct_portfolio(returns_dict, method=decision.method)
-                        logger.success(f"Portfolio constructed using {decision.method} | Diversification Ratio: {portfolio_result['diversification_ratio']:.4f}")
-                        
+                        decision = portfolio_agent.select_method(
+                            factors_for_portfolio, returns_df
+                        )
+                        portfolio_result = construct_portfolio(
+                            returns_dict, method=decision.method
+                        )
+                        logger.success(
+                            f"Portfolio constructed using {decision.method} | Diversification Ratio: {portfolio_result['diversification_ratio']:.4f}"
+                        )
+
                         # Persist to database
                         with sqlite3.connect(self.db_path) as conn:
                             cursor = conn.cursor()
                             pid = f"portfolio_{uuid.uuid4().hex[:8]}"
-                            cursor.execute("""
+                            cursor.execute(
+                                """
                                 INSERT INTO portfolio_pool (id, run_id, method, rationale, weights_json, returns_json, diversification_ratio)
                                 VALUES (?, ?, ?, ?, ?, ?, ?)
-                            """, (
-                                pid,
-                                self.run_id,
-                                decision.method,
-                                decision.rationale,
-                                json.dumps(portfolio_result["weights"], ensure_ascii=False),
-                                json.dumps(_serialize_returns(portfolio_result["portfolio_returns"]), ensure_ascii=False),
-                                float(portfolio_result["diversification_ratio"])
-                            ))
+                            """,
+                                (
+                                    pid,
+                                    self.run_id,
+                                    decision.method,
+                                    decision.rationale,
+                                    json.dumps(
+                                        portfolio_result["weights"],
+                                        ensure_ascii=False,
+                                    ),
+                                    json.dumps(
+                                        _serialize_returns(
+                                            portfolio_result[
+                                                "portfolio_returns"
+                                            ]
+                                        ),
+                                        ensure_ascii=False,
+                                    ),
+                                    float(
+                                        portfolio_result[
+                                            "diversification_ratio"
+                                        ]
+                                    ),
+                                ),
+                            )
                             conn.commit()
                 except Exception as e:
                     logger.error(f"Portfolio construction failed: {e}")
@@ -1295,26 +1446,43 @@ class PortfolioManager:
             return []
 
         try:
-            from aiminer.core.manual_runner import run_manual_strategy_backtest, strategy_id_for
+            from aiminer.core.manual_runner import (
+                run_manual_strategy_backtest,
+                strategy_id_for,
+            )
         except Exception as exc:
-            logger.warning(f"[Strategy Eval] Unable to import strategy runner: {exc}")
+            logger.warning(
+                f"[Strategy Eval] Unable to import strategy runner: {exc}"
+            )
             self.strategy_pool = []
             return []
 
         def _fallback_candidates(factor):
-            market_profile = factor.get("market_profile", self.settings.market_profile)
+            market_profile = factor.get(
+                "market_profile", self.settings.market_profile
+            )
             execution_style = str(factor.get("execution_style") or "")
             if market_profile == "futures":
-                template_name = "ts_long_flat" if execution_style == "ts_trend" else "ts_long_short"
+                template_name = (
+                    "ts_long_flat"
+                    if execution_style == "ts_trend"
+                    else "ts_long_short"
+                )
             else:
-                template_name = "ts_long_flat" if execution_style == "ts_trend" else "cs_top_bottom"
+                template_name = (
+                    "ts_long_flat"
+                    if execution_style == "ts_trend"
+                    else "cs_top_bottom"
+                )
             cfg = strategy_templates()[template_name].model_copy(
                 update={
                     "label": f"{template_name}:{factor.get('hypothesis') or factor.get('id')}",
                     "start_date": self.settings.market_start or "2017-01-01",
                     "end_date": self.settings.market_end or "2020-10-31",
                     "engine": self.settings.evaluation_engine,
-                    "market": factor.get("market_profile", self.settings.market_profile),
+                    "market": factor.get(
+                        "market_profile", self.settings.market_profile
+                    ),
                 }
             )
             return [
@@ -1335,8 +1503,12 @@ class PortfolioManager:
                     return float(
                         selection_score(
                             metrics,
-                            factor_ic=float(factor.get("perf_metric", 0.0) or 0.0),
-                            walk_forward=(result.get("walk_forward") or {}).get("aggregate"),
+                            factor_ic=float(
+                                factor.get("perf_metric", 0.0) or 0.0
+                            ),
+                            walk_forward=(result.get("walk_forward") or {}).get(
+                                "aggregate"
+                            ),
                         )
                     )
                 except Exception as exc:
@@ -1347,7 +1519,9 @@ class PortfolioManager:
             return float(
                 result.get(
                     "selection_score",
-                    factor.get("selection_score", factor.get("perf_metric", 0.0)),
+                    factor.get(
+                        "selection_score", factor.get("perf_metric", 0.0)
+                    ),
                 )
                 or 0.0
             )
@@ -1358,14 +1532,24 @@ class PortfolioManager:
             payload.setdefault("status", "ok")
             payload.setdefault("chart_paths", {})
             payload.setdefault("ran_at", time.strftime("%Y-%m-%dT%H:%M:%S"))
-            payload.setdefault("label", (payload.get("strategy_config") or {}).get("label"))
-            payload.setdefault("market", (payload.get("strategy_config") or {}).get("market"))
-            payload.setdefault("engine", (payload.get("strategy_config") or {}).get("engine"))
+            payload.setdefault(
+                "label", (payload.get("strategy_config") or {}).get("label")
+            )
+            payload.setdefault(
+                "market", (payload.get("strategy_config") or {}).get("market")
+            )
+            payload.setdefault(
+                "engine", (payload.get("strategy_config") or {}).get("engine")
+            )
             payload["run_id"] = self.run_id
             payload["source_factor_id"] = factor.get("id")
             payload["agent_id"] = factor.get("agent_id")
-            payload["candidate_rank"] = int(payload.get("candidate_rank", idx) or idx)
-            raw_strategy_id = payload.get("raw_strategy_id") or payload.get("strategy_id")
+            payload["candidate_rank"] = int(
+                payload.get("candidate_rank", idx) or idx
+            )
+            raw_strategy_id = payload.get("raw_strategy_id") or payload.get(
+                "strategy_id"
+            )
             cache_key = (
                 payload.get("cache_key")
                 or payload.get("strategy_cache_key")
@@ -1384,8 +1568,12 @@ class PortfolioManager:
             )
             payload["is_primary"] = False
             payload["selection_score"] = _score_result(factor, payload)
-            payload["market_profile"] = factor.get("market_profile", self.settings.market_profile)
-            payload["data_backend"] = factor.get("data_backend", self.settings.data_backend)
+            payload["market_profile"] = factor.get(
+                "market_profile", self.settings.market_profile
+            )
+            payload["data_backend"] = factor.get(
+                "data_backend", self.settings.data_backend
+            )
             return payload
 
         def _evaluate_candidate(factor, idx, candidate):
@@ -1397,10 +1585,18 @@ class PortfolioManager:
                 result = run_manual_strategy_backtest(
                     expression,
                     cfg,
-                    data_backend=factor.get("data_backend", self.settings.data_backend),
-                    market_profile=factor.get("market_profile", self.settings.market_profile),
+                    data_backend=factor.get(
+                        "data_backend", self.settings.data_backend
+                    ),
+                    market_profile=factor.get(
+                        "market_profile", self.settings.market_profile
+                    ),
                     market_mode=factor.get("market_mode", "single"),
-                    market_profiles=[factor.get("market_profile", self.settings.market_profile)],
+                    market_profiles=[
+                        factor.get(
+                            "market_profile", self.settings.market_profile
+                        )
+                    ],
                     local_data_path=self.settings.local_data_path,
                     local_data_layout=self.settings.local_data_layout,
                     run_id=self.run_id,
@@ -1409,7 +1605,9 @@ class PortfolioManager:
                     candidate_rank=idx,
                     template_name=candidate.get("template_name"),
                     rationale=candidate.get("rationale"),
-                    signal_multiplier=float(factor.get("signal_direction", 1.0) or 1.0),
+                    signal_multiplier=float(
+                        factor.get("signal_direction", 1.0) or 1.0
+                    ),
                 )
             except Exception as exc:
                 logger.warning(
@@ -1427,12 +1625,17 @@ class PortfolioManager:
         pending_evaluations = []
         for factor_idx, factor in enumerate(self.alpha_pool):
             existing_results = [
-                dict(item) for item in (factor.get("strategy_results") or []) if isinstance(item, dict)
+                dict(item)
+                for item in (factor.get("strategy_results") or [])
+                if isinstance(item, dict)
             ]
             best_existing = factor.get("best_strategy_result") or {}
             if best_existing and isinstance(best_existing, dict):
                 best_id = best_existing.get("strategy_id")
-                if best_id and not any(item.get("strategy_id") == best_id for item in existing_results):
+                if best_id and not any(
+                    item.get("strategy_id") == best_id
+                    for item in existing_results
+                ):
                     existing_results.insert(0, dict(best_existing))
             if existing_results:
                 normalized_by_factor[factor_idx] = [
@@ -1445,8 +1648,12 @@ class PortfolioManager:
                     for item in (factor.get("strategy_candidates") or [])
                     if isinstance(item, dict)
                 ]
-                for idx, candidate in enumerate(candidates or _fallback_candidates(factor), start=1):
-                    pending_evaluations.append((factor_idx, factor, idx, candidate))
+                for idx, candidate in enumerate(
+                    candidates or _fallback_candidates(factor), start=1
+                ):
+                    pending_evaluations.append(
+                        (factor_idx, factor, idx, candidate)
+                    )
 
         strategy_worker_count = _bounded_worker_count(
             len(pending_evaluations),
@@ -1458,7 +1665,9 @@ class PortfolioManager:
                     max_workers=strategy_worker_count
                 ) as executor:
                     futures = {
-                        executor.submit(_evaluate_candidate, factor, idx, candidate): (
+                        executor.submit(
+                            _evaluate_candidate, factor, idx, candidate
+                        ): (
                             factor_idx,
                             idx,
                         )
@@ -1474,12 +1683,16 @@ class PortfolioManager:
                             )
                             continue
                         if result:
-                            normalized_by_factor.setdefault(factor_idx, []).append(result)
+                            normalized_by_factor.setdefault(
+                                factor_idx, []
+                            ).append(result)
             else:
                 for factor_idx, factor, idx, candidate in pending_evaluations:
                     result = _evaluate_candidate(factor, idx, candidate)
                     if result:
-                        normalized_by_factor.setdefault(factor_idx, []).append(result)
+                        normalized_by_factor.setdefault(factor_idx, []).append(
+                            result
+                        )
 
         for factor_idx, factor in enumerate(self.alpha_pool):
             normalized_results = sorted(
@@ -1487,16 +1700,23 @@ class PortfolioManager:
                 key=lambda item: int(item.get("candidate_rank", 0) or 0),
             )
             if not normalized_results:
-                factor["strategy_failure_reason"] = factor.get("strategy_failure_reason") or "no_strategy_results"
+                factor["strategy_failure_reason"] = (
+                    factor.get("strategy_failure_reason")
+                    or "no_strategy_results"
+                )
                 continue
 
             best = max(
                 normalized_results,
-                key=lambda item: float(item.get("selection_score", float("-inf")) or float("-inf")),
+                key=lambda item: float(
+                    item.get("selection_score", float("-inf")) or float("-inf")
+                ),
             )
             best_id = best.get("strategy_id")
             for result in normalized_results:
-                result["is_primary"] = bool(best_id and result.get("strategy_id") == best_id)
+                result["is_primary"] = bool(
+                    best_id and result.get("strategy_id") == best_id
+                )
             factor["strategy_results"] = normalized_results
             factor["best_strategy_result"] = best
             factor["best_strategy_config"] = best.get("strategy_config", {})
@@ -1507,7 +1727,8 @@ class PortfolioManager:
                 factor["strategy_daily_returns"]
             )
             factor["selection_score"] = float(
-                best.get("selection_score", factor.get("perf_metric", 0.0)) or 0.0
+                best.get("selection_score", factor.get("perf_metric", 0.0))
+                or 0.0
             )
             factor.pop("strategy_failure_reason", None)
             strategy_results.extend(normalized_results)
@@ -1515,14 +1736,18 @@ class PortfolioManager:
         self.alpha_pool = sorted(
             self.alpha_pool,
             key=lambda item: (
-                float(item.get("selection_score", float("-inf")) or float("-inf")),
+                float(
+                    item.get("selection_score", float("-inf")) or float("-inf")
+                ),
                 float(item.get("perf_metric", 0.0) or 0.0),
             ),
             reverse=True,
         )
         self.strategy_pool = sorted(
             strategy_results,
-            key=lambda item: float(item.get("selection_score", float("-inf")) or float("-inf")),
+            key=lambda item: float(
+                item.get("selection_score", float("-inf")) or float("-inf")
+            ),
             reverse=True,
         )
         self._dedupe_alpha_pool_by_returns(stage="strategy")
@@ -1541,6 +1766,7 @@ def cull_alpha_pool(results_list):
 
 
 # --- CLI Entry Point ---
+
 
 def main(args=None):
     try:
@@ -1583,12 +1809,19 @@ def main(args=None):
         help="Initialize the LLM Wiki from RAG documents on startup",
     )
     parser.add_argument(
-        "--roles", type=str, nargs="+", help="Specific roles to assign to sub-agents"
+        "--roles",
+        type=str,
+        nargs="+",
+        help="Specific roles to assign to sub-agents",
     )
-    parser.add_argument("--run-id", type=str, help="Stable run id for checkpoint resume")
+    parser.add_argument(
+        "--run-id", type=str, help="Stable run id for checkpoint resume"
+    )
     parser.add_argument("--llm-provider", type=str, help="LLM provider")
     parser.add_argument("--llm-model", type=str, help="Specific LLM model name")
-    parser.add_argument("--llm-base-url", type=str, help="Override OpenAI-compatible base URL")
+    parser.add_argument(
+        "--llm-base-url", type=str, help="Override OpenAI-compatible base URL"
+    )
     parser.add_argument(
         "--llm-reasoning-effort",
         type=str,
@@ -1617,7 +1850,9 @@ def main(args=None):
         type=str,
         help="Comma-separated market profiles for batch/mixed mode",
     )
-    parser.add_argument("--local-data-path", type=str, help="Local CSV/Parquet dataset path")
+    parser.add_argument(
+        "--local-data-path", type=str, help="Local CSV/Parquet dataset path"
+    )
     parser.add_argument(
         "--local-data-layout",
         type=str,
@@ -1626,7 +1861,9 @@ def main(args=None):
         help="Local data layout",
     )
     parser.add_argument(
-        "--market-start", type=str, help="Market analysis start date (YYYY-MM-DD)"
+        "--market-start",
+        type=str,
+        help="Market analysis start date (YYYY-MM-DD)",
     )
     parser.add_argument(
         "--market-end", type=str, help="Market analysis end date (YYYY-MM-DD)"
@@ -1634,7 +1871,9 @@ def main(args=None):
     parser.add_argument(
         "--use-gpu", action="store_true", help="Use GPU for local RAG embedding"
     )
-    parser.add_argument("--rebuild-rag", action="store_true", help="Force rebuild RAG")
+    parser.add_argument(
+        "--rebuild-rag", action="store_true", help="Force rebuild RAG"
+    )
     parser.add_argument(
         "--swarm-global-timeout-seconds",
         type=float,
@@ -1682,7 +1921,12 @@ def main(args=None):
     args = parser.parse_args(args)
 
     if args.reset:
-        from scripts.reset_workspace import build_plan, execute_plan, render_plan, render_result
+        from scripts.reset_workspace import (
+            build_plan,
+            execute_plan,
+            render_plan,
+            render_result,
+        )
 
         plan = build_plan(args.reset)
         logger.info(render_plan(plan))

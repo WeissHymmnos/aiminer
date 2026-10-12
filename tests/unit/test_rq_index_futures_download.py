@@ -1,16 +1,18 @@
+from pathlib import Path
 import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
 import pytest
 
-pytest.importorskip("rqdatac", reason="RiceQuant downloader imports the optional rqdatac client")
+pytest.importorskip(
+    "rqdatac", reason="RiceQuant downloader imports the optional rqdatac client"
+)
 
-from aiminer.core.local_data import load_local_ohlcv
 from scripts import download_rq_index_futures as downloader
 
+from aiminer.core.local_data import load_local_ohlcv
 
 pytestmark = pytest.mark.external
 
@@ -53,7 +55,16 @@ class FakeRQ:
             ]
         )
 
-    def get_price(self, order_book_ids, start_date=None, end_date=None, frequency="1d", fields=None, market=None, expect_df=True):
+    def get_price(
+        self,
+        order_book_ids,
+        start_date=None,
+        end_date=None,
+        frequency="1d",
+        fields=None,
+        market=None,
+        expect_df=True,
+    ):
         self.calls.append(
             {
                 "order_book_ids": order_book_ids,
@@ -82,7 +93,15 @@ class FakeRQ:
             index=dates,
         )
 
-    def get_dominant_future(self, underlying_symbol, start_date=None, end_date=None, rule=0, rank=1, market="cn"):
+    def get_dominant_future(
+        self,
+        underlying_symbol,
+        start_date=None,
+        end_date=None,
+        rule=0,
+        rank=1,
+        market="cn",
+    ):
         return pd.Series(
             ["IF2406", "IF2407"],
             index=pd.to_datetime(["2024-01-01", "2024-01-02"]),
@@ -99,7 +118,9 @@ class TestRQIndexFuturesDownload(unittest.TestCase):
                 start="2024-01-01",
                 end="2024-12-31",
             )
-        self.assertEqual([item.order_book_id for item in contracts], ["IF2406", "IH2406"])
+        self.assertEqual(
+            [item.order_book_id for item in contracts], ["IF2406", "IH2406"]
+        )
 
     def test_discover_contracts_excludes_synthetic_continuous_symbols(self):
         fake = FakeRQ()
@@ -140,7 +161,9 @@ class TestRQIndexFuturesDownload(unittest.TestCase):
 
             self.assertEqual(first["status"], "written")
             self.assertEqual(second["status"], "written")
-            self.assertEqual(fake.calls[1]["start_date"], pd.Timestamp("2024-01-03"))
+            self.assertEqual(
+                fake.calls[1]["start_date"], pd.Timestamp("2024-01-03")
+            )
             path = downloader.contract_file_path(root, "1d", "IF2406")
             df = pd.read_parquet(path)
             self.assertEqual(df["datetime"].nunique(), 3)
@@ -201,10 +224,14 @@ class TestRQIndexFuturesDownload(unittest.TestCase):
             self.assertEqual(result["status"], "written")
             dominant_path = downloader.dominant_file_path(root, "1d", "IF")
             dominant = pd.read_parquet(dominant_path)
-            self.assertEqual(dominant["dominant_contract"].tolist(), ["IF2406", "IF2407"])
+            self.assertEqual(
+                dominant["dominant_contract"].tolist(), ["IF2406", "IF2407"]
+            )
             self.assertEqual(dominant["instrument"].unique().tolist(), ["IF"])
 
-            local_df = load_local_ohlcv(contract_dir / "IF2406.parquet", market_profile="futures")
+            local_df = load_local_ohlcv(
+                contract_dir / "IF2406.parquet", market_profile="futures"
+            )
             self.assertEqual(local_df.index.names, ["datetime", "instrument"])
             self.assertIn("total_turnover", local_df.columns)
 

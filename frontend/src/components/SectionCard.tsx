@@ -1,4 +1,4 @@
-import type { PropsWithChildren, ReactNode } from "react";
+import type { PropsWithChildren, ReactNode } from 'react';
 
 type Props = PropsWithChildren<{
   title: string;
@@ -8,7 +8,7 @@ type Props = PropsWithChildren<{
 
 export function SectionCard({ title, actions, className, children }: Props) {
   return (
-    <section className={`card ${className ?? ""}`.trim()}>
+    <section className={`card ${className ?? ''}`.trim()}>
       <div className="card-header">
         <h2>{title}</h2>
         <div>{actions}</div>

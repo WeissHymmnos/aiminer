@@ -1,11 +1,14 @@
 import os
+from pathlib import Path
 import sys
 import types
-from pathlib import Path
 
 import pytest
 
-from aiminer.core.evaluator_factory import build_evaluator, evaluation_config_from_mapping
+from aiminer.core.evaluator_factory import (
+    build_evaluator,
+    evaluation_config_from_mapping,
+)
 from aiminer.core.settings import (
     SUPPORTED_DATA_BACKENDS,
     SUPPORTED_EVALUATION_MODES,
@@ -26,7 +29,9 @@ class _DummyEvaluator:
 def _profile_list(primary, raw_profiles, market_mode):
     if market_mode == "single" or not raw_profiles:
         return [primary]
-    profiles = [item.strip() for item in raw_profiles.split(",") if item.strip()]
+    profiles = [
+        item.strip() for item in raw_profiles.split(",") if item.strip()
+    ]
     return [primary] + [item for item in profiles if item != primary]
 
 
@@ -37,9 +42,13 @@ def _is_supported(mode, backend, market_mode, market_profile, market_profiles):
     if backend in {"ricequant", "local"} and mode != "ricequant":
         return False
     if backend == "ricequant":
-        return market_mode != "mixed" and all(profile == "cn_stock" for profile in profiles)
+        return market_mode != "mixed" and all(
+            profile == "cn_stock" for profile in profiles
+        )
     if backend == "qlib":
-        return market_mode != "mixed" and all(profile != "futures" for profile in profiles)
+        return market_mode != "mixed" and all(
+            profile != "futures" for profile in profiles
+        )
     return True
 
 
@@ -50,7 +59,13 @@ def _is_supported(mode, backend, market_mode, market_profile, market_profiles):
 @pytest.mark.parametrize("market_profile", SUPPORTED_MARKET_PROFILES)
 @pytest.mark.parametrize(
     "market_profiles",
-    [None, "cn_stock", "cn_stock,us_stock", "cn_stock,futures", "us_stock,futures"],
+    [
+        None,
+        "cn_stock",
+        "cn_stock,us_stock",
+        "cn_stock,futures",
+        "us_stock,futures",
+    ],
 )
 @pytest.mark.parametrize("local_data_layout", SUPPORTED_LOCAL_DATA_LAYOUTS)
 def test_supported_parameter_matrix_is_validated_consistently(
@@ -84,7 +99,9 @@ def test_supported_parameter_matrix_is_validated_consistently(
     if backend == "local":
         overrides["local_data_path"] = str(local_path)
 
-    supported = _is_supported(mode, backend, market_mode, market_profile, market_profiles)
+    supported = _is_supported(
+        mode, backend, market_mode, market_profile, market_profiles
+    )
     if supported:
         settings = build_settings(overrides)
         assert settings.evaluation_mode == mode
@@ -96,8 +113,12 @@ def test_supported_parameter_matrix_is_validated_consistently(
 
 
 @pytest.mark.parametrize("llm_provider", [None, *SUPPORTED_LLM_PROVIDERS])
-@pytest.mark.parametrize("embedding_provider", [None, "local", *SUPPORTED_LLM_PROVIDERS])
-@pytest.mark.parametrize("reasoning_effort", [None, *SUPPORTED_LLM_REASONING_EFFORTS])
+@pytest.mark.parametrize(
+    "embedding_provider", [None, "local", *SUPPORTED_LLM_PROVIDERS]
+)
+@pytest.mark.parametrize(
+    "reasoning_effort", [None, *SUPPORTED_LLM_REASONING_EFFORTS]
+)
 def test_provider_embedding_reasoning_matrix(
     tmp_path, monkeypatch, llm_provider, embedding_provider, reasoning_effort
 ):
@@ -126,7 +147,9 @@ def test_provider_embedding_reasoning_matrix(
         assert settings.llm_reasoning_effort == reasoning_effort
 
 
-def test_all_settings_supported_combinations_reach_evaluator_factory(tmp_path, monkeypatch):
+def test_all_settings_supported_combinations_reach_evaluator_factory(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr("aiminer.core.settings.load_dotenv", lambda: None)
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
     for module_name, class_name in [
@@ -155,7 +178,9 @@ def test_all_settings_supported_combinations_reach_evaluator_factory(tmp_path, m
                             "cn_stock,futures",
                             "us_stock,futures",
                         ]:
-                            for local_data_layout in SUPPORTED_LOCAL_DATA_LAYOUTS:
+                            for (
+                                local_data_layout
+                            ) in SUPPORTED_LOCAL_DATA_LAYOUTS:
                                 if not _is_supported(
                                     mode,
                                     backend,
@@ -176,12 +201,16 @@ def test_all_settings_supported_combinations_reach_evaluator_factory(tmp_path, m
                                     "local_data_layout": local_data_layout,
                                 }
                                 if backend == "local":
-                                    overrides["local_data_path"] = str(local_path)
+                                    overrides["local_data_path"] = str(
+                                        local_path
+                                    )
                                 try:
                                     settings = build_settings(overrides)
                                     build_evaluator(
                                         factor_expressions=["Rank($close)"],
-                                        config=evaluation_config_from_mapping(settings),
+                                        config=evaluation_config_from_mapping(
+                                            settings
+                                        ),
                                         test_start_date="2015-01-01",
                                         test_end_date="2015-02-01",
                                     )

@@ -1,13 +1,14 @@
 import unittest
-import pandas as pd
-import numpy as np
 
+import numpy as np
+import pandas as pd
 import pytest
 
-pl = pytest.importorskip("polars", reason="Polars tests require the optional native engine stack")
+pl = pytest.importorskip(
+    "polars", reason="Polars tests require the optional native engine stack"
+)
 
 from aiminer.core.alphaeval.polars_engine import PolarsEngine
-
 
 pytestmark = pytest.mark.native
 
@@ -45,25 +46,33 @@ class TestPolarsOperatorsExtensive(unittest.TestCase):
         # Mean, Sum, Std, Delta, Ref
         res = self.get_result("Mean($close, 2)")
         a_vals = (
-            res.filter(pl.col("instrument") == "A").sort("datetime")["factor"].to_list()
+            res.filter(pl.col("instrument") == "A")
+            .sort("datetime")["factor"]
+            .to_list()
         )
         self.assertAlmostEqual(a_vals[1], 10.5)
 
         res = self.get_result("Sum($close, 2)")
         a_vals = (
-            res.filter(pl.col("instrument") == "A").sort("datetime")["factor"].to_list()
+            res.filter(pl.col("instrument") == "A")
+            .sort("datetime")["factor"]
+            .to_list()
         )
         self.assertAlmostEqual(a_vals[1], 21.0)
 
         res = self.get_result("Delta($close, 1)")
         a_vals = (
-            res.filter(pl.col("instrument") == "A").sort("datetime")["factor"].to_list()
+            res.filter(pl.col("instrument") == "A")
+            .sort("datetime")["factor"]
+            .to_list()
         )
         self.assertAlmostEqual(a_vals[1], 1.0)
 
         res = self.get_result("Ref($close, 1)")
         a_vals = (
-            res.filter(pl.col("instrument") == "A").sort("datetime")["factor"].to_list()
+            res.filter(pl.col("instrument") == "A")
+            .sort("datetime")["factor"]
+            .to_list()
         )
         self.assertEqual(a_vals[1], 10.0)
 
@@ -89,7 +98,9 @@ class TestPolarsOperatorsExtensive(unittest.TestCase):
         # Ts_Rank, Ts_ArgMax
         res = self.get_result("Ts_Rank($close, 5)")
         a_vals = (
-            res.filter(pl.col("instrument") == "A").sort("datetime")["factor"].to_list()
+            res.filter(pl.col("instrument") == "A")
+            .sort("datetime")["factor"]
+            .to_list()
         )
         # Just check it runs and produces values for indices >= 4
         self.assertIsNotNone(a_vals[10])
@@ -107,7 +118,9 @@ class TestPolarsOperatorsExtensive(unittest.TestCase):
     def test_infix_operators(self):
         # Test $close + $volume * 2
         res = self.get_result("$close + $volume * 2")
-        self.assertAlmostEqual(res["factor"][0], res["close"][0] + res["volume"][0] * 2)
+        self.assertAlmostEqual(
+            res["factor"][0], res["close"][0] + res["volume"][0] * 2
+        )
 
     def test_logical_operators(self):
         # Test $close > $volume
@@ -122,7 +135,9 @@ class TestPolarsOperatorsExtensive(unittest.TestCase):
 
     def test_math_ops(self):
         res = self.get_result("Add($close, $volume)")
-        self.assertAlmostEqual(res["factor"][0], res["close"][0] + res["volume"][0])
+        self.assertAlmostEqual(
+            res["factor"][0], res["close"][0] + res["volume"][0]
+        )
 
         res = self.get_result("Mul(Log(Abs($close) + 1), 2)")
         self.assertIsNotNone(res["factor"][0])

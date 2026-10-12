@@ -17,11 +17,11 @@ empty trash entries older than ``--purge-after-days``).
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass, field
+from pathlib import Path
 import shutil
 import sys
 import time
-from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Iterable, List, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -49,7 +49,9 @@ SCOPE_TARGETS: dict[str, list[str]] = {
         "results/swarm_runs",
     ],
 }
-SCOPE_TARGETS["all"] = sorted({p for paths in SCOPE_TARGETS.values() for p in paths})
+SCOPE_TARGETS["all"] = sorted(
+    {p for paths in SCOPE_TARGETS.values() for p in paths}
+)
 
 VALID_SCOPES = tuple(SCOPE_TARGETS.keys())
 TRASH_ROOT_REL = "results/.trash"
@@ -282,7 +284,9 @@ def render_result(summary: dict) -> str:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Reset AIMiner mining artifacts.")
+    parser = argparse.ArgumentParser(
+        description="Reset AIMiner mining artifacts."
+    )
     parser.add_argument(
         "--scope",
         action="append",
@@ -333,13 +337,19 @@ def main(argv: Iterable[str] | None = None) -> int:
 
     if args.purge:
         trash_dir = args.root / TRASH_ROOT_REL
-        removed = purge_old_trash(trash_dir, older_than_days=args.purge_after_days)
-        print(f"\nPurged {len(removed)} trash batches older than {args.purge_after_days}d")
+        removed = purge_old_trash(
+            trash_dir, older_than_days=args.purge_after_days
+        )
+        print(
+            f"\nPurged {len(removed)} trash batches older than {args.purge_after_days}d"
+        )
         for path in removed:
             print(f"  - removed {path}")
 
     if not args.confirm:
-        print("\nDry-run only. Re-run with --confirm to actually move the targets.")
+        print(
+            "\nDry-run only. Re-run with --confirm to actually move the targets."
+        )
 
     return 0
 

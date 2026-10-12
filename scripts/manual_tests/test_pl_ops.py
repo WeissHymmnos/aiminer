@@ -8,5 +8,7 @@ df = pl.DataFrame(
     }
 )
 # Let's try chained over
-expr = pl.col("close").rolling_mean(2).over("instrument").rank().over("datetime")
+expr = (
+    pl.col("close").rolling_mean(2).over("instrument").rank().over("datetime")
+)
 print(df.with_columns(expr))

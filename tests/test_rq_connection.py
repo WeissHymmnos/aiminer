@@ -1,10 +1,12 @@
 import os
 import unittest
 
-import pytest
 from dotenv import load_dotenv
+import pytest
 
-rq = pytest.importorskip("rqdatac", reason="RiceQuant client is optional in hermetic test runs")
+rq = pytest.importorskip(
+    "rqdatac", reason="RiceQuant client is optional in hermetic test runs"
+)
 
 
 pytestmark = pytest.mark.external

@@ -1,4 +1,5 @@
 import unittest
+
 from aiminer.agents.factor_agent import FactorAgent
 
 
@@ -16,7 +17,9 @@ class TestAgentValidation(unittest.TestCase):
         ]
         for expr in cases:
             is_valid, msg = self.agent._validate_qlib_expression(expr)
-            self.assertTrue(is_valid, f"Expression '{expr}' should be valid: {msg}")
+            self.assertTrue(
+                is_valid, f"Expression '{expr}' should be valid: {msg}"
+            )
 
     def test_invalid_expressions(self):
         cases = [
@@ -29,7 +32,9 @@ class TestAgentValidation(unittest.TestCase):
         ]
         for expr in cases:
             is_valid, msg = self.agent._validate_qlib_expression(expr)
-            self.assertFalse(is_valid, f"Expression '{expr}' should be INVALID: {msg}")
+            self.assertFalse(
+                is_valid, f"Expression '{expr}' should be INVALID: {msg}"
+            )
 
 
 if __name__ == "__main__":

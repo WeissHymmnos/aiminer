@@ -1,6 +1,7 @@
 import unittest
-from aiminer.app_workflow.state import AlphaMinerState
+
 from aiminer.app_workflow.graph import route_after_eval, route_after_wiki
+from aiminer.app_workflow.state import AlphaMinerState
 
 
 class TestEarlyStopping(unittest.TestCase):
@@ -91,7 +92,9 @@ class TestEarlyStopping(unittest.TestCase):
         }
         next_node = route_after_wiki(state)
         self.assertEqual(
-            next_node, "increment", "Should increment to next iteration normally."
+            next_node,
+            "increment",
+            "Should increment to next iteration normally.",
         )
 
     def test_max_iterations_reached(self):

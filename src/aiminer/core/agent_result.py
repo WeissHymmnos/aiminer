@@ -49,7 +49,8 @@ def factor_result_view(final_state: dict) -> dict:
 
     return {
         "iteration": snapshot.get("iteration", final_state.get("iteration")),
-        "hypothesis": snapshot.get("hypothesis") or snapshot.get("hypothesis_name"),
+        "hypothesis": snapshot.get("hypothesis")
+        or snapshot.get("hypothesis_name"),
         "code": snapshot.get("code") or snapshot.get("code_expression"),
         "metrics": snapshot.get("metrics")
         or snapshot.get("backtest_metrics")
@@ -81,7 +82,8 @@ def factor_result_view(final_state: dict) -> dict:
             "best_strategy_id", final_state.get("best_strategy_id")
         ),
         "strategy_daily_returns": snapshot.get(
-            "strategy_daily_returns", final_state.get("strategy_daily_returns", {})
+            "strategy_daily_returns",
+            final_state.get("strategy_daily_returns", {}),
         ),
         "selection_score": snapshot.get(
             "selection_score", final_state.get("selection_score", 0.0)
@@ -90,7 +92,8 @@ def factor_result_view(final_state: dict) -> dict:
             "execution_style", final_state.get("execution_style")
         ),
         "strategy_failure_reason": snapshot.get(
-            "strategy_failure_reason", final_state.get("strategy_failure_reason")
+            "strategy_failure_reason",
+            final_state.get("strategy_failure_reason"),
         ),
         "is_effective": snapshot.get(
             "is_effective", final_state.get("is_effective", False)
@@ -98,7 +101,9 @@ def factor_result_view(final_state: dict) -> dict:
         "is_simulated": snapshot.get(
             "is_simulated", final_state.get("is_simulated", False)
         ),
-        "ic_direction": snapshot.get("ic_direction", final_state.get("ic_direction")),
+        "ic_direction": snapshot.get(
+            "ic_direction", final_state.get("ic_direction")
+        ),
         "ic_direction_label": snapshot.get(
             "ic_direction_label", final_state.get("ic_direction_label")
         ),
@@ -119,7 +124,9 @@ def state_to_agent_result(
     perf_metric = float(metrics.get("information_coefficient", 0.0) or 0.0)
     terminal_error = final_state.get("error")
     has_recoverable_best = bool(
-        final_state.get("best_factor_snapshot") and factor_view.get("code") and metrics
+        final_state.get("best_factor_snapshot")
+        and factor_view.get("code")
+        and metrics
     )
 
     return {
@@ -138,16 +145,19 @@ def state_to_agent_result(
         ),
         "llm_provider": getattr(settings, "llm_provider", None)
         or final_state.get("llm_provider"),
-        "llm_model": getattr(settings, "llm_model", None) or final_state.get("llm_model"),
+        "llm_model": getattr(settings, "llm_model", None)
+        or final_state.get("llm_model"),
         "llm_base_url": getattr(settings, "llm_base_url", None)
         or final_state.get("llm_base_url"),
         "llm_reasoning_effort": getattr(settings, "llm_reasoning_effort", None)
         or final_state.get("llm_reasoning_effort"),
         "data_backend": (
-            getattr(settings, "data_backend", None) or final_state.get("data_backend")
+            getattr(settings, "data_backend", None)
+            or final_state.get("data_backend")
         ),
         "market_mode": (
-            getattr(settings, "market_mode", None) or final_state.get("market_mode")
+            getattr(settings, "market_mode", None)
+            or final_state.get("market_mode")
         ),
         "market_profile": (
             getattr(settings, "market_profile", None)

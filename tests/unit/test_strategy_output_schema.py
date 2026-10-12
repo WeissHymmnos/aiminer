@@ -1,6 +1,9 @@
 import json
 
-from aiminer.schemas.messages import RefinementProposalOutput, StrategyProposalBatchOutput
+from aiminer.schemas.messages import (
+    RefinementProposalOutput,
+    StrategyProposalBatchOutput,
+)
 
 
 def _candidate_payload(**overrides):
@@ -31,13 +34,18 @@ def test_strategy_batch_accepts_null_optional_strategy_dicts():
             _candidate_payload(
                 thresholds=None,
                 counts={"top_n": 30, "bottom_n": None},
-                holding_constraints={"max_positions": None, "min_holding_days": 3},
+                holding_constraints={
+                    "max_positions": None,
+                    "min_holding_days": 3,
+                },
                 cost_model=None,
             )
         ],
     }
 
-    parsed = StrategyProposalBatchOutput.model_validate_json(json.dumps(payload))
+    parsed = StrategyProposalBatchOutput.model_validate_json(
+        json.dumps(payload)
+    )
     candidate = parsed.candidates[0]
 
     assert candidate.thresholds == {}
@@ -61,7 +69,9 @@ def test_strategy_batch_coerces_scalar_enum_fields_from_numbers():
         ],
     }
 
-    parsed = StrategyProposalBatchOutput.model_validate_json(json.dumps(payload))
+    parsed = StrategyProposalBatchOutput.model_validate_json(
+        json.dumps(payload)
+    )
     candidate = parsed.candidates[0]
 
     assert candidate.template_name == "123"
@@ -82,13 +92,18 @@ def test_strategy_batch_drops_nested_optional_dict_values():
                     "ma_periods": {"short": 20, "long": 50},
                 },
                 counts={"top_n": 30, "buckets": [1, 2, 3]},
-                holding_constraints={"max_positions": 60, "weights": {"max": 0.04}},
+                holding_constraints={
+                    "max_positions": 60,
+                    "weights": {"max": 0.04},
+                },
                 cost_model={"commission_bps": 5.0, "tiers": [{"bps": 3.0}]},
             )
         ],
     }
 
-    parsed = StrategyProposalBatchOutput.model_validate_json(json.dumps(payload))
+    parsed = StrategyProposalBatchOutput.model_validate_json(
+        json.dumps(payload)
+    )
     candidate = parsed.candidates[0]
 
     assert candidate.thresholds == {"long_threshold": 0.75}
@@ -109,13 +124,18 @@ def test_strategy_batch_drops_non_numeric_optional_dict_values():
                     "additional_long_confirmation": "close > sma20",
                 },
                 counts={"top_n": "30", "bucket": "highest_decile"},
-                holding_constraints={"max_positions": "60", "note": "liquid only"},
+                holding_constraints={
+                    "max_positions": "60",
+                    "note": "liquid only",
+                },
                 cost_model={"commission_bps": "5.0", "slippage": "low"},
             )
         ],
     }
 
-    parsed = StrategyProposalBatchOutput.model_validate_json(json.dumps(payload))
+    parsed = StrategyProposalBatchOutput.model_validate_json(
+        json.dumps(payload)
+    )
     candidate = parsed.candidates[0]
 
     assert candidate.thresholds == {"long_threshold": 0.75}
@@ -134,7 +154,9 @@ def test_strategy_batch_accepts_fractional_quantile_counts():
         ],
     }
 
-    parsed = StrategyProposalBatchOutput.model_validate_json(json.dumps(payload))
+    parsed = StrategyProposalBatchOutput.model_validate_json(
+        json.dumps(payload)
+    )
     candidate = parsed.candidates[0]
 
     assert candidate.counts == {"quantile_long": 0.2, "quantile_short": 0.2}
@@ -156,7 +178,9 @@ def test_strategy_batch_accepts_structured_selection_rule():
         ],
     }
 
-    parsed = StrategyProposalBatchOutput.model_validate_json(json.dumps(payload))
+    parsed = StrategyProposalBatchOutput.model_validate_json(
+        json.dumps(payload)
+    )
     candidate = parsed.candidates[0]
 
     assert candidate.selection_rule == {

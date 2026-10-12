@@ -20,7 +20,9 @@ class EvaluationConfig:
     market_end: str | None = None
 
 
-def resolve_data_backend(value: str | None, *, evaluation_mode: str | None = None) -> str:
+def resolve_data_backend(
+    value: str | None, *, evaluation_mode: str | None = None
+) -> str:
     backend = (value or evaluation_mode or "ricequant").strip().lower()
     aliases = {
         "rq": "ricequant",
@@ -31,15 +33,29 @@ def resolve_data_backend(value: str | None, *, evaluation_mode: str | None = Non
     return aliases.get(backend, backend)
 
 
-def evaluation_config_from_mapping(source: dict[str, Any] | Any) -> EvaluationConfig:
-    get = source.get if isinstance(source, dict) else lambda name, default=None: getattr(source, name, default)
+def evaluation_config_from_mapping(
+    source: dict[str, Any] | Any,
+) -> EvaluationConfig:
+    get = (
+        source.get
+        if isinstance(source, dict)
+        else lambda name, default=None: getattr(source, name, default)
+    )
     market_profile = (get("market_profile") or "cn_stock").strip().lower()
     raw_profiles = get("market_profiles") or [market_profile]
-    market_profiles = [str(item).strip().lower() for item in raw_profiles if str(item).strip()]
-    market_profiles = [market_profile] + [item for item in market_profiles if item != market_profile]
+    market_profiles = [
+        str(item).strip().lower() for item in raw_profiles if str(item).strip()
+    ]
+    market_profiles = [market_profile] + [
+        item for item in market_profiles if item != market_profile
+    ]
     return EvaluationConfig(
-        data_backend=resolve_data_backend(get("data_backend"), evaluation_mode=get("evaluation_mode")),
-        evaluation_engine=(get("evaluation_engine") or "pandas").strip().lower(),
+        data_backend=resolve_data_backend(
+            get("data_backend"), evaluation_mode=get("evaluation_mode")
+        ),
+        evaluation_engine=(get("evaluation_engine") or "pandas")
+        .strip()
+        .lower(),
         market_mode=(get("market_mode") or "single").strip().lower(),
         market_profile=market_profile,
         market_profiles=market_profiles,
@@ -64,9 +80,13 @@ def build_evaluator(
 
     if config.data_backend == "ricequant":
         if config.market_mode == "mixed":
-            raise ValueError("ricequant backend does not support mixed market mode.")
+            raise ValueError(
+                "ricequant backend does not support mixed market mode."
+            )
         if profile.name != "cn_stock":
-            raise ValueError("ricequant backend currently supports cn_stock only.")
+            raise ValueError(
+                "ricequant backend currently supports cn_stock only."
+            )
         from aiminer.core.alphaeval.rq_eval import RiceQuantEval
 
         return RiceQuantEval(
@@ -80,9 +100,13 @@ def build_evaluator(
 
     if config.data_backend == "qlib":
         if config.market_mode == "mixed":
-            raise ValueError("qlib backend does not support mixed market mode yet.")
+            raise ValueError(
+                "qlib backend does not support mixed market mode yet."
+            )
         if profile.name == "futures":
-            raise ValueError("qlib backend does not support futures market_profile.")
+            raise ValueError(
+                "qlib backend does not support futures market_profile."
+            )
         from aiminer.core.alphaeval.modeltester import AlphaEval
 
         return AlphaEval(
@@ -97,14 +121,20 @@ def build_evaluator(
 
     if config.data_backend == "local":
         if not config.local_data_path:
-            raise ValueError("local backend requires local_data_path to be configured.")
+            raise ValueError(
+                "local backend requires local_data_path to be configured."
+            )
         from aiminer.core.alphaeval.local_eval import LocalDataEval
 
         market_profiles = (
-            config.market_profiles if config.market_mode in {"batch", "mixed"} else [config.market_profile]
+            config.market_profiles
+            if config.market_mode in {"batch", "mixed"}
+            else [config.market_profile]
         )
         market_name = (
-            "LOCAL_MIXED" if config.market_mode == "mixed" else get_market_profile(market_profiles[0]).default_market
+            "LOCAL_MIXED"
+            if config.market_mode == "mixed"
+            else get_market_profile(market_profiles[0]).default_market
         )
         return LocalDataEval(
             factor_expressions=factor_expressions,

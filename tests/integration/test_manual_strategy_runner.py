@@ -7,7 +7,15 @@ from aiminer.core import manual_runner
 
 
 class FakeEvaluator:
-    def __init__(self, factor_expressions, test_start_date, test_end_date, market, daily_normalize, engine):
+    def __init__(
+        self,
+        factor_expressions,
+        test_start_date,
+        test_end_date,
+        market,
+        daily_normalize,
+        engine,
+    ):
         self.factor_expressions = factor_expressions
         self.test_start_date = test_start_date
         self.test_end_date = test_end_date
@@ -25,7 +33,9 @@ class FakeEvaluator:
             {
                 self.factor_expressions[0]: [0.1, 0.9, 0.2, 0.8, 0.3],
             },
-            index=pd.MultiIndex.from_product([dates, ["A"]], names=["datetime", "instrument"]),
+            index=pd.MultiIndex.from_product(
+                [dates, ["A"]], names=["datetime", "instrument"]
+            ),
         )
         self.label_data = pd.DataFrame(
             {"label": [0.01, 0.02, -0.01, 0.03, 0.00]},
@@ -37,9 +47,14 @@ class FakeEvaluator:
 
 
 class TestManualStrategyRunner(unittest.TestCase):
-    @patch("aiminer.core.manual_runner.validate_expression", return_value=(True, "ok"))
+    @patch(
+        "aiminer.core.manual_runner.validate_expression",
+        return_value=(True, "ok"),
+    )
     @patch("aiminer.core.evaluator_factory.build_evaluator")
-    def test_run_manual_strategy_backtest_returns_payload(self, mock_build_evaluator, _mock_validate):
+    def test_run_manual_strategy_backtest_returns_payload(
+        self, mock_build_evaluator, _mock_validate
+    ):
         evaluator = FakeEvaluator(
             factor_expressions=["Rank($close)"],
             test_start_date="2024-01-01",

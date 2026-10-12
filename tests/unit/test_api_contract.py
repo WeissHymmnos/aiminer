@@ -1,16 +1,16 @@
 import asyncio
+from datetime import datetime, timedelta
 import importlib
 import json
 import os
 import sqlite3
 import threading
-from datetime import datetime, timedelta
 
-import pytest
-from aiminer.core.strategy import persist_strategy_result
 from fastapi import HTTPException
 from pydantic import ValidationError
+import pytest
 
+from aiminer.core.strategy import persist_strategy_result
 
 os.environ["AIMINER_DISABLE_AUTH"] = "true"
 
@@ -57,7 +57,9 @@ class _QueueStub:
 
 
 class _PsutilProcessStub:
-    def __init__(self, pid: int, create_time: float = 1234.0, status: str = "sleeping"):
+    def __init__(
+        self, pid: int, create_time: float = 1234.0, status: str = "sleeping"
+    ):
         self.pid = pid
         self._create_time = create_time
         self._status = status
@@ -75,10 +77,14 @@ class _PsutilProcessStub:
 def test_results_endpoint_returns_paginated_shape():
     mod = _module()
     payload = mod.get_results(run_id=None, offset=0, limit=10)
-    assert {"items", "total", "offset", "limit", "next_offset"} <= set(payload.keys())
+    assert {"items", "total", "offset", "limit", "next_offset"} <= set(
+        payload.keys()
+    )
     assert payload["limit"] == 10
     if payload["items"]:
-        assert {"selection_score", "best_strategy_id"} <= set(payload["items"][0].keys())
+        assert {"selection_score", "best_strategy_id"} <= set(
+            payload["items"][0].keys()
+        )
 
 
 def test_results_endpoint_legacy_alpha_pool_schema(tmp_path, monkeypatch):
@@ -131,7 +137,9 @@ def test_results_endpoint_legacy_alpha_pool_schema(tmp_path, monkeypatch):
     assert payload["items"][0]["best_strategy_id"] is None
 
 
-def test_factor_crossover_endpoint_uses_selected_pool_factors(tmp_path, monkeypatch):
+def test_factor_crossover_endpoint_uses_selected_pool_factors(
+    tmp_path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
     db_path = _prepare_db(tmp_path)
     with sqlite3.connect(db_path) as conn:
@@ -174,7 +182,9 @@ def test_factor_crossover_endpoint_uses_selected_pool_factors(tmp_path, monkeypa
                     "Rank($close)",
                     ic,
                     ic / 2,
-                    json.dumps({"information_coefficient": ic, "rank_ic": ic / 2}),
+                    json.dumps(
+                        {"information_coefficient": ic, "rank_ic": ic / 2}
+                    ),
                     json.dumps({"2024-01-01": ic}),
                     ic,
                     0,
@@ -201,7 +211,9 @@ def test_factor_crossover_endpoint_uses_selected_pool_factors(tmp_path, monkeypa
             return {
                 "status": "accepted",
                 "reason": "accepted",
-                "parent_factor_ids": [factor["id"] for factor in kwargs["parent_factors"]],
+                "parent_factor_ids": [
+                    factor["id"] for factor in kwargs["parent_factors"]
+                ],
                 "factor": {
                     "id": "alpha_hybrid",
                     "hypothesis": "hybrid",
@@ -227,13 +239,18 @@ def test_factor_crossover_endpoint_uses_selected_pool_factors(tmp_path, monkeypa
     assert calls["init"]["crossover_iterations"] == 2
     assert calls["run"]["iterations"] == 2
     assert calls["run"]["agent_id"] == "agent_crossover_pool"
-    assert [factor["id"] for factor in calls["run"]["parent_factors"]] == ["alpha_a", "alpha_b"]
+    assert [factor["id"] for factor in calls["run"]["parent_factors"]] == [
+        "alpha_a",
+        "alpha_b",
+    ]
 
 
 def test_wiki_index_returns_paginated_shape():
     mod = _module()
     payload = mod.wiki_index(offset=0, limit=10)
-    assert {"items", "total", "offset", "limit", "next_offset"} <= set(payload.keys())
+    assert {"items", "total", "offset", "limit", "next_offset"} <= set(
+        payload.keys()
+    )
     assert payload["limit"] == 10
 
 
@@ -279,7 +296,9 @@ def test_swarm_logs_tail_returns_recent_entries(tmp_path, monkeypatch):
     (run_dir / "run_1.json").write_text("{}", encoding="utf-8")
     (run_dir / "run_1.jsonl").write_text(
         "\n".join(
-            json.dumps({"message": f"log-{index}", "timestamp": f"00:00:0{index}"})
+            json.dumps(
+                {"message": f"log-{index}", "timestamp": f"00:00:0{index}"}
+            )
             for index in range(5)
         ),
         encoding="utf-8",
@@ -287,7 +306,9 @@ def test_swarm_logs_tail_returns_recent_entries(tmp_path, monkeypatch):
 
     mod = _module()
     actor = mod.Actor(identity="auth-disabled")
-    payload = mod.get_swarm_run_logs("run_1", offset=0, limit=2, tail=True, actor=actor)
+    payload = mod.get_swarm_run_logs(
+        "run_1", offset=0, limit=2, tail=True, actor=actor
+    )
 
     assert [item["message"] for item in payload["items"]] == ["log-3", "log-4"]
     assert payload["offset"] == 3
@@ -314,14 +335,18 @@ def test_swarm_logs_tail_ignores_corrupt_recent_lines(tmp_path, monkeypatch):
 
     mod = _module()
     actor = mod.Actor(identity="auth-disabled")
-    payload = mod.get_swarm_run_logs("run_2", offset=0, limit=2, tail=True, actor=actor)
+    payload = mod.get_swarm_run_logs(
+        "run_2", offset=0, limit=2, tail=True, actor=actor
+    )
 
     assert [item["message"] for item in payload["items"]] == ["log-4"]
     assert payload["offset"] == 3
     assert payload["next_offset"] == 5
 
 
-def test_stop_swarm_marks_run_stopping_while_process_is_alive(tmp_path, monkeypatch):
+def test_stop_swarm_marks_run_stopping_while_process_is_alive(
+    tmp_path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
     mod = _module()
     mod.SWARM_RUN_DIR.mkdir(parents=True, exist_ok=True)
@@ -344,7 +369,9 @@ def test_stop_swarm_marks_run_stopping_while_process_is_alive(tmp_path, monkeypa
     with mod.state.lock:
         mod.state.runs[run_id] = run_state
     stopped_pids = []
-    monkeypatch.setattr(mod, "_stop_process_tree", lambda pid: stopped_pids.append(pid))
+    monkeypatch.setattr(
+        mod, "_stop_process_tree", lambda pid: stopped_pids.append(pid)
+    )
 
     actor = mod.Actor(identity="auth-disabled")
     response = mod.stop_swarm(run_id, actor=actor)
@@ -359,7 +386,9 @@ def test_stop_swarm_marks_run_stopping_while_process_is_alive(tmp_path, monkeypa
     assert detail["is_active"] is True
 
 
-def test_wait_run_process_finalizes_stop_requested_run_as_stopped(tmp_path, monkeypatch):
+def test_wait_run_process_finalizes_stop_requested_run_as_stopped(
+    tmp_path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
     mod = _module()
     mod.SWARM_RUN_DIR.mkdir(parents=True, exist_ok=True)
@@ -377,7 +406,9 @@ def test_wait_run_process_finalizes_stop_requested_run_as_stopped(tmp_path, monk
 
     actor = mod.Actor(identity="auth-disabled")
     detail = mod.get_swarm_run(run_id, actor=actor)
-    logs = mod.get_swarm_run_logs(run_id, offset=0, limit=10, tail=False, actor=actor)
+    logs = mod.get_swarm_run_logs(
+        run_id, offset=0, limit=10, tail=False, actor=actor
+    )
 
     assert detail["status"] == "stopped"
     assert detail["is_active"] is False
@@ -409,7 +440,9 @@ def test_shutdown_event_stops_active_swarm_process(tmp_path, monkeypatch):
     with mod.state.lock:
         mod.state.runs[run_id] = run_state
     stopped_pids = []
-    monkeypatch.setattr(mod, "_stop_process_tree", lambda pid: stopped_pids.append(pid))
+    monkeypatch.setattr(
+        mod, "_stop_process_tree", lambda pid: stopped_pids.append(pid)
+    )
 
     mod._shutdown_active_swarm_runs()
     detail = mod._load_json(mod._manifest_path(run_id))
@@ -427,7 +460,9 @@ def test_stale_starting_run_is_recovered(tmp_path, monkeypatch):
     mod = _module()
     mod.SWARM_RUN_DIR.mkdir(parents=True, exist_ok=True)
     run_id = "run_stale_starting"
-    stale_time = (datetime.utcnow() - timedelta(seconds=10)).isoformat(timespec="seconds")
+    stale_time = (datetime.utcnow() - timedelta(seconds=10)).isoformat(
+        timespec="seconds"
+    )
     mod._write_run_manifest(
         run_id,
         {
@@ -446,7 +481,9 @@ def test_stale_starting_run_is_recovered(tmp_path, monkeypatch):
     assert "stale starting run" in detail["failure_reason"]
 
 
-def test_delete_run_blocks_manifest_active_process_after_api_restart(tmp_path, monkeypatch):
+def test_delete_run_blocks_manifest_active_process_after_api_restart(
+    tmp_path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
     mod = _module()
     mod.SWARM_RUN_DIR.mkdir(parents=True, exist_ok=True)
@@ -461,7 +498,9 @@ def test_delete_run_blocks_manifest_active_process_after_api_restart(tmp_path, m
             "process_create_time": create_time,
         },
     )
-    mod._log_path(run_id).write_text('{"message":"still running"}\n', encoding="utf-8")
+    mod._log_path(run_id).write_text(
+        '{"message":"still running"}\n', encoding="utf-8"
+    )
     monkeypatch.setattr(
         mod.psutil,
         "Process",
@@ -477,7 +516,9 @@ def test_delete_run_blocks_manifest_active_process_after_api_restart(tmp_path, m
     assert mod._log_path(run_id).exists()
 
 
-def test_swarm_status_counts_manifest_active_process_after_api_restart(tmp_path, monkeypatch):
+def test_swarm_status_counts_manifest_active_process_after_api_restart(
+    tmp_path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
     mod = _module()
     mod.SWARM_RUN_DIR.mkdir(parents=True, exist_ok=True)
@@ -503,7 +544,9 @@ def test_swarm_status_counts_manifest_active_process_after_api_restart(tmp_path,
     assert payload["active_run_ids"] == ["run_manifest_active"]
 
 
-def test_running_filter_excludes_inactive_running_manifest(tmp_path, monkeypatch):
+def test_running_filter_excludes_inactive_running_manifest(
+    tmp_path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
     mod = _module()
     mod.SWARM_RUN_DIR.mkdir(parents=True, exist_ok=True)
@@ -524,8 +567,12 @@ def test_running_filter_excludes_inactive_running_manifest(tmp_path, monkeypatch
     monkeypatch.setattr(mod.psutil, "Process", _missing_process)
     actor = mod.Actor(identity="auth-disabled")
 
-    running = mod.list_swarm_runs(status_filter="running", offset=0, limit=10, actor=actor)
-    all_runs = mod.list_swarm_runs(status_filter=None, offset=0, limit=10, actor=actor)
+    running = mod.list_swarm_runs(
+        status_filter="running", offset=0, limit=10, actor=actor
+    )
+    all_runs = mod.list_swarm_runs(
+        status_filter=None, offset=0, limit=10, actor=actor
+    )
 
     assert running["items"] == []
     assert all_runs["items"][0]["run_id"] == run_id
@@ -559,7 +606,9 @@ def test_run_manifest_writes_are_atomic_and_run_locked(tmp_path, monkeypatch):
         assert manifest[f"key_{index}"] == index
 
 
-def test_swarm_config_rejects_invalid_enum_before_route_creates_run(tmp_path, monkeypatch):
+def test_swarm_config_rejects_invalid_enum_before_route_creates_run(
+    tmp_path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
     mod = _module()
 
@@ -574,7 +623,9 @@ def test_swarm_config_rejects_invalid_enum_before_route_creates_run(tmp_path, mo
             }
         )
 
-    assert not mod.SWARM_RUN_DIR.exists() or not list(mod.SWARM_RUN_DIR.glob("run_*.json"))
+    assert not mod.SWARM_RUN_DIR.exists() or not list(
+        mod.SWARM_RUN_DIR.glob("run_*.json")
+    )
 
 
 def test_runtime_request_models_normalize_compatible_aliases():
@@ -704,7 +755,9 @@ def test_delete_strategy_handles_missing_strategy_table(tmp_path, monkeypatch):
     assert "strategy_backtests" in tables
 
 
-def test_frontend_fallback_uses_frontend_dist_build_output(tmp_path, monkeypatch):
+def test_frontend_fallback_uses_frontend_dist_build_output(
+    tmp_path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
     frontend_dist = tmp_path / "frontend" / "dist"
     frontend_dist.mkdir(parents=True)
@@ -717,7 +770,9 @@ def test_frontend_fallback_uses_frontend_dist_build_output(tmp_path, monkeypatch
     assert response.body.decode("utf-8") == html
 
 
-def test_strategy_endpoints_surface_template_name_and_rationale(tmp_path, monkeypatch):
+def test_strategy_endpoints_surface_template_name_and_rationale(
+    tmp_path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
     persist_strategy_result(
         tmp_path / "results" / "alpha_miner.db",
@@ -758,9 +813,15 @@ def test_strategy_endpoints_surface_template_name_and_rationale(tmp_path, monkey
     detail = mod.get_strategy("strategy_seed_1")
 
     assert listing["items"][0]["template_name"] == "cs_top_bottom"
-    assert listing["items"][0]["rationale"] == "Agent prefers cross-sectional long-short execution."
+    assert (
+        listing["items"][0]["rationale"]
+        == "Agent prefers cross-sectional long-short execution."
+    )
     assert detail["template_name"] == "cs_top_bottom"
-    assert detail["rationale"] == "Agent prefers cross-sectional long-short execution."
+    assert (
+        detail["rationale"]
+        == "Agent prefers cross-sectional long-short execution."
+    )
 
 
 def test_strategy_endpoints_support_legacy_schema(tmp_path, monkeypatch):
@@ -829,7 +890,9 @@ def test_strategy_endpoints_support_legacy_schema(tmp_path, monkeypatch):
     assert detail["expression"] == "rank(close)"
 
 
-def test_startup_event_migrates_alpha_and_strategy_tables(tmp_path, monkeypatch):
+def test_startup_event_migrates_alpha_and_strategy_tables(
+    tmp_path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
     db_path = _prepare_db(tmp_path)
     with sqlite3.connect(db_path) as conn:
@@ -876,8 +939,25 @@ def test_startup_event_migrates_alpha_and_strategy_tables(tmp_path, monkeypatch)
     asyncio.run(mod.startup_event())
 
     with sqlite3.connect(db_path) as conn:
-        alpha_columns = {row[1] for row in conn.execute("PRAGMA table_info(alpha_pool)").fetchall()}
-        strategy_columns = {row[1] for row in conn.execute("PRAGMA table_info(strategy_backtests)").fetchall()}
+        alpha_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(alpha_pool)").fetchall()
+        }
+        strategy_columns = {
+            row[1]
+            for row in conn.execute(
+                "PRAGMA table_info(strategy_backtests)"
+            ).fetchall()
+        }
 
-    assert {"selection_score", "best_strategy_id", "execution_style"} <= alpha_columns
-    assert {"template_name", "rationale", "run_id", "selection_score"} <= strategy_columns
+    assert {
+        "selection_score",
+        "best_strategy_id",
+        "execution_style",
+    } <= alpha_columns
+    assert {
+        "template_name",
+        "rationale",
+        "run_id",
+        "selection_score",
+    } <= strategy_columns

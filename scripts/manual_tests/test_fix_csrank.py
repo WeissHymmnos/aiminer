@@ -1,6 +1,7 @@
-import polars as pl
-import pandas as pd
 import numpy as np
+import pandas as pd
+import polars as pl
+
 from aiminer.core.alphaeval.polars_engine import PolarsEngine
 
 

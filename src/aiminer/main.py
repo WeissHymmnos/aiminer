@@ -1,9 +1,10 @@
-import os
-import sys
 import argparse
-import json
-import subprocess
 from datetime import datetime
+import json
+import os
+import subprocess
+import sys
+
 from loguru import logger
 
 from aiminer.app_workflow.graph import build_workflow
@@ -11,7 +12,9 @@ from aiminer.core.constants import MISSING_IC_SENTINEL
 from aiminer.core.settings import AiminerSettings, build_settings
 
 
-def setup_logging(verbose: bool = False, settings: AiminerSettings | None = None):
+def setup_logging(
+    verbose: bool = False, settings: AiminerSettings | None = None
+):
     settings = settings or build_settings()
     settings.logs_path.mkdir(parents=True, exist_ok=True)
     logger.add(
@@ -82,19 +85,25 @@ def print_summary(final_state: dict):
     if final_state.get("hypothesis_name"):
         print(f"\n  Last Hypothesis: {final_state['hypothesis_name']}")
     if final_state.get("hypothesis_description"):
-        print(f"  Description: {final_state['hypothesis_description'][:120]}...")
+        print(
+            f"  Description: {final_state['hypothesis_description'][:120]}..."
+        )
     if final_state.get("code_expression"):
         print(f"  Expression: {final_state['code_expression'][:120]}")
 
     metrics = final_state.get("backtest_metrics", {})
     if metrics:
         simulated = final_state.get("is_simulated", False)
-        print(f"\n  Backtest Metrics {'(SIMULATED)' if simulated else '(REAL)'}:")
+        print(
+            f"\n  Backtest Metrics {'(SIMULATED)' if simulated else '(REAL)'}:"
+        )
         for k, v in metrics.items():
             print(f"    {k}: {v}")
 
     if final_state.get("is_effective") is not None:
-        print(f"\n  Effective: {'✓ YES' if final_state['is_effective'] else '✗ NO'}")
+        print(
+            f"\n  Effective: {'✓ YES' if final_state['is_effective'] else '✗ NO'}"
+        )
     if final_state.get("review_summary"):
         print(f"  Review: {final_state['review_summary'][:200]}")
     if final_state.get("suggested_improvements"):
@@ -120,7 +129,9 @@ def main(args=None):
         help="Force rebuild the RAG knowledge base from docs",
     )
     parser.add_argument(
-        "--verbose", action="store_true", help="Enable verbose debug logging to stderr"
+        "--verbose",
+        action="store_true",
+        help="Enable verbose debug logging to stderr",
     )
     parser.add_argument(
         "--mode",
@@ -143,7 +154,9 @@ def main(args=None):
         help="Evaluation engine",
     )
     parser.add_argument(
-        "--wiki-bootstrap", action="store_true", help="Initialize LLM Wiki from RAG"
+        "--wiki-bootstrap",
+        action="store_true",
+        help="Initialize LLM Wiki from RAG",
     )
     parser.add_argument(
         "--llm-provider",
@@ -166,7 +179,9 @@ def main(args=None):
         help="LLM provider",
     )
     parser.add_argument("--llm-model", type=str, help="Specific LLM model name")
-    parser.add_argument("--llm-base-url", type=str, help="Override OpenAI-compatible base URL")
+    parser.add_argument(
+        "--llm-base-url", type=str, help="Override OpenAI-compatible base URL"
+    )
     parser.add_argument(
         "--llm-reasoning-effort",
         type=str,
@@ -207,8 +222,12 @@ def main(args=None):
         default="cn_stock",
         help="Market profile",
     )
-    parser.add_argument("--market-profiles", type=str, help="Comma-separated market profiles")
-    parser.add_argument("--local-data-path", type=str, help="Local CSV/Parquet dataset path")
+    parser.add_argument(
+        "--market-profiles", type=str, help="Comma-separated market profiles"
+    )
+    parser.add_argument(
+        "--local-data-path", type=str, help="Local CSV/Parquet dataset path"
+    )
     parser.add_argument(
         "--local-data-layout",
         type=str,
@@ -217,7 +236,9 @@ def main(args=None):
         help="Local data layout",
     )
     parser.add_argument(
-        "--market-start", type=str, help="Market analysis start date (YYYY-MM-DD)"
+        "--market-start",
+        type=str,
+        help="Market analysis start date (YYYY-MM-DD)",
     )
     parser.add_argument(
         "--market-end", type=str, help="Market analysis end date (YYYY-MM-DD)"
@@ -298,7 +319,9 @@ def main(args=None):
             logger.error(f"Failed to fetch macro news: {e}")
 
     # Pass providers to workflow builder
-    app = build_workflow(settings=settings.model_copy(update={"rebuild_rag": rebuild_rag}))
+    app = build_workflow(
+        settings=settings.model_copy(update={"rebuild_rag": rebuild_rag})
+    )
 
     # Handle wiki bootstrap if requested (synchronous in main)
     if settings.wiki_bootstrap:
@@ -346,31 +369,43 @@ def main(args=None):
 
                 # Check for errors in state update
                 if "error" in state_update and state_update["error"]:
-                    logger.error(f"Error in {node_name}: {state_update['error']}")
+                    logger.error(
+                        f"Error in {node_name}: {state_update['error']}"
+                    )
 
         logger.info("=== Execution Complete ===")
-        
+
         # Final Summary Generation with plots
-        if final_state.get("code_expression") and not final_state.get("is_simulated"):
+        if final_state.get("code_expression") and not final_state.get(
+            "is_simulated"
+        ):
             try:
                 from aiminer.agents.summary_agent import SummaryAgent
+
                 summary_agent = SummaryAgent(
                     provider=args.llm_provider,
                     model=args.llm_model,
                     reasoning_effort=settings.llm_reasoning_effort,
                     settings=settings,
                 )
-                factor_id = final_state.get("hypothesis_name", f"factor_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+                factor_id = final_state.get(
+                    "hypothesis_name",
+                    f"factor_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                )
                 report_data = {
                     "id": factor_id,
                     "hypothesis": final_state.get("hypothesis_description"),
                     "code": final_state.get("code_expression"),
                     "metrics": final_state.get("backtest_metrics"),
                     "returns": final_state.get("daily_returns"),
-                    "plot_paths": final_state.get("plot_paths", {})
+                    "plot_paths": final_state.get("plot_paths", {}),
                 }
-                report_path = summary_agent.generate_markdown_report(report_data)
-                logger.success(f"Final research report generated at: {report_path}")
+                report_path = summary_agent.generate_markdown_report(
+                    report_data
+                )
+                logger.success(
+                    f"Final research report generated at: {report_path}"
+                )
             except Exception as e:
                 logger.error(f"Failed to generate final report: {e}")
 

@@ -1,6 +1,6 @@
 import json
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from aiminer.agents.strategy_critic import (
     DEFAULT_IMPROVEMENT_EPSILON,
@@ -42,8 +42,11 @@ def _base_state(**overrides):
         "hypothesis_name": "rank_close",
         "selection_score": 1.0,
         "best_strategy_metrics": {
-            "sharpe": 0.4, "annualized_return": 0.08, "max_drawdown": -0.25,
-            "turnover": 0.6, "cost_drag": 0.01,
+            "sharpe": 0.4,
+            "annualized_return": 0.08,
+            "max_drawdown": -0.25,
+            "turnover": 0.6,
+            "cost_drag": 0.01,
         },
         "best_strategy_result": {
             "strategy_id": "agent_test_r0_cand_1",
@@ -52,16 +55,23 @@ def _base_state(**overrides):
                 "direction": "long_short",
                 "selection_rule": "top_bottom_n",
                 "rebalance_freq": "daily",
-                "top_n": 20, "bottom_n": 20,
+                "top_n": 20,
+                "bottom_n": 20,
                 "max_positions": 40,
                 "max_weight_per_position": 0.05,
                 "min_holding_days": 1,
                 "commission_bps": 5.0,
                 "slippage_bps": 5.0,
             },
-            "metrics": {"sharpe": 0.4, "annualized_return": 0.08, "max_drawdown": -0.25},
+            "metrics": {
+                "sharpe": 0.4,
+                "annualized_return": 0.08,
+                "max_drawdown": -0.25,
+            },
             "trade_stats": {"avg_turnover": 0.6, "rebalance_days": 240},
-            "period_metrics": {"yearly": {"2018": {"return": -0.05, "sharpe": -0.3}}},
+            "period_metrics": {
+                "yearly": {"2018": {"return": -0.05, "sharpe": -0.3}}
+            },
         },
         "strategy_refinement_round": 0,
         "max_strategy_refinement_rounds": 2,
@@ -77,7 +87,7 @@ class TestImprovementGate(unittest.TestCase):
 
     def test_positive_score_requires_relative_lift(self):
         self.assertFalse(_improvement_satisfied(1.01, 1.0))  # +1% < 5%
-        self.assertTrue(_improvement_satisfied(1.06, 1.0))   # +6% > 5%
+        self.assertTrue(_improvement_satisfied(1.06, 1.0))  # +6% > 5%
 
     def test_non_positive_score_uses_absolute_lift(self):
         self.assertFalse(_improvement_satisfied(-0.01, -0.02))
@@ -86,8 +96,16 @@ class TestImprovementGate(unittest.TestCase):
 
 class TestConfigSignature(unittest.TestCase):
     def test_identical_configs_share_signature(self):
-        a = {"strategy_mode": "cross_sectional", "top_n": 20, "min_holding_days": 1}
-        b = {"strategy_mode": "cross_sectional", "top_n": 20, "min_holding_days": 1}
+        a = {
+            "strategy_mode": "cross_sectional",
+            "top_n": 20,
+            "min_holding_days": 1,
+        }
+        b = {
+            "strategy_mode": "cross_sectional",
+            "top_n": 20,
+            "min_holding_days": 1,
+        }
         self.assertEqual(_config_signature(a), _config_signature(b))
 
     def test_param_change_changes_signature(self):
@@ -151,41 +169,47 @@ class TestStrategyCritic(unittest.TestCase):
 
     def test_max_rounds_short_circuits_without_calling_llm(self):
         payload = {
-            "failure_modes": ["x"], "should_continue": True,
-            "rationale": "should never run", "proposals": [],
+            "failure_modes": ["x"],
+            "should_continue": True,
+            "rationale": "should never run",
+            "proposals": [],
         }
         critic = _build_critic(payload)
         # Reset the stub so we can detect any unexpected call.
         critic.llm.invoke.reset_mock()
 
-        state = _base_state(strategy_refinement_round=2, max_strategy_refinement_rounds=2)
+        state = _base_state(
+            strategy_refinement_round=2, max_strategy_refinement_rounds=2
+        )
         result = critic(state)
 
         critic.llm.invoke.assert_not_called()
         self.assertEqual(
-            result["strategy_refinement_history"][-1]["halt_reason"], "max_rounds"
+            result["strategy_refinement_history"][-1]["halt_reason"],
+            "max_rounds",
         )
         self.assertNotIn("strategy_candidates", result)
 
     def test_no_improvement_short_circuits_without_calling_llm(self):
         payload = {
-            "failure_modes": ["x"], "should_continue": True,
-            "rationale": "should never run", "proposals": [],
+            "failure_modes": ["x"],
+            "should_continue": True,
+            "rationale": "should never run",
+            "proposals": [],
         }
         critic = _build_critic(payload)
         critic.llm.invoke.reset_mock()
 
         state = _base_state(
             selection_score=1.01,
-            strategy_refinement_history=[
-                {"round": 0, "selection_score": 1.0}
-            ],
+            strategy_refinement_history=[{"round": 0, "selection_score": 1.0}],
         )
         result = critic(state)
 
         critic.llm.invoke.assert_not_called()
         self.assertEqual(
-            result["strategy_refinement_history"][-1]["halt_reason"], "no_improvement"
+            result["strategy_refinement_history"][-1]["halt_reason"],
+            "no_improvement",
         )
 
     def test_duplicate_proposal_is_dropped(self):
@@ -218,7 +242,8 @@ class TestStrategyCritic(unittest.TestCase):
 
         self.assertNotIn("strategy_candidates", result)
         self.assertEqual(
-            result["strategy_refinement_history"][-1]["halt_reason"], "no_novel_proposals"
+            result["strategy_refinement_history"][-1]["halt_reason"],
+            "no_novel_proposals",
         )
 
     def test_invalid_proposal_is_skipped_but_others_kept(self):
@@ -236,7 +261,10 @@ class TestStrategyCritic(unittest.TestCase):
                     "rebalance_freq": "daily",
                     "thresholds": {},
                     "counts": {"top_n": 10},
-                    "holding_constraints": {"max_weight_per_position": 0.05, "min_holding_days": 1},
+                    "holding_constraints": {
+                        "max_weight_per_position": 0.05,
+                        "min_holding_days": 1,
+                    },
                     "cost_model": {"commission_bps": 5.0, "slippage_bps": 5.0},
                     "rationale": "should be skipped",
                 },
@@ -273,7 +301,8 @@ class TestStrategyCritic(unittest.TestCase):
         result = critic(_base_state())
 
         self.assertEqual(
-            result["strategy_refinement_history"][-1]["halt_reason"], "llm_error"
+            result["strategy_refinement_history"][-1]["halt_reason"],
+            "llm_error",
         )
         self.assertNotIn("strategy_candidates", result)
 

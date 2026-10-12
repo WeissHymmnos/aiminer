@@ -1,11 +1,10 @@
 # --- Imports & Configuration ---
 import asyncio
 import json
-import os
-
-import sqlite3
 import multiprocessing
+import os
 import shlex
+import sqlite3
 import subprocess
 import tempfile
 import traceback
@@ -17,6 +16,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.widgets import (
     Button,
+    Checkbox,
     DataTable,
     Footer,
     Header,
@@ -28,7 +28,6 @@ from textual.widgets import (
     TabbedContent,
     TabPane,
     TextArea,
-    Checkbox,
 )
 from textual_plotext import PlotextPlot
 
@@ -78,7 +77,9 @@ class TUIApp(App):
         self.swarm_log_offset = 0
         self.swarm_poll_task = None
         self.swarm_api_token = os.getenv("AIMINER_AUTH_TOKEN", "")
-        self.swarm_api_base_url_explicit = bool(os.getenv("AIMINER_API_BASE_URL"))
+        self.swarm_api_base_url_explicit = bool(
+            os.getenv("AIMINER_API_BASE_URL")
+        )
         self.swarm_api_base_url = (
             os.getenv("AIMINER_API_BASE_URL")
             or self._detect_swarm_api_base_url()
@@ -87,7 +88,9 @@ class TUIApp(App):
         self.swarm_poll_interval = self._to_positive_float(
             os.getenv("AIMINER_TUI_SWARM_POLL_INTERVAL", "0.8"), 0.8
         )
-        self.swarm_log_batch = self._to_positive_int(os.getenv("AIMINER_TUI_SWARM_LOG_BATCH", "100"), 100)
+        self.swarm_log_batch = self._to_positive_int(
+            os.getenv("AIMINER_TUI_SWARM_LOG_BATCH", "100"), 100
+        )
         self.selected_factor_seed = None
 
     @staticmethod
@@ -152,9 +155,13 @@ class TUIApp(App):
             return list(dict.fromkeys(ports))
         return list(range(8000, 8021))
 
-    def _is_swarm_api_reachable(self, base_url: str, timeout: float = 0.25) -> bool:
+    def _is_swarm_api_reachable(
+        self, base_url: str, timeout: float = 0.25
+    ) -> bool:
         url = f"{base_url.rstrip('/')}/api/swarm/status"
-        req = urllib.request.Request(url, method="GET", headers=self._swarm_api_headers())
+        req = urllib.request.Request(
+            url, method="GET", headers=self._swarm_api_headers()
+        )
         try:
             with urllib.request.urlopen(req, timeout=timeout):
                 return True
@@ -190,11 +197,19 @@ class TUIApp(App):
         )
 
     async def _swarm_api_request(
-        self, method: str, path: str, payload: dict | None = None, params: dict | None = None
+        self,
+        method: str,
+        path: str,
+        payload: dict | None = None,
+        params: dict | None = None,
     ) -> dict:
-        return await asyncio.to_thread(self._swarm_api_request_sync, method, path, payload, params)
+        return await asyncio.to_thread(
+            self._swarm_api_request_sync, method, path, payload, params
+        )
 
-    def _swarm_api_request_sync(self, method: str, path: str, payload: dict | None, params: dict | None) -> dict:
+    def _swarm_api_request_sync(
+        self, method: str, path: str, payload: dict | None, params: dict | None
+    ) -> dict:
         if not self._ensure_swarm_api_base_url():
             raise RuntimeError(self._api_unreachable_hint())
         url = self._swarm_api_url(path)
@@ -214,22 +229,30 @@ class TUIApp(App):
                 raw = response.read()
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="ignore")
-            raise RuntimeError(f"Swarm API {method} {url} failed: {exc.code} {detail}") from exc
+            raise RuntimeError(
+                f"Swarm API {method} {url} failed: {exc.code} {detail}"
+            ) from exc
         except urllib.error.URLError as exc:
-            raise RuntimeError(f"Swarm API {method} {url} unreachable: {exc}") from exc
+            raise RuntimeError(
+                f"Swarm API {method} {url} unreachable: {exc}"
+            ) from exc
         except TimeoutError as exc:
             raise RuntimeError(
                 f"Swarm API {method} {url} timed out. {self._api_unreachable_hint()}"
             ) from exc
         except Exception as exc:
-            raise RuntimeError(f"Swarm API {method} {url} error: {exc}") from exc
+            raise RuntimeError(
+                f"Swarm API {method} {url} error: {exc}"
+            ) from exc
 
         if not raw:
             return {}
         try:
             return json.loads(raw.decode("utf-8"))
         except json.JSONDecodeError as exc:
-            raise RuntimeError(f"Swarm API {method} {url} returned invalid JSON payload") from exc
+            raise RuntimeError(
+                f"Swarm API {method} {url} returned invalid JSON payload"
+            ) from exc
 
     @staticmethod
     def _format_swarm_log_line(event: dict) -> str:
@@ -257,7 +280,7 @@ class TUIApp(App):
             return
         self.query_one("#swarm-logs", RichLog).write("\n".join(lines))
 
-# --- UI Composition ---
+    # --- UI Composition ---
     def compose(self) -> ComposeResult:
         yield Header()
         with TabbedContent(initial="swarm-tab", id="main-tabs"):
@@ -265,31 +288,35 @@ class TUIApp(App):
                 with Horizontal():
                     with VerticalScroll(classes="box", id="swarm-config"):
                         yield Label("Swarm Configuration", classes="title")
-                        
+
                         yield Label("Iterations:")
                         yield Input(value="30", id="swarm-iter")
-                        
+
                         yield Label("Mode (ricequant/qlib):")
                         yield Input(value="ricequant", id="swarm-mode")
 
                         yield Label("Data Backend:")
                         yield Input(value="ricequant", id="swarm-backend")
-                        
+
                         yield Label("Engine (pandas/polars):")
                         yield Input(value="polars", id="swarm-engine")
-                        
+
                         yield Label("LLM Provider:")
                         yield Input(value="kimi", id="swarm-provider")
-                        
-                        yield Label("LLM Model:")
-                        yield Input(value="kimi-k2-turbo-preview", id="swarm-model")
 
-                        yield Label("LLM Reasoning Effort (low/medium/high/xhigh, Codex only):")
+                        yield Label("LLM Model:")
+                        yield Input(
+                            value="kimi-k2-turbo-preview", id="swarm-model"
+                        )
+
+                        yield Label(
+                            "LLM Reasoning Effort (low/medium/high/xhigh, Codex only):"
+                        )
                         yield Input(value="", id="swarm-reasoning-effort")
 
                         yield Label("LLM Base URL:")
                         yield Input(value="", id="swarm-base-url")
-                        
+
                         yield Label("Embedding Provider:")
                         yield Input(value="openai", id="swarm-embed")
 
@@ -300,22 +327,29 @@ class TUIApp(App):
                         yield Input(value="cn_stock", id="swarm-market-profile")
 
                         yield Label("Market Profiles:")
-                        yield Input(value="cn_stock,us_stock,futures", id="swarm-market-profiles")
+                        yield Input(
+                            value="cn_stock,us_stock,futures",
+                            id="swarm-market-profiles",
+                        )
 
                         yield Label("Local Data Path:")
                         yield Input(value="", id="swarm-local-data-path")
 
                         yield Label("Local Data Layout:")
                         yield Input(value="auto", id="swarm-local-data-layout")
-                        
+
                         yield Label("Market Start:")
                         yield Input(value="2015-01-01", id="swarm-start")
-                        
+
                         yield Label("Market End:")
                         yield Input(value="2020-12-01", id="swarm-end")
-                        
-                        yield Checkbox("Parallel Execution", value=True, id="swarm-parallel")
-                        
+
+                        yield Checkbox(
+                            "Parallel Execution",
+                            value=True,
+                            id="swarm-parallel",
+                        )
+
                         yield Label("Roles (One per line):")
                         default_roles = (
                             "Momentum expert focused on Hurst exponent and fractal dimension\n"
@@ -330,19 +364,32 @@ class TUIApp(App):
                             "Graph expert mining industry-chain links via networks and knowledge graphs"
                         )
                         yield TextArea(text=default_roles, id="swarm-roles")
-                        
+
                         with Horizontal(id="swarm-buttons"):
-                            yield Button("Start Swarm", id="btn-swarm-start", variant="success")
-                            yield Button("Stop Swarm", id="btn-swarm-stop", variant="error", disabled=True)
-                    
+                            yield Button(
+                                "Start Swarm",
+                                id="btn-swarm-start",
+                                variant="success",
+                            )
+                            yield Button(
+                                "Stop Swarm",
+                                id="btn-swarm-stop",
+                                variant="error",
+                                disabled=True,
+                            )
+
                     with Vertical(classes="box", id="swarm-logs-container"):
                         yield Label("Swarm Logs", classes="title")
-                        yield RichLog(id="swarm-logs", markup=True, highlight=True)
+                        yield RichLog(
+                            id="swarm-logs", markup=True, highlight=True
+                        )
 
             with TabPane("Alpha Pool", id="pool-tab"):
                 with Horizontal():
                     yield DataTable(id="factors-table", classes="box")
-                    with VerticalScroll(classes="box", id="pool-details-container"):
+                    with VerticalScroll(
+                        classes="box", id="pool-details-container"
+                    ):
                         yield Label("Factor Details", classes="title")
                         yield Button(
                             "Seed To Strategy Tab",
@@ -355,8 +402,13 @@ class TUIApp(App):
 
             with TabPane("Manual Backtester", id="manual-tab"):
                 with Vertical(classes="box", id="manual-top-box"):
-                    yield Label("Current Expression (Press 'e' to edit in nvim):", classes="title")
-                    yield Static(self.current_expression, id="expression-display")
+                    yield Label(
+                        "Current Expression (Press 'e' to edit in nvim):",
+                        classes="title",
+                    )
+                    yield Static(
+                        self.current_expression, id="expression-display"
+                    )
                     with Horizontal(id="manual-date-row"):
                         yield Label("Start:")
                         yield Input(value="2017-01-01", id="manual-start")
@@ -375,22 +427,33 @@ class TUIApp(App):
                     yield Label("Local Data Layout:")
                     yield Input(value="auto", id="manual-local-data-layout")
                     with Horizontal(id="manual-buttons"):
-                        yield Button("Edit Code (e)", id="btn-edit", variant="primary")
-                        yield Button("Run Backtest (r)", id="btn-run", variant="success")
-                
+                        yield Button(
+                            "Edit Code (e)", id="btn-edit", variant="primary"
+                        )
+                        yield Button(
+                            "Run Backtest (r)", id="btn-run", variant="success"
+                        )
+
                 with Horizontal(id="manual-bottom-box"):
                     with VerticalScroll(classes="box", id="metrics-container"):
                         yield Label("Metrics", classes="title")
-                        yield Static("Run a backtest to see metrics here.", id="metrics-display")
+                        yield Static(
+                            "Run a backtest to see metrics here.",
+                            id="metrics-display",
+                        )
 
                     yield PlotextPlot(id="manual-chart")
 
             with TabPane("Strategy Backtester", id="strategy-tab"):
                 with Horizontal():
-                    with VerticalScroll(classes="box", id="strategy-config-box"):
+                    with VerticalScroll(
+                        classes="box", id="strategy-config-box"
+                    ):
                         yield Label("Strategy Templates", classes="title")
                         yield Label("Template Key:")
-                        yield Input(value="cs_top_bottom", id="strategy-template")
+                        yield Input(
+                            value="cs_top_bottom", id="strategy-template"
+                        )
                         yield Label("Strategy Mode:")
                         yield Input(value="cross_sectional", id="strategy-mode")
                         yield Label("Direction:")
@@ -426,13 +489,19 @@ class TUIApp(App):
                         yield Label("Market Mode:")
                         yield Input(value="single", id="strategy-market-mode")
                         yield Label("Market Profile:")
-                        yield Input(value="cn_stock", id="strategy-market-profile")
+                        yield Input(
+                            value="cn_stock", id="strategy-market-profile"
+                        )
                         yield Label("Market Profiles:")
-                        yield Input(value="cn_stock", id="strategy-market-profiles")
+                        yield Input(
+                            value="cn_stock", id="strategy-market-profiles"
+                        )
                         yield Label("Local Data Path:")
                         yield Input(value="", id="strategy-local-data-path")
                         yield Label("Local Data Layout:")
-                        yield Input(value="auto", id="strategy-local-data-layout")
+                        yield Input(
+                            value="auto", id="strategy-local-data-layout"
+                        )
                         yield Label("Start:")
                         yield Input(value="2017-01-01", id="strategy-start")
                         yield Label("End:")
@@ -440,9 +509,21 @@ class TUIApp(App):
                         yield Label("Engine:")
                         yield Input(value="polars", id="strategy-engine")
                         with Horizontal(id="strategy-buttons"):
-                            yield Button("Load Template", id="btn-strategy-template", variant="primary")
-                            yield Button("Sync JSON", id="btn-strategy-sync", variant="default")
-                            yield Button("Run Strategy", id="btn-strategy-run", variant="success")
+                            yield Button(
+                                "Load Template",
+                                id="btn-strategy-template",
+                                variant="primary",
+                            )
+                            yield Button(
+                                "Sync JSON",
+                                id="btn-strategy-sync",
+                                variant="default",
+                            )
+                            yield Button(
+                                "Run Strategy",
+                                id="btn-strategy-run",
+                                variant="success",
+                            )
 
                     with Vertical(classes="box", id="strategy-right-box"):
                         yield Label("Strategy JSON", classes="title")
@@ -455,21 +536,28 @@ class TUIApp(App):
                             "Default source is the form on the left. Enable this only when the raw JSON should override the form.",
                             id="strategy-source-hint",
                         )
-                        yield TextArea(text=self.current_strategy_json, id="strategy-json")
-                        yield Static("Run a strategy backtest to see metrics here.", id="strategy-metrics-display")
+                        yield TextArea(
+                            text=self.current_strategy_json, id="strategy-json"
+                        )
+                        yield Static(
+                            "Run a strategy backtest to see metrics here.",
+                            id="strategy-metrics-display",
+                        )
                         yield PlotextPlot(id="strategy-chart")
 
             with TabPane("Strategy Results", id="strategy-results-tab"):
                 with Horizontal():
                     yield DataTable(id="strategies-table", classes="box")
-                    with VerticalScroll(classes="box", id="strategy-details-container"):
+                    with VerticalScroll(
+                        classes="box", id="strategy-details-container"
+                    ):
                         yield Label("Strategy Details", classes="title")
                         yield Markdown("", id="strategy-details")
                         yield PlotextPlot(id="strategy-results-chart")
 
         yield Footer()
 
-# --- Action & Event Handlers ---
+    # --- Action & Event Handlers ---
     def action_vim_down(self) -> None:
         focused = self.focused
         if isinstance(focused, DataTable):
@@ -521,17 +609,19 @@ class TUIApp(App):
         table.add_columns("ID", "Hypothesis", "IC", "Effective")
         strategy_table = self.query_one("#strategies-table", DataTable)
         strategy_table.cursor_type = "row"
-        strategy_table.add_columns("Label", "Tpl", "Source", "P", "C#", "Score", "Sharpe", "MaxDD")
+        strategy_table.add_columns(
+            "Label", "Tpl", "Source", "P", "C#", "Score", "Sharpe", "MaxDD"
+        )
         self.load_factors()
         self.load_strategies()
 
     def load_factors(self) -> None:
         if not os.path.exists(self.db_path):
             return
-        
+
         table = self.query_one("#factors-table", DataTable)
         table.clear()
-        
+
         with _db_connect(self.db_path) as conn:
             cursor = conn.cursor()
             try:
@@ -547,7 +637,7 @@ class TUIApp(App):
                     rows = cursor.fetchall()
                 except sqlite3.OperationalError:
                     rows = []
-            
+
             for row in rows:
                 d = dict(row)
                 fid = d.get("id", "N/A")
@@ -601,15 +691,19 @@ class TUIApp(App):
                 f"{float(metrics.get('max_drawdown') or 0.0):.4f}",
                 key=data.get("strategy_id", "N/A"),
             )
-                
-    async def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+
+    async def on_data_table_row_selected(
+        self, event: DataTable.RowSelected
+    ) -> None:
         row_key = event.row_key.value
         if not row_key:
             return
 
         if event.data_table.id == "factors-table":
             with _db_connect(self.db_path) as conn:
-                row = conn.execute("SELECT * FROM alpha_pool WHERE id=?", (row_key,)).fetchone()
+                row = conn.execute(
+                    "SELECT * FROM alpha_pool WHERE id=?", (row_key,)
+                ).fetchone()
                 strategy_row = None
                 row_dict = dict(row) if row else {}
                 if row_dict.get("best_strategy_id"):
@@ -627,7 +721,9 @@ class TUIApp(App):
             d = dict(row)
             metrics = json.loads(d.get("metrics_json") or "{}")
             returns = json.loads(d.get("returns_json") or "{}")
-            best_strategy_summary = "\n**Best Strategy:**\n- None persisted for this factor."
+            best_strategy_summary = (
+                "\n**Best Strategy:**\n- None persisted for this factor."
+            )
             seed_button = self.query_one("#btn-seed-strategy", Button)
             if strategy_row:
                 s = dict(strategy_row)
@@ -646,25 +742,25 @@ class TUIApp(App):
                 self.selected_factor_seed = None
                 seed_button.disabled = True
 
-            ic_val = metrics.get('information_coefficient')
+            ic_val = metrics.get("information_coefficient")
             if ic_val is None:
-                ic_val = d.get('ic')
+                ic_val = d.get("ic")
             ic_val = float(ic_val) if ic_val is not None else 0.0
 
-            rank_ic_val = metrics.get('rank_ic')
+            rank_ic_val = metrics.get("rank_ic")
             if rank_ic_val is None:
-                rank_ic_val = d.get('rank_ic')
+                rank_ic_val = d.get("rank_ic")
             rank_ic_val = float(rank_ic_val) if rank_ic_val is not None else 0.0
 
-            ann_ret_val = float(metrics.get('annualized_return') or 0.0)
-            max_dd_val = float(metrics.get('max_drawdown') or 0.0)
+            ann_ret_val = float(metrics.get("annualized_return") or 0.0)
+            max_dd_val = float(metrics.get("max_drawdown") or 0.0)
 
             details_md = f"""
-**Hypothesis:** {d.get('hypothesis')}
+**Hypothesis:** {d.get("hypothesis")}
 
 **Code:**
 ```python
-{d.get('code')}
+{d.get("code")}
 ```
 
 **Metrics:**
@@ -672,8 +768,8 @@ class TUIApp(App):
 - **Rank IC:** {rank_ic_val:.4f}
 - **Annualized Return:** {ann_ret_val:.4f}
 - **Max Drawdown:** {max_dd_val:.4f}
-- **Selection Score:** {float(d.get('selection_score') or 0.0):.4f}
-- **Execution Style:** {d.get('execution_style') or 'N/A'}
+- **Selection Score:** {float(d.get("selection_score") or 0.0):.4f}
+- **Execution Style:** {d.get("execution_style") or "N/A"}
 {best_strategy_summary}
         """
             self.query_one("#factor-details", Markdown).update(details_md)
@@ -684,7 +780,11 @@ class TUIApp(App):
             plt.axes_color("none")
             plt.ticks_color("white")
             if returns:
-                plt.plot(self._compute_cumulative(returns), color="blue", marker="braille")
+                plt.plot(
+                    self._compute_cumulative(returns),
+                    color="blue",
+                    marker="braille",
+                )
                 plt.title("Cumulative Returns")
             else:
                 plt.title("No Returns Data Available")
@@ -705,25 +805,25 @@ class TUIApp(App):
             cfg = json.loads(d.get("strategy_config_json") or "{}")
             trade = json.loads(d.get("trade_stats_json") or "{}")
             details_md = f"""
-**Strategy ID:** {d.get('strategy_id') or 'N/A'}
+**Strategy ID:** {d.get("strategy_id") or "N/A"}
 
-**Label:** {d.get('label') or 'Unnamed Strategy'}
+**Label:** {d.get("label") or "Unnamed Strategy"}
 
-**Template:** {d.get('template_name') or 'N/A'}
+**Template:** {d.get("template_name") or "N/A"}
 
-**Source Factor:** {d.get('source_factor_id') or 'N/A'}
+**Source Factor:** {d.get("source_factor_id") or "N/A"}
 
-**Primary Candidate:** {"Yes" if d.get('is_primary') else "No"}
+**Primary Candidate:** {"Yes" if d.get("is_primary") else "No"}
 
-**Candidate Rank:** {d.get('candidate_rank') or 'N/A'}
+**Candidate Rank:** {d.get("candidate_rank") or "N/A"}
 
-**Selection Score:** {float(d.get('selection_score') or 0.0):.4f}
+**Selection Score:** {float(d.get("selection_score") or 0.0):.4f}
 
-**Rationale:** {d.get('rationale') or 'N/A'}
+**Rationale:** {d.get("rationale") or "N/A"}
 
 **Expression:**
 ```python
-{json.loads(d.get('expression_json') or '{}').get('expression', '')}
+{json.loads(d.get("expression_json") or "{}").get("expression", "")}
 ```
 
 **Config:**
@@ -732,12 +832,12 @@ class TUIApp(App):
 ```
 
 **Metrics:**
-- **Annualized Return:** {float(metrics.get('annualized_return') or 0.0):.4f}
-- **Sharpe:** {float(metrics.get('sharpe') or 0.0):.4f}
-- **Max Drawdown:** {float(metrics.get('max_drawdown') or 0.0):.4f}
-- **Turnover:** {float(metrics.get('turnover') or 0.0):.4f}
-- **Cost Drag:** {float(metrics.get('cost_drag') or 0.0):.4f}
-- **Avg Holding Period:** {float(metrics.get('average_holding_period') or 0.0):.2f}
+- **Annualized Return:** {float(metrics.get("annualized_return") or 0.0):.4f}
+- **Sharpe:** {float(metrics.get("sharpe") or 0.0):.4f}
+- **Max Drawdown:** {float(metrics.get("max_drawdown") or 0.0):.4f}
+- **Turnover:** {float(metrics.get("turnover") or 0.0):.4f}
+- **Cost Drag:** {float(metrics.get("cost_drag") or 0.0):.4f}
+- **Avg Holding Period:** {float(metrics.get("average_holding_period") or 0.0):.2f}
 
 **Trade Stats:**
 ```json
@@ -751,7 +851,11 @@ class TUIApp(App):
             plt.axes_color("none")
             plt.ticks_color("white")
             if returns:
-                plt.plot(self._compute_cumulative(returns), color="magenta", marker="braille")
+                plt.plot(
+                    self._compute_cumulative(returns),
+                    color="magenta",
+                    marker="braille",
+                )
                 plt.title("Strategy Cumulative Returns")
             else:
                 plt.title("No Strategy Returns Data")
@@ -792,14 +896,18 @@ class TUIApp(App):
         tmp_path = ""
 
         def show_editor_error(message: str) -> None:
-            self.query_one("#metrics-display", Static).update(f"Editor error: {message}")
+            self.query_one("#metrics-display", Static).update(
+                f"Editor error: {message}"
+            )
             try:
                 self.notify(message, severity="error")
             except Exception:
                 pass
 
         # Suspend TUI, open the configured editor.
-        with tempfile.NamedTemporaryFile(mode='w+', suffix='.py', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(
+            mode="w+", suffix=".py", delete=False
+        ) as tmp:
             tmp.write(self.current_expression)
             tmp_path = tmp.name
 
@@ -814,12 +922,14 @@ class TUIApp(App):
                 return
 
             # Read back
-            with open(tmp_path, 'r') as f:
+            with open(tmp_path, "r") as f:
                 new_code = f.read().strip()
 
             if new_code:
                 self.current_expression = new_code
-                self.query_one("#expression-display", Static).update(self.current_expression)
+                self.query_one("#expression-display", Static).update(
+                    self.current_expression
+                )
         except FileNotFoundError:
             show_editor_error(
                 f"Editor command not found: {editor_name}. Install it or set EDITOR, for example EDITOR='nano'."
@@ -831,7 +941,10 @@ class TUIApp(App):
                 os.remove(tmp_path)
 
     def _load_strategy_template(self) -> None:
-        template_key = self.query_one("#strategy-template", Input).value.strip() or "cs_top_bottom"
+        template_key = (
+            self.query_one("#strategy-template", Input).value.strip()
+            or "cs_top_bottom"
+        )
         cfg = self.strategy_defaults.get(template_key)
         if cfg is None:
             self.query_one("#strategy-metrics-display", Static).update(
@@ -843,15 +956,33 @@ class TUIApp(App):
         self.query_one("#strategy-rule", Input).value = cfg.selection_rule
         self.query_one("#strategy-rebalance", Input).value = cfg.rebalance_freq
         self.query_one("#strategy-top-n", Input).value = str(cfg.top_n or "")
-        self.query_one("#strategy-bottom-n", Input).value = str(cfg.bottom_n or "")
-        self.query_one("#strategy-long-threshold", Input).value = str(cfg.long_threshold or "")
-        self.query_one("#strategy-short-threshold", Input).value = str(cfg.short_threshold or "")
-        self.query_one("#strategy-exit-threshold", Input).value = str(cfg.exit_threshold or "")
-        self.query_one("#strategy-max-positions", Input).value = str(cfg.max_positions or "")
-        self.query_one("#strategy-max-weight", Input).value = str(cfg.max_weight_per_position)
-        self.query_one("#strategy-min-holding", Input).value = str(cfg.min_holding_days)
-        self.query_one("#strategy-commission", Input).value = str(cfg.commission_bps)
-        self.query_one("#strategy-slippage", Input).value = str(cfg.slippage_bps)
+        self.query_one("#strategy-bottom-n", Input).value = str(
+            cfg.bottom_n or ""
+        )
+        self.query_one("#strategy-long-threshold", Input).value = str(
+            cfg.long_threshold or ""
+        )
+        self.query_one("#strategy-short-threshold", Input).value = str(
+            cfg.short_threshold or ""
+        )
+        self.query_one("#strategy-exit-threshold", Input).value = str(
+            cfg.exit_threshold or ""
+        )
+        self.query_one("#strategy-max-positions", Input).value = str(
+            cfg.max_positions or ""
+        )
+        self.query_one("#strategy-max-weight", Input).value = str(
+            cfg.max_weight_per_position
+        )
+        self.query_one("#strategy-min-holding", Input).value = str(
+            cfg.min_holding_days
+        )
+        self.query_one("#strategy-commission", Input).value = str(
+            cfg.commission_bps
+        )
+        self.query_one("#strategy-slippage", Input).value = str(
+            cfg.slippage_bps
+        )
         self.query_one("#strategy-market", Input).value = cfg.market
         self.query_one("#strategy-start", Input).value = cfg.start_date
         self.query_one("#strategy-end", Input).value = cfg.end_date
@@ -859,29 +990,53 @@ class TUIApp(App):
         self.current_strategy_json = json.dumps(
             cfg.model_dump(mode="json"), ensure_ascii=False, indent=2
         )
-        self.query_one("#strategy-json", TextArea).text = self.current_strategy_json
+        self.query_one(
+            "#strategy-json", TextArea
+        ).text = self.current_strategy_json
         self.query_one("#strategy-use-json", Checkbox).value = False
         self.query_one("#strategy-metrics-display", Static).update(
             "Loaded template into form fields. Run Strategy uses the form unless Advanced JSON is enabled."
         )
 
-    def _apply_strategy_config_to_form(self, config: dict, template_name: str | None = None) -> None:
+    def _apply_strategy_config_to_form(
+        self, config: dict, template_name: str | None = None
+    ) -> None:
         cfg = StrategyConfig.model_validate(config)
-        self.query_one("#strategy-template", Input).value = template_name or cfg.label or "seeded"
+        self.query_one("#strategy-template", Input).value = (
+            template_name or cfg.label or "seeded"
+        )
         self.query_one("#strategy-mode", Input).value = cfg.strategy_mode
         self.query_one("#strategy-direction", Input).value = cfg.direction
         self.query_one("#strategy-rule", Input).value = cfg.selection_rule
         self.query_one("#strategy-rebalance", Input).value = cfg.rebalance_freq
         self.query_one("#strategy-top-n", Input).value = str(cfg.top_n or "")
-        self.query_one("#strategy-bottom-n", Input).value = str(cfg.bottom_n or "")
-        self.query_one("#strategy-long-threshold", Input).value = str(cfg.long_threshold or "")
-        self.query_one("#strategy-short-threshold", Input).value = str(cfg.short_threshold or "")
-        self.query_one("#strategy-exit-threshold", Input).value = str(cfg.exit_threshold or "")
-        self.query_one("#strategy-max-positions", Input).value = str(cfg.max_positions or "")
-        self.query_one("#strategy-max-weight", Input).value = str(cfg.max_weight_per_position)
-        self.query_one("#strategy-min-holding", Input).value = str(cfg.min_holding_days)
-        self.query_one("#strategy-commission", Input).value = str(cfg.commission_bps)
-        self.query_one("#strategy-slippage", Input).value = str(cfg.slippage_bps)
+        self.query_one("#strategy-bottom-n", Input).value = str(
+            cfg.bottom_n or ""
+        )
+        self.query_one("#strategy-long-threshold", Input).value = str(
+            cfg.long_threshold or ""
+        )
+        self.query_one("#strategy-short-threshold", Input).value = str(
+            cfg.short_threshold or ""
+        )
+        self.query_one("#strategy-exit-threshold", Input).value = str(
+            cfg.exit_threshold or ""
+        )
+        self.query_one("#strategy-max-positions", Input).value = str(
+            cfg.max_positions or ""
+        )
+        self.query_one("#strategy-max-weight", Input).value = str(
+            cfg.max_weight_per_position
+        )
+        self.query_one("#strategy-min-holding", Input).value = str(
+            cfg.min_holding_days
+        )
+        self.query_one("#strategy-commission", Input).value = str(
+            cfg.commission_bps
+        )
+        self.query_one("#strategy-slippage", Input).value = str(
+            cfg.slippage_bps
+        )
         self.query_one("#strategy-market", Input).value = cfg.market
         self.query_one("#strategy-start", Input).value = cfg.start_date
         self.query_one("#strategy-end", Input).value = cfg.end_date
@@ -889,7 +1044,9 @@ class TUIApp(App):
         self.current_strategy_json = json.dumps(
             cfg.model_dump(mode="json"), ensure_ascii=False, indent=2
         )
-        self.query_one("#strategy-json", TextArea).text = self.current_strategy_json
+        self.query_one(
+            "#strategy-json", TextArea
+        ).text = self.current_strategy_json
         self.query_one("#strategy-use-json", Checkbox).value = False
 
     def _seed_selected_factor_to_strategy_tab(self) -> None:
@@ -900,8 +1057,12 @@ class TUIApp(App):
         expression = factor.get("code") or ""
         if expression:
             self.current_expression = expression
-            self.query_one("#expression-display", Static).update(self.current_expression)
-        strategy_config = json.loads(strategy.get("strategy_config_json") or "{}")
+            self.query_one("#expression-display", Static).update(
+                self.current_expression
+            )
+        strategy_config = json.loads(
+            strategy.get("strategy_config_json") or "{}"
+        )
         if strategy_config:
             self._apply_strategy_config_to_form(
                 strategy_config,
@@ -912,12 +1073,23 @@ class TUIApp(App):
             self.query_one("#strategy-backend", Input).value = str(backend)
         market_mode = factor.get("market_mode")
         if market_mode:
-            self.query_one("#strategy-market-mode", Input).value = str(market_mode)
-        market_profile = strategy.get("market_profile") or factor.get("market_profile")
+            self.query_one("#strategy-market-mode", Input).value = str(
+                market_mode
+            )
+        market_profile = strategy.get("market_profile") or factor.get(
+            "market_profile"
+        )
         if market_profile:
-            self.query_one("#strategy-market-profile", Input).value = str(market_profile)
-            self.query_one("#strategy-market-profiles", Input).value = str(market_profile)
-        rationale = strategy.get("rationale") or "Seeded strategy config from selected factor."
+            self.query_one("#strategy-market-profile", Input).value = str(
+                market_profile
+            )
+            self.query_one("#strategy-market-profiles", Input).value = str(
+                market_profile
+            )
+        rationale = (
+            strategy.get("rationale")
+            or "Seeded strategy config from selected factor."
+        )
         self.query_one("#strategy-metrics-display", Static).update(
             "\n".join(
                 [
@@ -939,58 +1111,107 @@ class TUIApp(App):
 
         payload = {
             "label": f"TUI {self.query_one('#strategy-template', Input).value.strip() or 'strategy'}",
-            "strategy_mode": self.query_one("#strategy-mode", Input).value.strip(),
-            "direction": self.query_one("#strategy-direction", Input).value.strip(),
-            "selection_rule": self.query_one("#strategy-rule", Input).value.strip(),
-            "rebalance_freq": self.query_one("#strategy-rebalance", Input).value.strip(),
+            "strategy_mode": self.query_one(
+                "#strategy-mode", Input
+            ).value.strip(),
+            "direction": self.query_one(
+                "#strategy-direction", Input
+            ).value.strip(),
+            "selection_rule": self.query_one(
+                "#strategy-rule", Input
+            ).value.strip(),
+            "rebalance_freq": self.query_one(
+                "#strategy-rebalance", Input
+            ).value.strip(),
             "top_n": _num(self.query_one("#strategy-top-n", Input).value, int),
-            "bottom_n": _num(self.query_one("#strategy-bottom-n", Input).value, int),
-            "long_threshold": _num(self.query_one("#strategy-long-threshold", Input).value, float),
-            "short_threshold": _num(self.query_one("#strategy-short-threshold", Input).value, float),
-            "exit_threshold": _num(self.query_one("#strategy-exit-threshold", Input).value, float),
-            "max_positions": _num(self.query_one("#strategy-max-positions", Input).value, int),
-            "max_weight_per_position": float(self.query_one("#strategy-max-weight", Input).value or 0.05),
-            "min_holding_days": int(self.query_one("#strategy-min-holding", Input).value or 1),
-            "commission_bps": float(self.query_one("#strategy-commission", Input).value or 0.0),
-            "slippage_bps": float(self.query_one("#strategy-slippage", Input).value or 0.0),
-            "market": self.query_one("#strategy-market", Input).value or "000300.XSHG",
-            "start_date": self.query_one("#strategy-start", Input).value or "2017-01-01",
-            "end_date": self.query_one("#strategy-end", Input).value or "2020-10-31",
-            "engine": self.query_one("#strategy-engine", Input).value or "polars",
+            "bottom_n": _num(
+                self.query_one("#strategy-bottom-n", Input).value, int
+            ),
+            "long_threshold": _num(
+                self.query_one("#strategy-long-threshold", Input).value, float
+            ),
+            "short_threshold": _num(
+                self.query_one("#strategy-short-threshold", Input).value, float
+            ),
+            "exit_threshold": _num(
+                self.query_one("#strategy-exit-threshold", Input).value, float
+            ),
+            "max_positions": _num(
+                self.query_one("#strategy-max-positions", Input).value, int
+            ),
+            "max_weight_per_position": float(
+                self.query_one("#strategy-max-weight", Input).value or 0.05
+            ),
+            "min_holding_days": int(
+                self.query_one("#strategy-min-holding", Input).value or 1
+            ),
+            "commission_bps": float(
+                self.query_one("#strategy-commission", Input).value or 0.0
+            ),
+            "slippage_bps": float(
+                self.query_one("#strategy-slippage", Input).value or 0.0
+            ),
+            "market": self.query_one("#strategy-market", Input).value
+            or "000300.XSHG",
+            "start_date": self.query_one("#strategy-start", Input).value
+            or "2017-01-01",
+            "end_date": self.query_one("#strategy-end", Input).value
+            or "2020-10-31",
+            "engine": self.query_one("#strategy-engine", Input).value
+            or "polars",
         }
         return StrategyConfig.model_validate(payload)
 
     @staticmethod
     def _parse_profiles(text: str) -> list[str]:
-        return [item.strip() for item in (text or "").split(",") if item.strip()]
+        return [
+            item.strip() for item in (text or "").split(",") if item.strip()
+        ]
 
     def _sync_strategy_json(self) -> None:
         cfg = self._strategy_config_from_form()
         self.current_strategy_json = json.dumps(
             cfg.model_dump(mode="json"), ensure_ascii=False, indent=2
         )
-        self.query_one("#strategy-json", TextArea).text = self.current_strategy_json
+        self.query_one(
+            "#strategy-json", TextArea
+        ).text = self.current_strategy_json
         self.query_one("#strategy-metrics-display", Static).update(
             "Synced form fields to JSON. Form fields remain the run source unless Advanced JSON is enabled."
         )
 
-# --- Backtesting Execution ---
+    # --- Backtesting Execution ---
     async def _run_backtester(self) -> None:
         btn = self.query_one("#btn-run", Button)
         btn.disabled = True
         btn.label = "Running..."
-        self.query_one("#metrics-display", Static).update("Running backtest... Please wait.")
-        
-        start_date = self.query_one("#manual-start", Input).value or "2017-01-01"
-        end_date = self.query_one("#manual-end", Input).value or "2020-10-31"
-        data_backend = self.query_one("#manual-backend", Input).value or "ricequant"
-        market_mode = self.query_one("#manual-market-mode", Input).value or "single"
-        market_profile = self.query_one("#manual-market-profile", Input).value or "cn_stock"
-        market_profiles = self._parse_profiles(
-            self.query_one("#manual-market-profiles", Input).value or market_profile
+        self.query_one("#metrics-display", Static).update(
+            "Running backtest... Please wait."
         )
-        local_data_path = self.query_one("#manual-local-data-path", Input).value or None
-        local_data_layout = self.query_one("#manual-local-data-layout", Input).value or "auto"
+
+        start_date = (
+            self.query_one("#manual-start", Input).value or "2017-01-01"
+        )
+        end_date = self.query_one("#manual-end", Input).value or "2020-10-31"
+        data_backend = (
+            self.query_one("#manual-backend", Input).value or "ricequant"
+        )
+        market_mode = (
+            self.query_one("#manual-market-mode", Input).value or "single"
+        )
+        market_profile = (
+            self.query_one("#manual-market-profile", Input).value or "cn_stock"
+        )
+        market_profiles = self._parse_profiles(
+            self.query_one("#manual-market-profiles", Input).value
+            or market_profile
+        )
+        local_data_path = (
+            self.query_one("#manual-local-data-path", Input).value or None
+        )
+        local_data_layout = (
+            self.query_one("#manual-local-data-layout", Input).value or "auto"
+        )
 
         try:
             # Run in worker thread to prevent blocking UI
@@ -1012,20 +1233,20 @@ class TUIApp(App):
                 local_data_path=local_data_path,
                 local_data_layout=local_data_layout,
             )
-            
+
             metrics = result.get("metrics", {})
             returns = result.get("daily_returns", {})
-            
+
             # Update Metrics
             metrics_text = f"""
-Information Coefficient: {metrics.get('ic', 0):.4f}
-Rank IC: {metrics.get('rank_ic', 0):.4f}
-Max Drawdown: {metrics.get('max_drawdown', 0):.4f}
-Sharpe Ratio: {metrics.get('sharpe', 0):.4f}
-RRE: {(metrics.get('rre') or 0.0):.4f}
+Information Coefficient: {metrics.get("ic", 0):.4f}
+Rank IC: {metrics.get("rank_ic", 0):.4f}
+Max Drawdown: {metrics.get("max_drawdown", 0):.4f}
+Sharpe Ratio: {metrics.get("sharpe", 0):.4f}
+RRE: {(metrics.get("rre") or 0.0):.4f}
 """
             self.query_one("#metrics-display", Static).update(metrics_text)
-            
+
             # Plot
             chart = self.query_one("#manual-chart", PlotextPlot)
             plt = chart.plt
@@ -1034,18 +1255,25 @@ RRE: {(metrics.get('rre') or 0.0):.4f}
             plt.axes_color("none")
             plt.ticks_color("white")
             if returns:
-                plt.plot(self._compute_cumulative(returns), color="green", marker="braille")
+                plt.plot(
+                    self._compute_cumulative(returns),
+                    color="green",
+                    marker="braille",
+                )
                 plt.title("Manual Backtest Cumulative Returns")
             else:
                 plt.title("No Returns Data")
             chart.refresh()
-                
+
         except Exception as e:
             import traceback
+
             err_str = traceback.format_exc()
             with open("backtest_error.log", "w") as f:
                 f.write(err_str)
-            self.query_one("#metrics-display", Static).update(f"Error: {e}\nCheck backtest_error.log")
+            self.query_one("#metrics-display", Static).update(
+                f"Error: {e}\nCheck backtest_error.log"
+            )
         finally:
             btn.disabled = False
             btn.label = "Run Backtest (r)"
@@ -1057,34 +1285,60 @@ RRE: {(metrics.get('rre') or 0.0):.4f}
         metrics_widget = self.query_one("#strategy-metrics-display", Static)
         metrics_widget.update("Running strategy backtest... Please wait.")
         try:
-            use_advanced_json = self.query_one("#strategy-use-json", Checkbox).value
+            use_advanced_json = self.query_one(
+                "#strategy-use-json", Checkbox
+            ).value
             if use_advanced_json:
-                json_text = self.query_one("#strategy-json", TextArea).text.strip()
+                json_text = self.query_one(
+                    "#strategy-json", TextArea
+                ).text.strip()
                 if not json_text:
-                    raise ValueError("Advanced JSON is enabled, but Strategy JSON is empty.")
+                    raise ValueError(
+                        "Advanced JSON is enabled, but Strategy JSON is empty."
+                    )
                 strategy_config = StrategyConfig.model_validate_json(json_text)
                 source_label = "advanced JSON"
             else:
                 strategy_config = self._strategy_config_from_form()
                 self.current_strategy_json = json.dumps(
-                    strategy_config.model_dump(mode="json"), ensure_ascii=False, indent=2
+                    strategy_config.model_dump(mode="json"),
+                    ensure_ascii=False,
+                    indent=2,
                 )
-                self.query_one("#strategy-json", TextArea).text = self.current_strategy_json
+                self.query_one(
+                    "#strategy-json", TextArea
+                ).text = self.current_strategy_json
                 source_label = "form fields"
-            metrics_widget.update(f"Running strategy backtest using {source_label}... Please wait.")
+            metrics_widget.update(
+                f"Running strategy backtest using {source_label}... Please wait."
+            )
             result = await asyncio.to_thread(
                 manual_runner.run_manual_strategy_backtest,
                 self.current_expression,
                 strategy_config.model_dump(mode="json"),
-                data_backend=self.query_one("#strategy-backend", Input).value or "ricequant",
-                market_profile=self.query_one("#strategy-market-profile", Input).value or "cn_stock",
-                market_mode=self.query_one("#strategy-market-mode", Input).value or "single",
+                data_backend=self.query_one("#strategy-backend", Input).value
+                or "ricequant",
+                market_profile=self.query_one(
+                    "#strategy-market-profile", Input
+                ).value
+                or "cn_stock",
+                market_mode=self.query_one("#strategy-market-mode", Input).value
+                or "single",
                 market_profiles=self._parse_profiles(
                     self.query_one("#strategy-market-profiles", Input).value
-                    or (self.query_one("#strategy-market-profile", Input).value or "cn_stock")
+                    or (
+                        self.query_one("#strategy-market-profile", Input).value
+                        or "cn_stock"
+                    )
                 ),
-                local_data_path=self.query_one("#strategy-local-data-path", Input).value or None,
-                local_data_layout=self.query_one("#strategy-local-data-layout", Input).value or "auto",
+                local_data_path=self.query_one(
+                    "#strategy-local-data-path", Input
+                ).value
+                or None,
+                local_data_layout=self.query_one(
+                    "#strategy-local-data-layout", Input
+                ).value
+                or "auto",
             )
             metrics = result.get("metrics", {})
             returns = result.get("daily_returns", {})
@@ -1108,7 +1362,11 @@ RRE: {(metrics.get('rre') or 0.0):.4f}
             plt.axes_color("none")
             plt.ticks_color("white")
             if returns:
-                plt.plot(self._compute_cumulative(returns), color="magenta", marker="braille")
+                plt.plot(
+                    self._compute_cumulative(returns),
+                    color="magenta",
+                    marker="braille",
+                )
                 plt.title("Strategy Cumulative Returns")
             else:
                 plt.title("No Strategy Returns")
@@ -1118,12 +1376,14 @@ RRE: {(metrics.get('rre') or 0.0):.4f}
             err_str = traceback.format_exc()
             with open("strategy_backtest_error.log", "w") as f:
                 f.write(err_str)
-            metrics_widget.update(f"Error: {e}\nCheck strategy_backtest_error.log")
+            metrics_widget.update(
+                f"Error: {e}\nCheck strategy_backtest_error.log"
+            )
         finally:
             btn.disabled = False
             btn.label = "Run Strategy"
 
-# --- Swarm Control ---
+    # --- Swarm Control ---
     async def _start_swarm(self) -> None:
         if self.swarm_running:
             return
@@ -1136,24 +1396,30 @@ RRE: {(metrics.get('rre') or 0.0):.4f}
         self.swarm_stopping = False
 
         # Read parameters
-        iterations = self._to_int(self.query_one("#swarm-iter", Input).value, 30)
+        iterations = self._to_int(
+            self.query_one("#swarm-iter", Input).value, 30
+        )
         mode = self.query_one("#swarm-mode", Input).value
         backend = self.query_one("#swarm-backend", Input).value
         engine = self.query_one("#swarm-engine", Input).value
         provider = self.query_one("#swarm-provider", Input).value
         model = self.query_one("#swarm-model", Input).value
-        reasoning_effort = self.query_one("#swarm-reasoning-effort", Input).value
+        reasoning_effort = self.query_one(
+            "#swarm-reasoning-effort", Input
+        ).value
         base_url = self.query_one("#swarm-base-url", Input).value
         embed = self.query_one("#swarm-embed", Input).value
         market_mode = self.query_one("#swarm-market-mode", Input).value
         market_profile = self.query_one("#swarm-market-profile", Input).value
         market_profiles = self.query_one("#swarm-market-profiles", Input).value
         local_data_path = self.query_one("#swarm-local-data-path", Input).value
-        local_data_layout = self.query_one("#swarm-local-data-layout", Input).value
+        local_data_layout = self.query_one(
+            "#swarm-local-data-layout", Input
+        ).value
         start = self.query_one("#swarm-start", Input).value
         end = self.query_one("#swarm-end", Input).value
         parallel = self.query_one("#swarm-parallel", Checkbox).value
-        
+
         roles_text = self.query_one("#swarm-roles", TextArea).text
         roles = [r.strip() for r in roles_text.split("\n") if r.strip()]
 
@@ -1188,42 +1454,67 @@ RRE: {(metrics.get('rre') or 0.0):.4f}
         self._ensure_swarm_api_base_url()
         if self.swarm_api_base_url != before_api_base_url:
             self._append_swarm_log_lines(
-                [f"[bold yellow]Auto-detected Swarm API: {self.swarm_api_base_url}[/bold yellow]"]
+                [
+                    f"[bold yellow]Auto-detected Swarm API: {self.swarm_api_base_url}[/bold yellow]"
+                ]
             )
-        self._append_swarm_log_lines(["[bold blue]Submitting Swarm request to API...[/bold blue]"])
+        self._append_swarm_log_lines(
+            ["[bold blue]Submitting Swarm request to API...[/bold blue]"]
+        )
         try:
-            resp = await self._swarm_api_request("POST", "/api/swarm/runs", payload=payload)
+            resp = await self._swarm_api_request(
+                "POST", "/api/swarm/runs", payload=payload
+            )
             self.swarm_run_id = resp.get("run_id")
         except Exception as exc:
-            self._append_swarm_log_lines([f"[bold red]Failed to start Swarm: {exc}[/bold red]"])
+            self._append_swarm_log_lines(
+                [f"[bold red]Failed to start Swarm: {exc}[/bold red]"]
+            )
             self._finish_swarm()
             return
 
         if not self.swarm_run_id:
-            self._append_swarm_log_lines(["[bold red]No run_id returned from API.[/bold red]"])
+            self._append_swarm_log_lines(
+                ["[bold red]No run_id returned from API.[/bold red]"]
+            )
             self._finish_swarm()
             return
 
         self.swarm_log_offset = 0
-        self.swarm_poll_task = asyncio.create_task(self._poll_swarm_run(self.swarm_run_id))
+        self.swarm_poll_task = asyncio.create_task(
+            self._poll_swarm_run(self.swarm_run_id)
+        )
 
     async def _poll_swarm_run(self, run_id: str) -> None:
-        self._append_swarm_log_lines([f"[bold green]Swarm run started: {run_id}[/bold green]"])
+        self._append_swarm_log_lines(
+            [f"[bold green]Swarm run started: {run_id}[/bold green]"]
+        )
         last_status = None
         try:
             while self.swarm_running and self.swarm_run_id == run_id:
                 logs = await self._swarm_api_request(
                     "GET",
                     f"/api/swarm/runs/{run_id}/logs",
-                    params={"offset": self.swarm_log_offset, "limit": self.swarm_log_batch},
+                    params={
+                        "offset": self.swarm_log_offset,
+                        "limit": self.swarm_log_batch,
+                    },
                 )
                 items = logs.get("items") if isinstance(logs, dict) else []
                 if not isinstance(items, list):
                     items = []
                 if items:
-                    self.swarm_log_offset = int(logs.get("next_offset", self.swarm_log_offset + len(items)))
-                    self._append_swarm_log_lines([self._format_swarm_log_line(item) for item in items])
-                status_info = await self._swarm_api_request("GET", f"/api/swarm/runs/{run_id}")
+                    self.swarm_log_offset = int(
+                        logs.get(
+                            "next_offset", self.swarm_log_offset + len(items)
+                        )
+                    )
+                    self._append_swarm_log_lines(
+                        [self._format_swarm_log_line(item) for item in items]
+                    )
+                status_info = await self._swarm_api_request(
+                    "GET", f"/api/swarm/runs/{run_id}"
+                )
                 status = status_info.get("status")
                 if status and status != last_status:
                     self._append_swarm_log_lines(
@@ -1232,23 +1523,36 @@ RRE: {(metrics.get('rre') or 0.0):.4f}
                     last_status = status
                 if status in {"completed", "failed", "stopped"}:
                     if status == "completed":
-                        self._append_swarm_log_lines(["[bold green]Swarm completed.[/bold green]"])
                         self._append_swarm_log_lines(
-                            [f"[bold blue]Result summary: factors={status_info.get('result_counts', {}).get('factor_count', 0)} "
-                             f"strategies={status_info.get('result_counts', {}).get('strategy_count', 0)}[/bold blue]"]
+                            ["[bold green]Swarm completed.[/bold green]"]
+                        )
+                        self._append_swarm_log_lines(
+                            [
+                                f"[bold blue]Result summary: factors={status_info.get('result_counts', {}).get('factor_count', 0)} "
+                                f"strategies={status_info.get('result_counts', {}).get('strategy_count', 0)}[/bold blue]"
+                            ]
                         )
                         self.load_factors()
                     elif status == "failed":
-                        reason = status_info.get("failure_reason") or "Unknown failure"
-                        self._append_swarm_log_lines([f"[bold red]Swarm failed: {reason}[/bold red]"])
+                        reason = (
+                            status_info.get("failure_reason")
+                            or "Unknown failure"
+                        )
+                        self._append_swarm_log_lines(
+                            [f"[bold red]Swarm failed: {reason}[/bold red]"]
+                        )
                     else:
-                        self._append_swarm_log_lines(["[bold yellow]Swarm stopped.[/bold yellow]"])
+                        self._append_swarm_log_lines(
+                            ["[bold yellow]Swarm stopped.[/bold yellow]"]
+                        )
                     break
                 await asyncio.sleep(self.swarm_poll_interval)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            self._append_swarm_log_lines([f"[bold red]Swarm status/log polling failed: {exc}[/bold red]"])
+            self._append_swarm_log_lines(
+                [f"[bold red]Swarm status/log polling failed: {exc}[/bold red]"]
+            )
         finally:
             self._finish_swarm(from_poll_task=True)
 
@@ -1257,7 +1561,9 @@ RRE: {(metrics.get('rre') or 0.0):.4f}
             return
         if self.swarm_stopping:
             self._append_swarm_log_lines(
-                ["[bold yellow]Stop already requested; continuing to poll until terminal status.[/bold yellow]"]
+                [
+                    "[bold yellow]Stop already requested; continuing to poll until terminal status.[/bold yellow]"
+                ]
             )
             return
 
@@ -1272,15 +1578,23 @@ RRE: {(metrics.get('rre') or 0.0):.4f}
         except Exception:
             pass
         self._append_swarm_log_lines(
-            ["[bold yellow]Stopping Swarm. Keeping polling active until the API reports completed, failed, or stopped.[/bold yellow]"]
+            [
+                "[bold yellow]Stopping Swarm. Keeping polling active until the API reports completed, failed, or stopped.[/bold yellow]"
+            ]
         )
         try:
-            await self._swarm_api_request("POST", f"/api/swarm/runs/{self.swarm_run_id}/stop")
+            await self._swarm_api_request(
+                "POST", f"/api/swarm/runs/{self.swarm_run_id}/stop"
+            )
             self._append_swarm_log_lines(
-                ["[bold yellow]Stop request accepted; waiting for terminal status...[/bold yellow]"]
+                [
+                    "[bold yellow]Stop request accepted; waiting for terminal status...[/bold yellow]"
+                ]
             )
         except Exception as exc:
-            self._append_swarm_log_lines([f"[bold red]Stop request failed: {exc}[/bold red]"])
+            self._append_swarm_log_lines(
+                [f"[bold red]Stop request failed: {exc}[/bold red]"]
+            )
             self.swarm_stopping = False
             try:
                 btn_stop = self.query_one("#btn-swarm-stop", Button)
@@ -1310,19 +1624,31 @@ RRE: {(metrics.get('rre') or 0.0):.4f}
     async def _quit_after_optional_stop(self) -> None:
         if self.swarm_running:
             self._append_swarm_log_lines(
-                ["[bold yellow]Quit requested: sending stop request, then exiting without waiting for terminal status.[/bold yellow]"]
+                [
+                    "[bold yellow]Quit requested: sending stop request, then exiting without waiting for terminal status.[/bold yellow]"
+                ]
             )
             if self.swarm_run_id and not self.swarm_stopping:
                 try:
-                    await self._swarm_api_request("POST", f"/api/swarm/runs/{self.swarm_run_id}/stop")
-                    self._append_swarm_log_lines(["[bold yellow]Stop request sent before quit.[/bold yellow]"])
+                    await self._swarm_api_request(
+                        "POST", f"/api/swarm/runs/{self.swarm_run_id}/stop"
+                    )
+                    self._append_swarm_log_lines(
+                        [
+                            "[bold yellow]Stop request sent before quit.[/bold yellow]"
+                        ]
+                    )
                 except Exception as exc:
                     self._append_swarm_log_lines(
-                        [f"[bold red]Stop before quit failed: {exc}. Exiting anyway.[/bold red]"]
+                        [
+                            f"[bold red]Stop before quit failed: {exc}. Exiting anyway.[/bold red]"
+                        ]
                     )
             elif self.swarm_stopping:
                 self._append_swarm_log_lines(
-                    ["[bold yellow]Stop was already pending. Exiting without another stop request.[/bold yellow]"]
+                    [
+                        "[bold yellow]Stop was already pending. Exiting without another stop request.[/bold yellow]"
+                    ]
                 )
             self._finish_swarm()
         self.exit()

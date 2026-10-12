@@ -102,7 +102,9 @@ def test_stock_cross_sectional_aliases_get_count_defaults():
         counts={},
     )
 
-    config = candidate_to_strategy_config(candidate, _state(market_profile="cn_stock"))
+    config = candidate_to_strategy_config(
+        candidate, _state(market_profile="cn_stock")
+    )
 
     assert config["strategy_mode"] == "cross_sectional"
     assert config["direction"] == "long_only"

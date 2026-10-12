@@ -52,7 +52,9 @@ def test_wiki_retrieve_retries_transient_503(tmp_path, monkeypatch):
                 raise RuntimeError("Error code: 503 in query.")
             return {
                 "documents": [["# Retry Factor\n\nfactor content"]],
-                "metadatas": [[{"title": "Retry Factor", "type": "experiment_card"}]],
+                "metadatas": [
+                    [{"title": "Retry Factor", "type": "experiment_card"}]
+                ],
             }
 
     monkeypatch.setattr(wiki_module.time, "sleep", lambda _seconds: None)

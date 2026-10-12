@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
+import sys
 
 import pandas as pd
 
@@ -11,9 +11,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from aiminer.core.local_data import load_local_ohlcv
-from aiminer.core.local_data import ohlcv_quality_report, validate_ohlcv_quality
-
+from aiminer.core.local_data import (
+    load_local_ohlcv,
+    ohlcv_quality_report,
+    validate_ohlcv_quality,
+)
 
 CONTRACT_REQUIRED_COLUMNS = {
     "datetime",
@@ -54,8 +56,14 @@ def validate_contract_file(path: Path) -> dict[str, object]:
     dt = pd.to_datetime(df["datetime"], errors="coerce")
     _assert(dt.notna().all(), f"{path} has invalid datetime values")
     _assert(dt.is_monotonic_increasing, f"{path} datetime is not ascending")
-    _assert(df["datetime"].nunique() == len(df), f"{path} has duplicate datetime rows")
-    _assert(df["instrument"].astype(str).nunique() == 1, f"{path} contains multiple instruments")
+    _assert(
+        df["datetime"].nunique() == len(df),
+        f"{path} has duplicate datetime rows",
+    )
+    _assert(
+        df["instrument"].astype(str).nunique() == 1,
+        f"{path} contains multiple instruments",
+    )
     validate_ohlcv_quality(df, source=str(path))
     quality = ohlcv_quality_report(df)
     return {
@@ -75,10 +83,22 @@ def validate_dominant_file(path: Path, underlying: str) -> dict[str, object]:
     dt = pd.to_datetime(df["datetime"], errors="coerce")
     _assert(dt.notna().all(), f"{path} has invalid datetime values")
     _assert(dt.is_monotonic_increasing, f"{path} datetime is not ascending")
-    _assert(df["datetime"].nunique() == len(df), f"{path} has duplicate datetime rows")
-    _assert(df["instrument"].astype(str).nunique() == 1, f"{path} contains multiple instruments")
-    _assert(str(df["instrument"].iloc[0]) == underlying, f"{path} instrument is not {underlying}")
-    _assert(df["dominant_contract"].astype(str).str.startswith(underlying).all(), f"{path} has wrong dominant contract prefix")
+    _assert(
+        df["datetime"].nunique() == len(df),
+        f"{path} has duplicate datetime rows",
+    )
+    _assert(
+        df["instrument"].astype(str).nunique() == 1,
+        f"{path} contains multiple instruments",
+    )
+    _assert(
+        str(df["instrument"].iloc[0]) == underlying,
+        f"{path} instrument is not {underlying}",
+    )
+    _assert(
+        df["dominant_contract"].astype(str).str.startswith(underlying).all(),
+        f"{path} has wrong dominant contract prefix",
+    )
     validate_ohlcv_quality(df, source=str(path))
     quality = ohlcv_quality_report(df)
     return {
@@ -97,12 +117,30 @@ def validate_local_loader(contracts_dir: Path) -> dict[str, object]:
         market_profile="futures",
         layout="instrument_files",
     )
-    _assert(df.index.names == ["datetime", "instrument"], "load_local_ohlcv index names mismatch")
+    _assert(
+        df.index.names == ["datetime", "instrument"],
+        "load_local_ohlcv index names mismatch",
+    )
     _assert(len(df) > 0, "load_local_ohlcv returned empty dataframe")
-    for column in ("open", "high", "low", "close", "volume", "vwap", "total_turnover", "market", "asset_class"):
-        _assert(column in df.columns, f"load_local_ohlcv missing column: {column}")
+    for column in (
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "vwap",
+        "total_turnover",
+        "market",
+        "asset_class",
+    ):
+        _assert(
+            column in df.columns, f"load_local_ohlcv missing column: {column}"
+        )
     quality = ohlcv_quality_report(df.reset_index())
-    _assert(quality["invalid_rows"] == 0, f"load_local_ohlcv returned invalid OHLCV rows: {quality}")
+    _assert(
+        quality["invalid_rows"] == 0,
+        f"load_local_ohlcv returned invalid OHLCV rows: {quality}",
+    )
     return {
         "rows": len(df),
         "instruments": int(df.index.get_level_values("instrument").nunique()),
@@ -132,7 +170,11 @@ def _dominant_underlyings_for_frequency(
     manifest_payload: dict[str, object],
     frequency: str,
 ) -> tuple[list[str], dict[str, str]]:
-    runs = [run for run in (manifest_payload.get("runs") or []) if isinstance(run, dict)]
+    runs = [
+        run
+        for run in (manifest_payload.get("runs") or [])
+        if isinstance(run, dict)
+    ]
     requested: list[str] = []
     for run in reversed(runs):
         results = [
@@ -141,12 +183,17 @@ def _dominant_underlyings_for_frequency(
             if item.get("frequency") == frequency
         ]
         if results:
-            requested = [str(item.get("underlying")).upper() for item in results]
+            requested = [
+                str(item.get("underlying")).upper() for item in results
+            ]
             break
     if not requested:
         last_request = manifest_payload.get("last_request")
         if isinstance(last_request, dict):
-            requested = [str(item).upper() for item in (last_request.get("underlyings") or [])]
+            requested = [
+                str(item).upper()
+                for item in (last_request.get("underlyings") or [])
+            ]
     requested = requested or list(DEFAULT_UNDERLYINGS)
 
     statuses: dict[str, str] = {}
@@ -183,17 +230,24 @@ def run_suite(root: Path, *, check_1m: bool) -> dict[str, object]:
     contract_files_1d = sorted(contracts_1d.glob("*.parquet"))
     _assert(contract_files_1d, f"No parquet files found in {contracts_1d}")
     summaries["contracts_1d_count"] = len(contract_files_1d)
-    summaries["contracts_1d_files"] = _validate_all_contract_files(contract_files_1d)
+    summaries["contracts_1d_files"] = _validate_all_contract_files(
+        contract_files_1d
+    )
     summaries["contracts_1d_sample"] = summaries["contracts_1d_files"][0]
 
     dominant_summaries = {}
     dominant_underlyings_1d, skipped_1d = _dominant_underlyings_for_frequency(
         root, manifest_payload=manifest_payload, frequency="1d"
     )
-    _assert(dominant_underlyings_1d, f"No dominant 1d files expected/found in {dominant_1d}")
+    _assert(
+        dominant_underlyings_1d,
+        f"No dominant 1d files expected/found in {dominant_1d}",
+    )
     for underlying in dominant_underlyings_1d:
         path = dominant_1d / f"{underlying}.parquet"
-        dominant_summaries[underlying] = validate_dominant_file(path, underlying)
+        dominant_summaries[underlying] = validate_dominant_file(
+            path, underlying
+        )
     summaries["dominant_1d"] = dominant_summaries
     summaries["dominant_1d_skipped"] = skipped_1d
     summaries["local_loader_1d"] = validate_local_loader(contracts_1d)
@@ -206,16 +260,25 @@ def run_suite(root: Path, *, check_1m: bool) -> dict[str, object]:
         contract_files_1m = sorted(contracts_1m.glob("*.parquet"))
         _assert(contract_files_1m, f"No parquet files found in {contracts_1m}")
         summaries["contracts_1m_count"] = len(contract_files_1m)
-        summaries["contracts_1m_files"] = _validate_all_contract_files(contract_files_1m)
+        summaries["contracts_1m_files"] = _validate_all_contract_files(
+            contract_files_1m
+        )
         summaries["contracts_1m_sample"] = summaries["contracts_1m_files"][0]
         dominant_1m_summaries = {}
-        dominant_underlyings_1m, skipped_1m = _dominant_underlyings_for_frequency(
-            root, manifest_payload=manifest_payload, frequency="1m"
+        dominant_underlyings_1m, skipped_1m = (
+            _dominant_underlyings_for_frequency(
+                root, manifest_payload=manifest_payload, frequency="1m"
+            )
         )
-        _assert(dominant_underlyings_1m, f"No dominant 1m files expected/found in {dominant_1m}")
+        _assert(
+            dominant_underlyings_1m,
+            f"No dominant 1m files expected/found in {dominant_1m}",
+        )
         for underlying in dominant_underlyings_1m:
             path = dominant_1m / f"{underlying}.parquet"
-            dominant_1m_summaries[underlying] = validate_dominant_file(path, underlying)
+            dominant_1m_summaries[underlying] = validate_dominant_file(
+                path, underlying
+            )
         summaries["dominant_1m"] = dominant_1m_summaries
         summaries["dominant_1m_skipped"] = skipped_1m
 
@@ -226,9 +289,15 @@ def run_suite(root: Path, *, check_1m: bool) -> dict[str, object]:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Validate downloaded local futures parquet data.")
+    parser = argparse.ArgumentParser(
+        description="Validate downloaded local futures parquet data."
+    )
     parser.add_argument("--root", default="data/local_futures")
-    parser.add_argument("--skip-1m", action="store_true", help="Only validate 1d contracts and dominant files.")
+    parser.add_argument(
+        "--skip-1m",
+        action="store_true",
+        help="Only validate 1d contracts and dominant files.",
+    )
     return parser
 
 

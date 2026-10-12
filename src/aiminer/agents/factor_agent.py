@@ -1,12 +1,15 @@
 # --- Imports & Constants ---
 
 from __future__ import annotations
-from typing import Dict, Any
-from langchain_core.prompts import ChatPromptTemplate
+
 import json
 import re
+from typing import Any, Dict
+
+from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
 from pydantic import ValidationError
+
 from aiminer.app_workflow.state import AlphaMinerState
 from aiminer.core.llm import get_llm
 from aiminer.schemas.messages import FormalizationOutput, ImplementationOutput
@@ -17,7 +20,7 @@ class FactorAgent:
     FactorAgent translates the market hypothesis into executable code (Formalization and Implementation).
     """
 
-# --- Operator Whitelist & Signatures ---
+    # --- Operator Whitelist & Signatures ---
 
     # Verified Whitelist of supported Qlib operators in our Matrix Engine (rq_eval.py)
     QLIB_OPERATORS = {
@@ -97,9 +100,16 @@ class FactorAgent:
     # so when --mode qlib is selected they must be removed from the prompt and
     # rejected by the validator (otherwise eval_agent silently falls back to
     # simulated metrics).
-    _MATRIX_ENGINE_ONLY_OPS = frozenset({
-        "CSRank", "CSZScore", "GroupNeutral", "Winsorize", "Percentile", "Scale",
-    })
+    _MATRIX_ENGINE_ONLY_OPS = frozenset(
+        {
+            "CSRank",
+            "CSZScore",
+            "GroupNeutral",
+            "Winsorize",
+            "Percentile",
+            "Scale",
+        }
+    )
 
     # Verified Whitelist of supported data fields
     QLIB_FIELDS = {"$close", "$open", "$high", "$low", "$volume", "$vwap"}
@@ -171,7 +181,7 @@ Logic / conditional:
             reasoning_effort=reasoning_effort,
         )  # Lower temperature for strictness
 
-# --- JSON Parsing & Sanitization ---
+    # --- JSON Parsing & Sanitization ---
 
     @staticmethod
     def _strip_markdown_json(text: str) -> str:
@@ -267,7 +277,9 @@ Logic / conditional:
                     out.append(next_ch)
                     i += 2
                     continue
-                if next_ch == "u" and re.match(r"u[0-9a-fA-F]{4}", text[i + 1 : i + 6]):
+                if next_ch == "u" and re.match(
+                    r"u[0-9a-fA-F]{4}", text[i + 1 : i + 6]
+                ):
                     out.append(text[i : i + 6])
                     i += 6
                     continue
@@ -301,20 +313,27 @@ Logic / conditional:
             i += 1
         return "".join(out)
 
-# --- Expression Validation & Repair ---
+    # --- Expression Validation & Repair ---
 
-    def _validate_qlib_expression(self, expr: str, evaluation_mode: str = "ricequant") -> tuple:
+    def _validate_qlib_expression(
+        self, expr: str, evaluation_mode: str = "ricequant"
+    ) -> tuple:
         import ast
 
         if not expr or not expr.strip():
             return False, "Expression is empty."
 
         forbidden_ops = (
-            self._MATRIX_ENGINE_ONLY_OPS if evaluation_mode == "qlib" else frozenset()
+            self._MATRIX_ENGINE_ONLY_OPS
+            if evaluation_mode == "qlib"
+            else frozenset()
         )
 
         if "Cannot be expressed" in expr or "whitelist" in expr:
-            return False, "LLM returned a refusal/explanation instead of a formula."
+            return (
+                False,
+                "LLM returned a refusal/explanation instead of a formula.",
+            )
 
         # Check balanced parentheses
         depth = 0
@@ -329,7 +348,10 @@ Logic / conditional:
             return False, f"Unbalanced parentheses: {depth} unclosed '('."
 
         if "$" not in expr:
-            return False, "Expression contains no Qlib field references (e.g., $close)."
+            return (
+                False,
+                "Expression contains no Qlib field references (e.g., $close).",
+            )
 
         # Strict field validation: all $xxx must be in QLIB_FIELDS
         all_fields = re.findall(r"\$\w+", expr)
@@ -400,12 +422,34 @@ Logic / conditional:
             "Min",
             "Count",
         }
-        ternary_ops = {"Corr", "Correlation", "Cov", "Ts_Percentile", "If", "Clip"}
+        ternary_ops = {
+            "Corr",
+            "Correlation",
+            "Cov",
+            "Ts_Percentile",
+            "If",
+            "Clip",
+        }
         # Operators that accept exactly 1 data argument (plus optional scalars)
         unary_ops = {
-            "Rank", "CSRank", "CSZScore", "GroupNeutral", "Winsorize",
-            "Percentile", "Scale", "Abs", "Log", "Sign", "Sqrt", "Exp",
-            "Neg", "Negate", "Inv", "Not", "Ceil", "Floor",
+            "Rank",
+            "CSRank",
+            "CSZScore",
+            "GroupNeutral",
+            "Winsorize",
+            "Percentile",
+            "Scale",
+            "Abs",
+            "Log",
+            "Sign",
+            "Sqrt",
+            "Exp",
+            "Neg",
+            "Negate",
+            "Inv",
+            "Not",
+            "Ceil",
+            "Floor",
         }
 
         # qlib mode: Rank is a time-series rolling operator that requires N
@@ -414,17 +458,43 @@ Logic / conditional:
             unary_ops.discard("Rank")
 
         exact_one_arg_ops = {
-            "CSZScore", "GroupNeutral", "Percentile", "Abs", "Log", "Sign",
-            "Sqrt", "Exp", "Neg", "Negate", "Inv", "Not", "Ceil", "Floor",
+            "CSZScore",
+            "GroupNeutral",
+            "Percentile",
+            "Abs",
+            "Log",
+            "Sign",
+            "Sqrt",
+            "Exp",
+            "Neg",
+            "Negate",
+            "Inv",
+            "Not",
+            "Ceil",
+            "Floor",
         }
         rolling_window_ops = {
-            "Mean", "Std", "Med", "Median", "EMA", "WMA", "Ref", "Sum",
-            "Delta", "Ts_Rank", "Ts_Max", "Ts_Min", "Ts_ArgMax",
-            "Ts_ArgMin", "Count",
+            "Mean",
+            "Std",
+            "Med",
+            "Median",
+            "EMA",
+            "WMA",
+            "Ref",
+            "Sum",
+            "Delta",
+            "Ts_Rank",
+            "Ts_Max",
+            "Ts_Min",
+            "Ts_ArgMax",
+            "Ts_ArgMin",
+            "Count",
         }
 
         def constant_number(node: ast.AST):
-            if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            if isinstance(node, ast.Constant) and isinstance(
+                node.value, (int, float)
+            ):
                 return node.value
             if (
                 isinstance(node, ast.UnaryOp)
@@ -435,7 +505,9 @@ Logic / conditional:
                 return -node.operand.value
             return None
 
-        def is_integer_window(node: ast.AST, *, allow_zero: bool = False) -> bool:
+        def is_integer_window(
+            node: ast.AST, *, allow_zero: bool = False
+        ) -> bool:
             value = constant_number(node)
             if value is None or int(value) != value:
                 return False
@@ -508,7 +580,9 @@ Logic / conditional:
                         "Max",
                         "Min",
                     }
-                    if op in exact_two_arg_ops and (len(node.args) != 2 or node.keywords):
+                    if op in exact_two_arg_ops and (
+                        len(node.args) != 2 or node.keywords
+                    ):
                         return (
                             False,
                             f"Operator '{op}' takes exactly 2 positional arguments, but got {arg_count}.",
@@ -575,7 +649,11 @@ Logic / conditional:
                             )
 
                     # Tautology check: Div/Sub with identical operands → constant factor
-                    if op in {"Div", "Divi", "Divide", "Sub", "Subtract", "Minus"} and len(node.args) >= 2:
+                    if (
+                        op
+                        in {"Div", "Divi", "Divide", "Sub", "Subtract", "Minus"}
+                        and len(node.args) >= 2
+                    ):
                         if ast.dump(node.args[0]) == ast.dump(node.args[1]):
                             return (
                                 False,
@@ -583,7 +661,10 @@ Logic / conditional:
                             )
 
                     # Self-correlation check: Corr(a, a, n) or Cov(a, a, n)
-                    if op in {"Corr", "Correlation", "Cov"} and len(node.args) >= 2:
+                    if (
+                        op in {"Corr", "Correlation", "Cov"}
+                        and len(node.args) >= 2
+                    ):
                         if ast.dump(node.args[0]) == ast.dump(node.args[1]):
                             return (
                                 False,
@@ -596,7 +677,9 @@ Logic / conditional:
                         n_val = None
                         if isinstance(n_arg, ast.Constant):
                             n_val = n_arg.value
-                        elif isinstance(n_arg, ast.UnaryOp) and isinstance(n_arg.op, ast.USub):
+                        elif isinstance(n_arg, ast.UnaryOp) and isinstance(
+                            n_arg.op, ast.USub
+                        ):
                             if isinstance(n_arg.operand, ast.Constant):
                                 n_val = -n_arg.operand.value
                         if n_val is not None and n_val < 0:
@@ -664,7 +747,9 @@ Logic / conditional:
         return cls._repair_trailing_extra_parentheses(text)
 
     @staticmethod
-    def _repair_common_arity_issues(expr: str, evaluation_mode: str = "ricequant") -> str:
+    def _repair_common_arity_issues(
+        expr: str, evaluation_mode: str = "ricequant"
+    ) -> str:
         """Normalize common LLM arity mistakes before strict validation."""
         import ast
 
@@ -689,7 +774,9 @@ Logic / conditional:
         changed = False
 
         def constant_number(node: ast.AST):
-            if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            if isinstance(node, ast.Constant) and isinstance(
+                node.value, (int, float)
+            ):
                 return node.value
             if (
                 isinstance(node, ast.UnaryOp)
@@ -700,7 +787,9 @@ Logic / conditional:
                 return -node.operand.value
             return None
 
-        def is_integer_window(node: ast.AST, *, allow_zero: bool = False) -> bool:
+        def is_integer_window(
+            node: ast.AST, *, allow_zero: bool = False
+        ) -> bool:
             value = constant_number(node)
             if value is None or int(value) != value:
                 return False
@@ -736,19 +825,35 @@ Logic / conditional:
                     op = "Median"
                     node.func.id = op
 
-                if not node.keywords and op == "If" and len(node.args) in {1, 2}:
+                if (
+                    not node.keywords
+                    and op == "If"
+                    and len(node.args) in {1, 2}
+                ):
                     changed = True
                     fallback = ast.Constant(value=0)
                     if len(node.args) == 1:
-                        node.args = [node.args[0], ast.Constant(value=1), fallback]
+                        node.args = [
+                            node.args[0],
+                            ast.Constant(value=1),
+                            fallback,
+                        ]
                     else:
                         node.args = [node.args[0], node.args[1], fallback]
                     return node
 
-                if not node.keywords and op in {"Sub", "Subtract", "Minus"} and len(node.args) == 1:
+                if (
+                    not node.keywords
+                    and op in {"Sub", "Subtract", "Minus"}
+                    and len(node.args) == 1
+                ):
                     changed = True
                     return ast.copy_location(
-                        ast.Call(func=ast.Name(id="Neg", ctx=ast.Load()), args=node.args, keywords=[]),
+                        ast.Call(
+                            func=ast.Name(id="Neg", ctx=ast.Load()),
+                            args=node.args,
+                            keywords=[],
+                        ),
                         node,
                     )
 
@@ -762,7 +867,8 @@ Logic / conditional:
 
                 if (
                     not node.keywords
-                    and op in {
+                    and op
+                    in {
                         "Add",
                         "Plus",
                         "Mul",
@@ -811,7 +917,11 @@ Logic / conditional:
                     node.args[1] = ast.Constant(value=default_window_by_op[op])
                     return node
 
-                if not node.keywords and op in {"Corr", "Correlation", "Cov"} and len(node.args) == 2:
+                if (
+                    not node.keywords
+                    and op in {"Corr", "Correlation", "Cov"}
+                    and len(node.args) == 2
+                ):
                     changed = True
                     node.args.append(ast.Constant(value=20))
                     return node
@@ -853,7 +963,14 @@ Logic / conditional:
                 if (
                     evaluation_mode != "qlib"
                     and not node.keywords
-                    and op in {"Rank", "CSRank", "CSZScore", "GroupNeutral", "Percentile"}
+                    and op
+                    in {
+                        "Rank",
+                        "CSRank",
+                        "CSZScore",
+                        "GroupNeutral",
+                        "Percentile",
+                    }
                     and len(node.args) > 1
                 ):
                     changed = True
@@ -867,11 +984,15 @@ Logic / conditional:
 
         ast.fix_missing_locations(repaired_tree)
         repaired = ast.unparse(repaired_tree)
-        for safe_name, original in sorted(field_names.items(), key=lambda item: len(item[0]), reverse=True):
-            repaired = re.sub(rf"\b{re.escape(safe_name)}\b", original, repaired)
+        for safe_name, original in sorted(
+            field_names.items(), key=lambda item: len(item[0]), reverse=True
+        ):
+            repaired = re.sub(
+                rf"\b{re.escape(safe_name)}\b", original, repaired
+            )
         return repaired
 
-# --- FactorAgent Entry Point (__call__) ---
+    # --- FactorAgent Entry Point (__call__) ---
 
     def __call__(self, state: AlphaMinerState) -> Dict[str, Any]:
         hypothesis_desc = state.get("hypothesis_description", "")
@@ -917,7 +1038,9 @@ Logic / conditional:
                         f"[FactorAgent] Retrying formalization JSON parse "
                         f"({form_retry}/{max_form_retries}): {form_error}"
                     )
-                logger.info("[FactorAgent] LLM is formalizing the hypothesis into math...")
+                logger.info(
+                    "[FactorAgent] LLM is formalizing the hypothesis into math..."
+                )
                 raw_form_response = form_chain.invoke(
                     {"hypothesis": hypothesis_desc, "rationale": rationale}
                 )
@@ -942,7 +1065,9 @@ Logic / conditional:
                     "messages": [f"[FactorAgent] Error: {form_error}"],
                 }
 
-            logger.info(f"[FactorAgent] Formalized Math: {form_result.math_formula}")
+            logger.info(
+                f"[FactorAgent] Formalized Math: {form_result.math_formula}"
+            )
 
             # 2. Implementation with Self-Correction Retry Loop
             max_retries = 2
@@ -1028,8 +1153,12 @@ Logic / conditional:
                     # unbounded token growth and prevent LangChain template variable misinterpretation.
                     # Escape any literal braces in dynamic values so LangChain's PromptTemplate
                     # does not try to interpolate them as template variables.
-                    safe_code = code_expression.replace("{", "{{").replace("}", "}}")
-                    safe_feedback = error_feedback.replace("{", "{{").replace("}", "}}")
+                    safe_code = code_expression.replace("{", "{{").replace(
+                        "}", "}}"
+                    )
+                    safe_feedback = error_feedback.replace("{", "{{").replace(
+                        "}", "}}"
+                    )
                     messages = messages[:2] + [
                         (
                             "assistant",
@@ -1091,14 +1220,16 @@ Logic / conditional:
                     try:
                         from aiminer.core.alphaeval.rq_eval import RiceQuantEval
 
-                        is_mock_ok, mock_msg = RiceQuantEval.dry_run(code_expression)
+                        is_mock_ok, mock_msg = RiceQuantEval.dry_run(
+                            code_expression
+                        )
                         if not is_mock_ok:
                             is_valid = False
-                            validation_msg = (
-                                f"Runtime Error during Mock Execution: {mock_msg}"
-                            )
+                            validation_msg = f"Runtime Error during Mock Execution: {mock_msg}"
                     except Exception as dry_e:
-                        logger.warning(f"Dry run could not be performed: {dry_e}")
+                        logger.warning(
+                            f"Dry run could not be performed: {dry_e}"
+                        )
 
                 if is_valid:
                     is_valid_syntax = True

@@ -1,13 +1,13 @@
 /** Token → request headers. Empty token attaches nothing. */
 
 export function getBearerlessToken(value) {
-  return String(value ?? "")
-    .replace(/^Bearer\s+/i, "")
+  return String(value ?? '')
+    .replace(/^Bearer\s+/i, '')
     .trim();
 }
 
 export function buildAuthHeaders(token) {
-  const trimmed = String(token ?? "").trim();
+  const trimmed = String(token ?? '').trim();
   if (!trimmed) {
     return {};
   }
@@ -17,6 +17,6 @@ export function buildAuthHeaders(token) {
   }
   return {
     Authorization: /^Bearer\s+/i.test(trimmed) ? trimmed : `Bearer ${apiKey}`,
-    "X-API-Key": apiKey,
+    'X-API-Key': apiKey,
   };
 }

@@ -1,6 +1,6 @@
+from pathlib import Path
 import tempfile
 import unittest
-from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -14,7 +14,12 @@ class TestLocalDataLoader(unittest.TestCase):
             path = Path(tmpdir) / "panel.csv"
             pd.DataFrame(
                 {
-                    "datetime": ["2024-01-01", "2024-01-01", "2024-01-02", "2024-01-02"],
+                    "datetime": [
+                        "2024-01-01",
+                        "2024-01-01",
+                        "2024-01-02",
+                        "2024-01-02",
+                    ],
                     "instrument": ["A", "B", "A", "B"],
                     "open": [1, 2, 1.1, 2.1],
                     "high": [1.2, 2.2, 1.3, 2.3],
@@ -42,8 +47,12 @@ class TestLocalDataLoader(unittest.TestCase):
                         "volume": [100, 110],
                     }
                 ).to_parquet(root / f"{instrument}.parquet", index=False)
-            df = load_local_ohlcv(root, market_profile="us_stock", layout="instrument_files")
-            instruments = sorted(df.index.get_level_values("instrument").unique().tolist())
+            df = load_local_ohlcv(
+                root, market_profile="us_stock", layout="instrument_files"
+            )
+            instruments = sorted(
+                df.index.get_level_values("instrument").unique().tolist()
+            )
             self.assertEqual(instruments, ["A", "B"])
 
     def test_panel_directory_concatenates_all_panel_shards(self):
@@ -62,8 +71,12 @@ class TestLocalDataLoader(unittest.TestCase):
                     }
                 ).to_csv(root / f"{shard}.csv", index=False)
 
-            df = load_local_ohlcv(root, market_profile="cn_stock", layout="panel")
-            instruments = sorted(df.index.get_level_values("instrument").unique().tolist())
+            df = load_local_ohlcv(
+                root, market_profile="cn_stock", layout="panel"
+            )
+            instruments = sorted(
+                df.index.get_level_values("instrument").unique().tolist()
+            )
 
             self.assertEqual(instruments, ["A", "B"])
 
@@ -87,7 +100,9 @@ class TestLocalDataLoader(unittest.TestCase):
 
             self.assertEqual(len(df), 2)
             self.assertEqual(
-                sorted(df.index.get_level_values("instrument").unique().tolist()),
+                sorted(
+                    df.index.get_level_values("instrument").unique().tolist()
+                ),
                 ["A"],
             )
 

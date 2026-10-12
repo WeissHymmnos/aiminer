@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
-import uuid
 from pathlib import Path
+import sqlite3
 from typing import Any
+import uuid
+
 
 def _serialize_returns(returns: Any) -> dict[str, Any]:
     if returns is None or not hasattr(returns, "items"):
@@ -81,7 +82,9 @@ def load_alpha_pool_rows(db_path: str | Path) -> list[dict[str, Any]]:
     with sqlite3.connect(path) as conn:
         conn.row_factory = sqlite3.Row
         try:
-            rows = conn.execute("SELECT * FROM alpha_pool ORDER BY timestamp DESC").fetchall()
+            rows = conn.execute(
+                "SELECT * FROM alpha_pool ORDER BY timestamp DESC"
+            ).fetchall()
         except sqlite3.OperationalError:
             return []
     records: list[dict[str, Any]] = []
@@ -101,7 +104,9 @@ def load_alpha_pool_rows(db_path: str | Path) -> list[dict[str, Any]]:
     return records
 
 
-def write_alpha_pool_json_backup(db_path: str | Path, results_path: str | Path) -> None:
+def write_alpha_pool_json_backup(
+    db_path: str | Path, results_path: str | Path
+) -> None:
     output_path = Path(results_path) / "alpha_pool.json"
     records = load_alpha_pool_rows(db_path)
     _atomic_write_json(output_path, records)
@@ -158,18 +163,26 @@ def persist_alpha_pool_rows(
                     factor.get("role"),
                     factor.get("hypothesis"),
                     factor.get("code"),
-                    metrics.get("information_coefficient", factor.get("perf_metric", 0.0)),
+                    metrics.get(
+                        "information_coefficient",
+                        factor.get("perf_metric", 0.0),
+                    ),
                     metrics.get("rank_ic", 0.0),
                     report_path,
                     json.dumps(metrics, ensure_ascii=False),
-                    json.dumps(_serialize_returns(returns_dict), ensure_ascii=False)
+                    json.dumps(
+                        _serialize_returns(returns_dict), ensure_ascii=False
+                    )
                     if not isinstance(returns_dict, dict)
                     else json.dumps(returns_dict, ensure_ascii=False),
                     int(bool(factor.get("is_effective"))),
                     factor.get("perf_metric"),
                     factor.get("selection_score"),
                     factor.get("best_strategy_id"),
-                    json.dumps(factor.get("best_strategy_metrics") or {}, ensure_ascii=False),
+                    json.dumps(
+                        factor.get("best_strategy_metrics") or {},
+                        ensure_ascii=False,
+                    ),
                     factor.get("execution_style"),
                     factor.get("run_id", run_id),
                     factor.get("agent_id"),

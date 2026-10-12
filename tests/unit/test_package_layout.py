@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -15,10 +15,7 @@ def test_aiminer_package_is_importable():
 
 
 def test_core_submodules_are_importable():
-    from aiminer.core import settings
-    from aiminer.core import evaluator_factory
-    from aiminer.core import interfaces
-    from aiminer.core import constants
+    from aiminer.core import constants, evaluator_factory, interfaces, settings
 
     assert hasattr(settings, "AiminerSettings")
     assert hasattr(evaluator_factory, "build_evaluator")
@@ -28,10 +25,12 @@ def test_core_submodules_are_importable():
 
 
 def test_agent_submodules_are_importable():
-    from aiminer.agents import idea_agent
-    from aiminer.agents import factor_agent
-    from aiminer.agents import eval_agent
-    from aiminer.agents import strategy_agent
+    from aiminer.agents import (
+        eval_agent,
+        factor_agent,
+        idea_agent,
+        strategy_agent,
+    )
 
     assert hasattr(idea_agent, "IdeaAgent")
     assert hasattr(factor_agent, "FactorAgent")
@@ -40,8 +39,7 @@ def test_agent_submodules_are_importable():
 
 
 def test_workflow_submodules_are_importable():
-    from aiminer.app_workflow import graph
-    from aiminer.app_workflow import state
+    from aiminer.app_workflow import graph, state
 
     assert hasattr(graph, "build_workflow")
     assert hasattr(state, "AlphaMinerState")
@@ -55,11 +53,7 @@ def test_schemas_are_importable():
 
 
 def test_entry_point_modules_are_importable():
-    from aiminer import manager
-    from aiminer import main
-    from aiminer import api
-    from aiminer import tui
-    from aiminer import sub_agent
+    from aiminer import api, main, manager, sub_agent, tui
 
     assert hasattr(manager, "main")
     assert hasattr(main, "main")
@@ -76,8 +70,8 @@ def test_manager_argparse_does_not_run_without_args():
 
 
 def test_manager_argparse_accepts_minimal_args():
-    from aiminer.manager import main as manager_main
     from aiminer.manager import PortfolioManager
+    from aiminer.manager import main as manager_main
 
     with patch.object(PortfolioManager, "run_swarm") as mock_run:
         with patch("multiprocessing.set_start_method"):
@@ -115,8 +109,8 @@ def test_tui_app_class_exists():
 
 
 def test_sub_agent_uses_injected_settings():
-    from aiminer.sub_agent import AlphaResearcher
     from aiminer.core.settings import AiminerSettings
+    from aiminer.sub_agent import AlphaResearcher
 
     settings = AiminerSettings(max_iterations=2, evaluation_mode="ricequant")
     agent = AlphaResearcher(
@@ -156,9 +150,9 @@ def test_rag_module_uses_injected_settings():
 
 
 def test_evaluator_factory_return_annotated_with_backtest_backend():
-    from aiminer.core.evaluator_factory import build_evaluator
-
     import inspect
+
+    from aiminer.core.evaluator_factory import build_evaluator
 
     sig = inspect.signature(build_evaluator)
     assert sig.return_annotation == "BacktestBackend"
@@ -171,7 +165,7 @@ def test_pyproject_src_layout_is_configured():
 
     text = pyproject.read_text(encoding="utf-8")
     assert 'name = "aiminer"' in text
-    assert '[project.scripts]' in text
+    assert "[project.scripts]" in text
     assert 'aiminer = "aiminer.main:main"' in text
     assert 'aiminer-manager = "aiminer.manager:main"' in text
     assert 'aiminer-tui = "aiminer.tui:main"' in text

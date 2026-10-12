@@ -3,7 +3,11 @@ import sqlite3
 import pandas as pd
 
 from aiminer.core import manual_runner
-from aiminer.core.strategy import _normalize_positions, _rebalance_mask, persist_strategy_result
+from aiminer.core.strategy import (
+    _normalize_positions,
+    _rebalance_mask,
+    persist_strategy_result,
+)
 
 
 class _FakeStrategyEvaluator:
@@ -64,11 +68,16 @@ def test_rebalance_mask_marks_first_day_of_week_and_month_only():
     assert monthly == [True, False, True, False, False]
 
 
-def test_strategy_persistence_keeps_run_scoped_rows_for_same_cache_key(tmp_path):
+def test_strategy_persistence_keeps_run_scoped_rows_for_same_cache_key(
+    tmp_path,
+):
     db_path = tmp_path / "alpha_miner.db"
     base_payload = {
         "run_type": "strategy_backtest",
-        "strategy_config": {"strategy_mode": "cross_sectional", "signal_source": "expression"},
+        "strategy_config": {
+            "strategy_mode": "cross_sectional",
+            "signal_source": "expression",
+        },
         "expression": "rank(close)",
         "metrics": {"sharpe": 1.0},
         "daily_returns": {"2024-01-01": 0.01},
@@ -113,7 +122,9 @@ def test_strategy_persistence_keeps_run_scoped_rows_for_same_cache_key(tmp_path)
     ]
 
 
-def test_manual_strategy_cache_materializes_run_scoped_strategy_ids(monkeypatch, tmp_path):
+def test_manual_strategy_cache_materializes_run_scoped_strategy_ids(
+    monkeypatch, tmp_path
+):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
         manual_runner,
@@ -126,7 +137,9 @@ def test_manual_strategy_cache_materializes_run_scoped_strategy_ids(monkeypatch,
         build_calls.append(factor_expressions[0])
         return _FakeStrategyEvaluator(factor_expressions[0])
 
-    monkeypatch.setattr("aiminer.core.evaluator_factory.build_evaluator", _build_evaluator)
+    monkeypatch.setattr(
+        "aiminer.core.evaluator_factory.build_evaluator", _build_evaluator
+    )
     config = {
         "label": "cache-test",
         "strategy_mode": "time_series",

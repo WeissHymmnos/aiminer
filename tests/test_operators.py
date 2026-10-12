@@ -1,13 +1,14 @@
 import unittest
-import pandas as pd
-import numpy as np
 
+import numpy as np
+import pandas as pd
 import pytest
 
-pytest.importorskip("rqdatac", reason="RiceQuant evaluator imports the optional rqdatac client")
+pytest.importorskip(
+    "rqdatac", reason="RiceQuant evaluator imports the optional rqdatac client"
+)
 
 from aiminer.core.alphaeval.rq_eval import RiceQuantEval
-
 
 pytestmark = pytest.mark.external
 

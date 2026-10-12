@@ -1,6 +1,7 @@
 import os
-import rqdatac as rq
+
 from dotenv import load_dotenv
+import rqdatac as rq
 
 load_dotenv()
 

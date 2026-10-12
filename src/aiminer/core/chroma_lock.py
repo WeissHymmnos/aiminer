@@ -1,7 +1,7 @@
-import os
-import time
 from contextlib import contextmanager
+import os
 from pathlib import Path
+import time
 
 from loguru import logger
 
@@ -16,7 +16,9 @@ def chroma_process_lock(action: str = "operation"):
     """
     import fcntl
 
-    lock_path = Path(os.getenv("AIMINER_CHROMA_LOCK_PATH", "data/chroma_global.lock"))
+    lock_path = Path(
+        os.getenv("AIMINER_CHROMA_LOCK_PATH", "data/chroma_global.lock")
+    )
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     start = time.monotonic()
     with lock_path.open("a+") as lock_file:

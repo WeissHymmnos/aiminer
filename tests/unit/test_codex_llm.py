@@ -1,8 +1,8 @@
 import stat
 import textwrap
 
-import pytest
 from langchain_core.messages import HumanMessage, SystemMessage
+import pytest
 
 from aiminer.core.codex_llm import CodexChatModel, is_codex_available
 from aiminer.core.llm import get_llm
@@ -13,15 +13,16 @@ def _fake_codex(tmp_path, body: str) -> str:
     script.write_text(
         "#!/usr/bin/env python3\n"
         "import sys\n"
-        "from pathlib import Path\n"
-        + textwrap.dedent(body),
+        "from pathlib import Path\n" + textwrap.dedent(body),
         encoding="utf-8",
     )
     script.chmod(script.stat().st_mode | stat.S_IXUSR)
     return str(script)
 
 
-def test_codex_chat_model_invokes_codex_exec_with_read_only_ephemeral(tmp_path, monkeypatch):
+def test_codex_chat_model_invokes_codex_exec_with_read_only_ephemeral(
+    tmp_path, monkeypatch
+):
     calls_path = tmp_path / "calls.txt"
     fake = _fake_codex(
         tmp_path,
@@ -82,7 +83,9 @@ def test_codex_chat_model_applies_stop_strings(tmp_path, monkeypatch):
     assert response.content == "alpha "
 
 
-def test_codex_chat_model_reads_reasoning_effort_from_env(tmp_path, monkeypatch):
+def test_codex_chat_model_reads_reasoning_effort_from_env(
+    tmp_path, monkeypatch
+):
     fake = _fake_codex(
         tmp_path,
         """
@@ -155,7 +158,9 @@ def test_get_llm_returns_codex_chat_model(tmp_path, monkeypatch):
     )
     monkeypatch.setenv("AIMINER_CODEX_CMD", fake)
 
-    llm = get_llm(provider="codex", model_name="gpt-5.4-test", base_url="http://ignored")
+    llm = get_llm(
+        provider="codex", model_name="gpt-5.4-test", base_url="http://ignored"
+    )
 
     assert isinstance(llm, CodexChatModel)
     assert llm.model_name == "gpt-5.4-test"
@@ -193,7 +198,9 @@ def test_get_llm_configures_mimo_provider(monkeypatch):
     assert isinstance(llm, FakeChatOpenAI)
     assert captured["model"] == "mimo-v2.5-pro"
     assert captured["api_key"] == "mimo-test-key"
-    assert str(captured["base_url"]) == "https://token-plan-cn.xiaomimimo.com/v1"
+    assert (
+        str(captured["base_url"]) == "https://token-plan-cn.xiaomimimo.com/v1"
+    )
 
 
 def test_get_llm_configures_mimo_v25_alias(monkeypatch):

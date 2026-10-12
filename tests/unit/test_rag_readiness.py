@@ -1,6 +1,10 @@
 import sqlite3
 
-from aiminer.core.rag import RAGModule, chroma_sqlite_summary, resolve_embedding_model_tag
+from aiminer.core.rag import (
+    RAGModule,
+    chroma_sqlite_summary,
+    resolve_embedding_model_tag,
+)
 
 
 def test_chroma_sqlite_summary_reports_empty_store_not_ready(tmp_path):
@@ -12,7 +16,9 @@ def test_chroma_sqlite_summary_reports_empty_store_not_ready(tmp_path):
         conn.execute("CREATE TABLE embeddings (id TEXT)")
         conn.commit()
 
-    payload = chroma_sqlite_summary(str(tmp_path / "chroma_db"), "kimi_embedding-2")
+    payload = chroma_sqlite_summary(
+        str(tmp_path / "chroma_db"), "kimi_embedding-2"
+    )
 
     assert payload["exists"] is True
     assert payload["collections"] == 0

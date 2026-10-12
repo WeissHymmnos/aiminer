@@ -1,6 +1,7 @@
-import akshare as ak
-import os
 from datetime import datetime
+import os
+
+import akshare as ak
 
 
 def generate_market_metadata():
@@ -32,14 +33,18 @@ def generate_market_metadata():
 
         with open(file_path, "w", encoding="utf-8") as f:
             f.write("# Market Data Metadata\n\n")
-            f.write(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+            f.write(
+                f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            )
 
             f.write("## Overview\n")
             f.write(
                 "This document provides metadata about the financial market data available for factor mining.\n"
             )
             f.write(f"- **Total A-Share Equities:** {total_stocks}\n")
-            f.write(f"- **Total Futures Contracts (Active):** {total_futures}\n\n")
+            f.write(
+                f"- **Total Futures Contracts (Active):** {total_futures}\n\n"
+            )
 
             f.write("## A-Share Daily Bar Data Structure\n")
             f.write(

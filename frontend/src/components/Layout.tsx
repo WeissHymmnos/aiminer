@@ -1,18 +1,18 @@
-import { useState, type MouseEvent } from "react";
-import { NavLink, Outlet } from "react-router-dom";
-import { getStoredToken, setStoredToken } from "../lib/api";
+import { useState, type MouseEvent } from 'react';
+import { NavLink, Outlet } from 'react-router-dom';
+import { getStoredToken, setStoredToken } from '../lib/api';
 
 const links = [
-  { to: "/", label: "Catalog" },
-  { to: "/review", label: "Review" },
-  { to: "/reproduce", label: "Reproduce" },
-  { to: "/agent", label: "Agent" },
-  { to: "/runs", label: "Swarm Runs" },
-  { to: "/pool", label: "Alpha Pool" },
-  { to: "/manual", label: "Manual Backtest" },
-  { to: "/strategy", label: "Strategy Backtest" },
-  { to: "/wiki", label: "Wiki" },
-  { to: "/ops", label: "Operations" },
+  { to: '/', label: 'Catalog' },
+  { to: '/review', label: 'Review' },
+  { to: '/reproduce', label: 'Reproduce' },
+  { to: '/agent', label: 'Agent' },
+  { to: '/runs', label: 'Swarm Runs' },
+  { to: '/pool', label: 'Alpha Pool' },
+  { to: '/manual', label: 'Manual Backtest' },
+  { to: '/strategy', label: 'Strategy Backtest' },
+  { to: '/wiki', label: 'Wiki' },
+  { to: '/ops', label: 'Operations' },
 ];
 
 type WikiDirtyWindow = Window & {
@@ -53,14 +53,18 @@ export function Layout() {
             }}
           />
         </label>
-        <p className="muted">Stored in localStorage and sent as `Authorization` plus `X-API-Key`.</p>
+        <p className="muted">
+          Stored in localStorage and sent as `Authorization` plus `X-API-Key`.
+        </p>
         <nav className="nav">
           {links.map((link) => (
             <NavLink
               key={link.to}
               to={link.to}
-              end={link.to === "/"}
-              className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
+              end={link.to === '/'}
+              className={({ isActive }) =>
+                isActive ? 'nav-link active' : 'nav-link'
+              }
               onClick={confirmNavigation}
             >
               {link.label}

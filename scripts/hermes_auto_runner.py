@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta
 import json
 import os
+from pathlib import Path
 import re
 import signal
 import subprocess
 import sys
 import time
-from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
-
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE_DIR = ROOT / "results" / "hermes_runner"
@@ -22,7 +21,9 @@ BEIJING_TZ = ZoneInfo("Asia/Shanghai")
 DEFAULT_PYTHON = os.getenv("AIMINER_PYTHON")
 if not DEFAULT_PYTHON:
     conda_python = Path("/home/wh/.conda/envs/aiminer/bin/python")
-    DEFAULT_PYTHON = str(conda_python) if conda_python.exists() else sys.executable
+    DEFAULT_PYTHON = (
+        str(conda_python) if conda_python.exists() else sys.executable
+    )
 
 DEFAULT_COMMAND = [
     DEFAULT_PYTHON,
@@ -220,7 +221,9 @@ def start(mode: str, extra_args: list[str] | None = None) -> int:
         }
     )
     _save_state(state)
-    print(f"started pid={process.pid} mode={mode} log={log_path.relative_to(ROOT)}")
+    print(
+        f"started pid={process.pid} mode={mode} log={log_path.relative_to(ROOT)}"
+    )
     return 0
 
 
@@ -299,26 +302,40 @@ def status() -> int:
 def _dump_errors_to_daily_log():
     """Append new errors/warnings from latest log to results/error_log_YYYYMMDD.txt"""
     try:
-        log_files = sorted(LOG_DIR.glob("hermes_*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
+        log_files = sorted(
+            LOG_DIR.glob("hermes_*.log"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
         if not log_files:
             return
         log = log_files[0]
-        errlog = ROOT / "results" / f"error_log_{datetime.now(BEIJING_TZ).strftime('%Y%m%d')}.txt"
+        errlog = (
+            ROOT
+            / "results"
+            / f"error_log_{datetime.now(BEIJING_TZ).strftime('%Y%m%d')}.txt"
+        )
         errlog.parent.mkdir(parents=True, exist_ok=True)
 
         existing = set()
         if errlog.exists():
             existing = set(errlog.read_text().splitlines())
 
-        pattern = re.compile(r'error|traceback|warning|failed|timeout', re.IGNORECASE)
+        pattern = re.compile(
+            r"error|traceback|warning|failed|timeout", re.IGNORECASE
+        )
         new_lines = []
-        for line in log.read_text(errors='replace').splitlines():
-            if pattern.search(line) and 'INFO' not in line and line not in existing:
+        for line in log.read_text(errors="replace").splitlines():
+            if (
+                pattern.search(line)
+                and "INFO" not in line
+                and line not in existing
+            ):
                 new_lines.append(line)
 
         if new_lines:
-            with open(errlog, 'a') as f:
-                f.write('\n'.join(new_lines) + '\n')
+            with open(errlog, "a") as f:
+                f.write("\n".join(new_lines) + "\n")
     except Exception:
         pass
 
@@ -370,7 +387,9 @@ def main() -> int:
     start_parser = subparsers.add_parser("start", help="Start a manual run now")
     start_parser.add_argument("manager_args", nargs=argparse.REMAINDER)
 
-    resume_parser = subparsers.add_parser("resume", help="Clear pause and start now")
+    resume_parser = subparsers.add_parser(
+        "resume", help="Clear pause and start now"
+    )
     resume_parser.add_argument("manager_args", nargs=argparse.REMAINDER)
 
     stop_parser = subparsers.add_parser("stop", help="Stop current run")
@@ -380,7 +399,9 @@ def main() -> int:
     subparsers.add_parser("status", help="Print JSON status")
     subparsers.add_parser("tick", help="Run one schedule check")
 
-    watch_parser = subparsers.add_parser("watch", help="Run schedule loop forever")
+    watch_parser = subparsers.add_parser(
+        "watch", help="Run schedule loop forever"
+    )
     watch_parser.add_argument("--interval-seconds", type=int, default=60)
 
     args = parser.parse_args()

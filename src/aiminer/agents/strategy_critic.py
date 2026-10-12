@@ -10,14 +10,15 @@ from aiminer.agents.strategy_agent import (
     candidate_to_strategy_config,
     normalize_strategy_candidate_payload,
 )
+from aiminer.app_workflow.state import AlphaMinerState
 from aiminer.core.llm import get_llm
 from aiminer.schemas.messages import RefinementProposalOutput
-from aiminer.app_workflow.state import AlphaMinerState
-
 
 # Convergence guards. These live as module constants so they can be tweaked or
 # patched in tests without rebuilding a critic instance.
-DEFAULT_IMPROVEMENT_EPSILON = 0.05  # require >5% selection_score lift to keep iterating
+DEFAULT_IMPROVEMENT_EPSILON = (
+    0.05  # require >5% selection_score lift to keep iterating
+)
 DEFAULT_MAX_REFINEMENT_ROUNDS = 2
 MAX_PROPOSALS_PER_ROUND = 2
 
@@ -100,11 +101,19 @@ class StrategyCritic:
     def __call__(self, state: AlphaMinerState) -> Dict[str, Any]:
         round_idx = int(state.get("strategy_refinement_round", 0))
         max_rounds = int(
-            state.get("max_strategy_refinement_rounds", DEFAULT_MAX_REFINEMENT_ROUNDS)
+            state.get(
+                "max_strategy_refinement_rounds", DEFAULT_MAX_REFINEMENT_ROUNDS
+            )
         )
-        history: List[Dict[str, Any]] = list(state.get("strategy_refinement_history") or [])
+        history: List[Dict[str, Any]] = list(
+            state.get("strategy_refinement_history") or []
+        )
         best_result = state.get("best_strategy_result") or {}
-        best_metrics = best_result.get("metrics") or state.get("best_strategy_metrics") or {}
+        best_metrics = (
+            best_result.get("metrics")
+            or state.get("best_strategy_metrics")
+            or {}
+        )
         current_score = float(state.get("selection_score", 0.0) or 0.0)
 
         # Stop conditions checked before paying for an LLM call ----------------
@@ -113,22 +122,36 @@ class StrategyCritic:
             logger.info(
                 f"[StrategyCritic] No meaningful lift ({previous_score} → {current_score}); halting refinement."
             )
-            return self._halt(state, history, current_score, reason="no_improvement")
+            return self._halt(
+                state, history, current_score, reason="no_improvement"
+            )
         if round_idx >= max_rounds:
-            logger.info(f"[StrategyCritic] Max refinement rounds ({max_rounds}) reached.")
-            return self._halt(state, history, current_score, reason="max_rounds")
+            logger.info(
+                f"[StrategyCritic] Max refinement rounds ({max_rounds}) reached."
+            )
+            return self._halt(
+                state, history, current_score, reason="max_rounds"
+            )
         if not best_result or not best_metrics:
-            logger.info("[StrategyCritic] No best strategy to reflect on; halting.")
+            logger.info(
+                "[StrategyCritic] No best strategy to reflect on; halting."
+            )
             return self._halt(state, history, current_score, reason="no_best")
 
         try:
-            proposal = self._invoke_llm(state, best_result, best_metrics, history)
+            proposal = self._invoke_llm(
+                state, best_result, best_metrics, history
+            )
         except Exception as exc:
-            logger.warning(f"[StrategyCritic] LLM critique failed: {exc}; halting refinement.")
+            logger.warning(
+                f"[StrategyCritic] LLM critique failed: {exc}; halting refinement."
+            )
             return self._halt(state, history, current_score, reason="llm_error")
 
         if not proposal.should_continue or not proposal.proposals:
-            logger.info("[StrategyCritic] Critic chose to stop (should_continue=False or empty).")
+            logger.info(
+                "[StrategyCritic] Critic chose to stop (should_continue=False or empty)."
+            )
             return self._halt(
                 state,
                 history,
@@ -139,7 +162,9 @@ class StrategyCritic:
             )
 
         # Materialize candidates with dedupe vs current best + intra-batch ----
-        current_signature = _config_signature(best_result.get("strategy_config") or {})
+        current_signature = _config_signature(
+            best_result.get("strategy_config") or {}
+        )
         seen_signatures: set[tuple] = {current_signature}
         normalized: List[Dict[str, Any]] = []
         for item in proposal.proposals[:MAX_PROPOSALS_PER_ROUND]:
@@ -163,7 +188,9 @@ class StrategyCritic:
             normalized.append({**payload, "strategy_config": config})
 
         if not normalized:
-            logger.info("[StrategyCritic] All proposals were duplicates or invalid; halting.")
+            logger.info(
+                "[StrategyCritic] All proposals were duplicates or invalid; halting."
+            )
             return self._halt(
                 state,
                 history,
@@ -208,7 +235,9 @@ class StrategyCritic:
             {
                 "round": int(state.get("strategy_refinement_round", 0)),
                 "selection_score": current_score,
-                "best_strategy_id": (state.get("best_strategy_result") or {}).get("strategy_id"),
+                "best_strategy_id": (
+                    state.get("best_strategy_result") or {}
+                ).get("strategy_id"),
                 "halt_reason": reason,
                 "failure_modes": list(failure_modes or []),
                 "rationale": rationale,
@@ -265,14 +294,16 @@ class StrategyCritic:
             "each with: template_name (str), strategy_mode (cross_sectional|time_series), "
             "direction (long_only|long_short|long_flat), selection_rule (top_n|bottom_n|top_bottom_n|threshold), "
             "rebalance_freq (daily|weekly|monthly), "
-            "thresholds (dict e.g. {\"long_threshold\":0.8,\"short_threshold\":0.2}), "
-            "counts (dict e.g. {\"top_n\":100,\"bottom_n\":50}), "
-            "holding_constraints (dict e.g. {\"max_positions\":200}), "
-            "cost_model (dict e.g. {\"commission_bps\":5.0}), rationale (str)), "
+            'thresholds (dict e.g. {"long_threshold":0.8,"short_threshold":0.2}), '
+            'counts (dict e.g. {"top_n":100,"bottom_n":50}), '
+            'holding_constraints (dict e.g. {"max_positions":200}), '
+            'cost_model (dict e.g. {"commission_bps":5.0}), rationale (str)), '
             "should_continue (bool), rationale (str)."
         )
 
         # Invoke the LLM directly — building a ChatPromptTemplate would treat
         # the JSON braces in `user` as template variables.
         raw = self.llm.invoke([("system", system), ("user", user)])
-        return RefinementProposalOutput.model_validate_json(_strip_markdown_json(raw.content))
+        return RefinementProposalOutput.model_validate_json(
+            _strip_markdown_json(raw.content)
+        )

@@ -1,4 +1,5 @@
-from typing import Protocol, Any, Dict, List, Optional, runtime_checkable
+from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+
 
 @runtime_checkable
 class BacktestBackend(Protocol):
@@ -7,6 +8,7 @@ class BacktestBackend(Protocol):
     Matches the usage of RiceQuantEval and LocalDataEval (which extends RiceQuantEval).
     Note: Qlib is not abstracted by this protocol.
     """
+
     ic: float
     rankic: float
     oos_ic: float
@@ -52,6 +54,7 @@ class VectorStore(Protocol):
     Protocol defining the interface for a vector storage collection.
     Matches the usage of chromadb.Collection in RAGModule and LLMWiki.
     """
+
     def count(self) -> int:
         """Return the number of documents in the collection."""
         ...
@@ -61,7 +64,7 @@ class VectorStore(Protocol):
         query_texts: List[str],
         n_results: int = 10,
         where: Optional[Dict[str, Any]] = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> Dict[str, Any]:
         """Query the collection for similar documents."""
         ...
@@ -71,7 +74,7 @@ class VectorStore(Protocol):
         documents: List[str],
         metadatas: List[Dict[str, Any]],
         ids: List[str],
-        **kwargs: Any
+        **kwargs: Any,
     ) -> None:
         """Add documents to the collection."""
         ...
@@ -81,7 +84,7 @@ class VectorStore(Protocol):
         ids: List[str],
         documents: List[str],
         metadatas: List[Dict[str, Any]],
-        **kwargs: Any
+        **kwargs: Any,
     ) -> None:
         """Update or insert documents in the collection."""
         ...
@@ -91,7 +94,7 @@ class VectorStore(Protocol):
         where: Optional[Dict[str, Any]] = None,
         include: Optional[List[str]] = None,
         limit: Optional[int] = None,
-        **kwargs: Any
+        **kwargs: Any,
     ) -> Dict[str, Any]:
         """Get documents from the collection."""
         ...

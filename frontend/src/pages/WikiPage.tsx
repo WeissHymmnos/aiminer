@@ -1,17 +1,22 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import ForceGraph2D from "react-force-graph-2d";
-import { useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { Panel, Group } from "react-resizable-panels";
-import { CodeEditor } from "../components/CodeEditor";
-import { JsonView } from "../components/JsonView";
-import { ResizeHandle } from "../components/ResizeHandle";
-import { SectionCard } from "../components/SectionCard";
-import { api, getErrorMessage } from "../lib/api";
-import type { WikiGraphEdge, WikiGraphNode } from "../types";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
+import ForceGraph2D from 'react-force-graph-2d';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Panel, Group } from 'react-resizable-panels';
+import { CodeEditor } from '../components/CodeEditor';
+import { JsonView } from '../components/JsonView';
+import { ResizeHandle } from '../components/ResizeHandle';
+import { SectionCard } from '../components/SectionCard';
+import { api, getErrorMessage } from '../lib/api';
+import type { WikiGraphEdge, WikiGraphNode } from '../types';
 
-type Mode = "global" | "local";
+type Mode = 'global' | 'local';
 type OperationResult = {
   label: string;
   payload: unknown;
@@ -30,10 +35,10 @@ type WikiDirtyWindow = Window & {
 const WIKI_INDEX_PAGE_SIZE = 50;
 
 function colorForType(type: string) {
-  if (type === "strategy_family") return "#a6da95";
-  if (type === "market_profile") return "#f5a97f";
-  if (type === "technical_ref") return "#8aadf4";
-  return "#c6a0f6";
+  if (type === 'strategy_family') return '#a6da95';
+  if (type === 'market_profile') return '#f5a97f';
+  if (type === 'technical_ref') return '#8aadf4';
+  return '#c6a0f6';
 }
 
 function parseFrontmatter(text: string) {
@@ -43,33 +48,41 @@ function parseFrontmatter(text: string) {
   }
 
   const metadata: Record<string, unknown> = {};
-  for (const rawLine of match[1].split("\n")) {
+  for (const rawLine of match[1].split('\n')) {
     const line = rawLine.trim();
-    if (!line || line.startsWith("#")) {
+    if (!line || line.startsWith('#')) {
       continue;
     }
-    const separatorIndex = line.indexOf(":");
+    const separatorIndex = line.indexOf(':');
     if (separatorIndex === -1) {
       continue;
     }
     const key = line.slice(0, separatorIndex).trim();
     let value: unknown = line.slice(separatorIndex + 1).trim();
 
-    if (typeof value === "string" && ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))) {
+    if (
+      typeof value === 'string' &&
+      ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'")))
+    ) {
       value = value.slice(1, -1);
-    } else if (typeof value === "string" && value.startsWith("[") && value.endsWith("]")) {
+    } else if (
+      typeof value === 'string' &&
+      value.startsWith('[') &&
+      value.endsWith(']')
+    ) {
       value = value
         .slice(1, -1)
-        .split(",")
-        .map((item) => item.trim().replace(/^["']|["']$/g, ""))
+        .split(',')
+        .map((item) => item.trim().replace(/^["']|["']$/g, ''))
         .filter(Boolean);
-    } else if (value === "true") {
+    } else if (value === 'true') {
       value = true;
-    } else if (value === "false") {
+    } else if (value === 'false') {
       value = false;
-    } else if (value === "null" || value === "") {
+    } else if (value === 'null' || value === '') {
       value = null;
-    } else if (typeof value === "string" && !Number.isNaN(Number(value))) {
+    } else if (typeof value === 'string' && !Number.isNaN(Number(value))) {
       value = Number(value);
     }
 
@@ -80,7 +93,7 @@ function parseFrontmatter(text: string) {
 }
 
 function normalizeWikiLinkTarget(value: string) {
-  return value.trim().replace(/\.md$/i, "").replace(/^\/+/, "");
+  return value.trim().replace(/\.md$/i, '').replace(/^\/+/, '');
 }
 
 function splitWikiLinks(value: string) {
@@ -91,19 +104,21 @@ function splitWikiLinks(value: string) {
 
   while ((match = regex.exec(value))) {
     const [raw, inner] = match;
-    const [targetText, labelText] = inner.split("|");
-    const target = normalizeWikiLinkTarget(targetText ?? "");
+    const [targetText, labelText] = inner.split('|');
+    const target = normalizeWikiLinkTarget(targetText ?? '');
     if (!target) {
       continue;
     }
     if (match.index > lastIndex) {
-      nodes.push({ type: "text", value: value.slice(lastIndex, match.index) });
+      nodes.push({ type: 'text', value: value.slice(lastIndex, match.index) });
     }
     nodes.push({
-      type: "link",
+      type: 'link',
       url: `wiki:${encodeURIComponent(target)}`,
       title: null,
-      children: [{ type: "text", value: (labelText ?? target).trim() || target }],
+      children: [
+        { type: 'text', value: (labelText ?? target).trim() || target },
+      ],
     });
     lastIndex = match.index + raw.length;
   }
@@ -112,7 +127,7 @@ function splitWikiLinks(value: string) {
     return null;
   }
   if (lastIndex < value.length) {
-    nodes.push({ type: "text", value: value.slice(lastIndex) });
+    nodes.push({ type: 'text', value: value.slice(lastIndex) });
   }
   return nodes;
 }
@@ -123,7 +138,7 @@ function transformWikiLinks(node: MarkdownNode) {
   }
   const nextChildren: MarkdownNode[] = [];
   for (const child of node.children) {
-    if (child.type === "text" && typeof child.value === "string") {
+    if (child.type === 'text' && typeof child.value === 'string') {
       nextChildren.push(...(splitWikiLinks(child.value) ?? [child]));
       continue;
     }
@@ -140,14 +155,15 @@ function remarkWikiLinks() {
 export function WikiPage() {
   const [indexPage, setIndexPage] = useState(0);
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
-  const [mode, setMode] = useState<Mode>("global");
+  const [mode, setMode] = useState<Mode>('global');
   const [isEditing, setIsEditing] = useState(false);
-  const [draftText, setDraftText] = useState("");
+  const [draftText, setDraftText] = useState('');
   const [loadedSlug, setLoadedSlug] = useState<string | null>(null);
-  const [staleDays, setStaleDays] = useState("30");
+  const [staleDays, setStaleDays] = useState('30');
   const [migrateDryRun, setMigrateDryRun] = useState(true);
-  const [operationResult, setOperationResult] = useState<OperationResult | null>(null);
-  const [errorMessage, setErrorMessage] = useState("");
+  const [operationResult, setOperationResult] =
+    useState<OperationResult | null>(null);
+  const [errorMessage, setErrorMessage] = useState('');
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 420, height: 640 });
   const queryClient = useQueryClient();
@@ -168,26 +184,27 @@ export function WikiPage() {
   }, []);
 
   const index = useQuery({
-    queryKey: ["wiki-index", indexOffset, WIKI_INDEX_PAGE_SIZE],
-    queryFn: () => api.wikiIndex({ offset: indexOffset, limit: WIKI_INDEX_PAGE_SIZE }),
+    queryKey: ['wiki-index', indexOffset, WIKI_INDEX_PAGE_SIZE],
+    queryFn: () =>
+      api.wikiIndex({ offset: indexOffset, limit: WIKI_INDEX_PAGE_SIZE }),
     placeholderData: keepPreviousData,
   });
   const graph = useQuery({
-    queryKey: ["wiki-graph"],
+    queryKey: ['wiki-graph'],
     queryFn: api.wikiGraph,
   });
   const indexItems = index.data?.items ?? [];
   const initialSlug = (indexItems[0]?.slug as string | undefined) ?? null;
   const slug = selectedSlug ?? initialSlug;
   const page = useQuery({
-    queryKey: ["wiki-page", slug],
+    queryKey: ['wiki-page', slug],
     queryFn: () => api.wikiPage(slug!),
     enabled: Boolean(slug),
   });
-  const isDirty = isEditing && draftText !== (page.data ?? "");
+  const isDirty = isEditing && draftText !== (page.data ?? '');
 
   function confirmDiscardChanges() {
-    return !isDirty || window.confirm("Discard unsaved wiki edits?");
+    return !isDirty || window.confirm('Discard unsaved wiki edits?');
   }
 
   function selectWikiSlug(nextSlug: string) {
@@ -196,7 +213,7 @@ export function WikiPage() {
     }
     setSelectedSlug(nextSlug);
     setIsEditing(false);
-    setDraftText("");
+    setDraftText('');
     setLoadedSlug(null);
   }
 
@@ -207,7 +224,7 @@ export function WikiPage() {
     setIndexPage(nextPage);
     if (!selectedSlug) {
       setIsEditing(false);
-      setDraftText("");
+      setDraftText('');
       setLoadedSlug(null);
     }
   }
@@ -228,10 +245,10 @@ export function WikiPage() {
     }
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
-      event.returnValue = "";
+      event.returnValue = '';
     };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isDirty]);
 
   useEffect(() => {
@@ -241,53 +258,67 @@ export function WikiPage() {
       if (targetWindow.__aiminerConfirmWikiDiscard === confirmDiscardChanges) {
         delete targetWindow.__aiminerConfirmWikiDiscard;
       }
-    }
+    };
   });
 
   const saveMutation = useMutation({
-    mutationFn: ({ nextSlug, content }: { nextSlug: string; content: string }) => api.updateWikiPage(nextSlug, content),
+    mutationFn: ({
+      nextSlug,
+      content,
+    }: {
+      nextSlug: string;
+      content: string;
+    }) => api.updateWikiPage(nextSlug, content),
     onSuccess: (payload) => {
-      setErrorMessage("");
+      setErrorMessage('');
       setIsEditing(false);
-      setOperationResult({ label: "Save Result", payload });
-      void queryClient.invalidateQueries({ queryKey: ["wiki-page", slug] });
-      void queryClient.invalidateQueries({ queryKey: ["wiki-index"] });
-      void queryClient.invalidateQueries({ queryKey: ["wiki-graph"] });
+      setOperationResult({ label: 'Save Result', payload });
+      void queryClient.invalidateQueries({ queryKey: ['wiki-page', slug] });
+      void queryClient.invalidateQueries({ queryKey: ['wiki-index'] });
+      void queryClient.invalidateQueries({ queryKey: ['wiki-graph'] });
     },
     onError: (error) => setErrorMessage((error as Error).message),
   });
   const lintMutation = useMutation({
     mutationFn: () => api.wikiLint(Number(staleDays) || 30),
     onSuccess: (payload) => {
-      setErrorMessage("");
-      setOperationResult({ label: "Lint Report", payload });
-      void queryClient.invalidateQueries({ queryKey: ["wiki-index"] });
-      void queryClient.invalidateQueries({ queryKey: ["wiki-graph"] });
+      setErrorMessage('');
+      setOperationResult({ label: 'Lint Report', payload });
+      void queryClient.invalidateQueries({ queryKey: ['wiki-index'] });
+      void queryClient.invalidateQueries({ queryKey: ['wiki-graph'] });
     },
     onError: (error) => setErrorMessage((error as Error).message),
   });
   const migrateMutation = useMutation({
     mutationFn: () => api.wikiMigrate(migrateDryRun),
     onSuccess: (payload) => {
-      setErrorMessage("");
-      setOperationResult({ label: migrateDryRun ? "Migration Dry Run" : "Migration Result", payload });
-      void queryClient.invalidateQueries({ queryKey: ["wiki-index"] });
-      void queryClient.invalidateQueries({ queryKey: ["wiki-graph"] });
-      void queryClient.invalidateQueries({ queryKey: ["wiki-page"] });
+      setErrorMessage('');
+      setOperationResult({
+        label: migrateDryRun ? 'Migration Dry Run' : 'Migration Result',
+        payload,
+      });
+      void queryClient.invalidateQueries({ queryKey: ['wiki-index'] });
+      void queryClient.invalidateQueries({ queryKey: ['wiki-graph'] });
+      void queryClient.invalidateQueries({ queryKey: ['wiki-page'] });
     },
     onError: (error) => setErrorMessage((error as Error).message),
   });
 
-  const parsedPage = useMemo(() => parseFrontmatter(page.data ?? ""), [page.data]);
+  const parsedPage = useMemo(
+    () => parseFrontmatter(page.data ?? ''),
+    [page.data],
+  );
 
   const graphData = useMemo(() => {
     const nodes = graph.data?.nodes ?? [];
     const edges = graph.data?.edges ?? [];
 
     const getId = (value: string | WikiGraphNode) =>
-      typeof value === "object" && value !== null ? value.slug || value.id : value;
+      typeof value === 'object' && value !== null
+        ? value.slug || value.id
+        : value;
 
-    if (mode === "global" || !slug) {
+    if (mode === 'global' || !slug) {
       return { nodes, links: edges };
     }
 
@@ -305,12 +336,19 @@ export function WikiPage() {
 
     return {
       nodes: nodes.filter((node) => allowed.has(node.slug)),
-      links: edges.filter((edge) => allowed.has(getId(edge.source)) && allowed.has(getId(edge.target))),
+      links: edges.filter(
+        (edge) =>
+          allowed.has(getId(edge.source)) && allowed.has(getId(edge.target)),
+      ),
     };
   }, [graph.data, mode, slug]);
 
-  const busy = saveMutation.isPending || lintMutation.isPending || migrateMutation.isPending;
-  const hasNextIndexPage = (index.data?.next_offset ?? 0) < (index.data?.total ?? 0);
+  const busy =
+    saveMutation.isPending ||
+    lintMutation.isPending ||
+    migrateMutation.isPending;
+  const hasNextIndexPage =
+    (index.data?.next_offset ?? 0) < (index.data?.total ?? 0);
 
   return (
     <Group orientation="horizontal" className="panel-container">
@@ -320,21 +358,38 @@ export function WikiPage() {
           className="wiki-index"
           actions={
             <div className="button-group">
-              <button className="button" disabled={busy} onClick={() => lintMutation.mutate()}>
+              <button
+                className="button"
+                disabled={busy}
+                onClick={() => lintMutation.mutate()}
+              >
                 Lint
               </button>
-              <button className="button" disabled={busy} onClick={() => migrateMutation.mutate()}>
+              <button
+                className="button"
+                disabled={busy}
+                onClick={() => migrateMutation.mutate()}
+              >
                 Migrate
               </button>
             </div>
           }
         >
-          {index.isPending && !index.data ? <div className="status-block loading">Loading wiki index...</div> : null}
-          {index.isError ? <div className="status-block error">{getErrorMessage(index.error)}</div> : null}
+          {index.isPending && !index.data ? (
+            <div className="status-block loading">Loading wiki index...</div>
+          ) : null}
+          {index.isError ? (
+            <div className="status-block error">
+              {getErrorMessage(index.error)}
+            </div>
+          ) : null}
           <div className="wiki-toolbar">
             <label className="field">
               Stale Days
-              <input value={staleDays} onChange={(event) => setStaleDays(event.target.value)} />
+              <input
+                value={staleDays}
+                onChange={(event) => setStaleDays(event.target.value)}
+              />
             </label>
             <label className="field-toggle">
               <span>Migrate Dry Run</span>
@@ -356,32 +411,44 @@ export function WikiPage() {
           )}
           <div className="list">
             {indexItems.map((item) => {
-              const itemSlug = String(item.slug ?? "");
+              const itemSlug = String(item.slug ?? '');
               return (
                 <button
                   type="button"
                   key={itemSlug}
-                  className={`list-row button-reset ${slug === itemSlug ? "selected" : ""}`}
+                  className={`list-row button-reset ${slug === itemSlug ? 'selected' : ''}`}
                   onClick={() => selectWikiSlug(itemSlug)}
                 >
                   <div>
                     <strong>{String(item.title ?? itemSlug)}</strong>
-                    <p className="muted">{String(item.type ?? "")}</p>
+                    <p className="muted">{String(item.type ?? '')}</p>
                   </div>
                 </button>
               );
             })}
-            {!index.isPending && !indexItems.length ? <p className="muted">No wiki pages on this page.</p> : null}
+            {!index.isPending && !indexItems.length ? (
+              <p className="muted">No wiki pages on this page.</p>
+            ) : null}
           </div>
           <div className="pagination-bar">
-            <button className="button" disabled={indexPage === 0} onClick={() => setWikiIndexPage((page) => Math.max(0, page - 1))}>
+            <button
+              className="button"
+              disabled={indexPage === 0}
+              onClick={() => setWikiIndexPage((page) => Math.max(0, page - 1))}
+            >
               Prev
             </button>
             <span className="pagination-summary">
               Page {indexPage + 1}
-              {typeof index.data?.total === "number" ? ` · ${index.data.total} pages` : ""}
+              {typeof index.data?.total === 'number'
+                ? ` · ${index.data.total} pages`
+                : ''}
             </span>
-            <button className="button" disabled={!hasNextIndexPage} onClick={() => setWikiIndexPage((page) => page + 1)}>
+            <button
+              className="button"
+              disabled={!hasNextIndexPage}
+              onClick={() => setWikiIndexPage((page) => page + 1)}
+            >
               Next
             </button>
           </div>
@@ -392,7 +459,7 @@ export function WikiPage() {
 
       <Panel id="wiki-content-panel" defaultSize={41} minSize={24}>
         <SectionCard
-          title={slug ? `Wiki · ${slug}` : "Wiki Page"}
+          title={slug ? `Wiki · ${slug}` : 'Wiki Page'}
           className="wiki-body"
           actions={
             slug ? (
@@ -401,7 +468,12 @@ export function WikiPage() {
                   <button
                     className="button"
                     disabled={saveMutation.isPending}
-                    onClick={() => saveMutation.mutate({ nextSlug: slug, content: draftText })}
+                    onClick={() =>
+                      saveMutation.mutate({
+                        nextSlug: slug,
+                        content: draftText,
+                      })
+                    }
                   >
                     Save
                   </button>
@@ -409,7 +481,7 @@ export function WikiPage() {
                     className="button"
                     disabled={saveMutation.isPending}
                     onClick={() => {
-                      setDraftText(page.data ?? "");
+                      setDraftText(page.data ?? '');
                       setIsEditing(false);
                     }}
                   >
@@ -417,49 +489,81 @@ export function WikiPage() {
                   </button>
                 </div>
               ) : (
-                <button className="button" disabled={page.isPending} onClick={() => setIsEditing(true)}>
+                <button
+                  className="button"
+                  disabled={page.isPending}
+                  onClick={() => setIsEditing(true)}
+                >
                   Edit Raw Markdown
                 </button>
               )
             ) : null
           }
         >
-          {page.isError ? <div className="status-block error">{getErrorMessage(page.error)}</div> : null}
+          {page.isError ? (
+            <div className="status-block error">
+              {getErrorMessage(page.error)}
+            </div>
+          ) : null}
           {slug ? (
             isEditing ? (
               <div className="stack">
-                <p className="muted">Editing raw markdown with frontmatter. Save writes back to the wiki vault file directly.</p>
-                <CodeEditor value={draftText} onChange={setDraftText} language="markdown" height="100%" />
+                <p className="muted">
+                  Editing raw markdown with frontmatter. Save writes back to the
+                  wiki vault file directly.
+                </p>
+                <CodeEditor
+                  value={draftText}
+                  onChange={setDraftText}
+                  language="markdown"
+                  height="100%"
+                />
               </div>
             ) : (
               <div className="stack">
-                {page.isPending && !page.data ? <div className="status-block loading">Loading wiki page...</div> : null}
+                {page.isPending && !page.data ? (
+                  <div className="status-block loading">
+                    Loading wiki page...
+                  </div>
+                ) : null}
                 {Object.keys(parsedPage.metadata).length > 0 ? (
                   <div className="wiki-metadata">
                     <div className="metric-grid">
-                      {Object.entries(parsedPage.metadata).map(([key, value]) => {
-                        if (key === "title" || key === "summary") {
-                          return null;
-                        }
-                        return (
-                          <div className="metric" key={key}>
-                            <span>{key}</span>
-                            <strong>{Array.isArray(value) ? value.join(", ") : String(value)}</strong>
-                          </div>
-                        );
-                      })}
+                      {Object.entries(parsedPage.metadata).map(
+                        ([key, value]) => {
+                          if (key === 'title' || key === 'summary') {
+                            return null;
+                          }
+                          return (
+                            <div className="metric" key={key}>
+                              <span>{key}</span>
+                              <strong>
+                                {Array.isArray(value)
+                                  ? value.join(', ')
+                                  : String(value)}
+                              </strong>
+                            </div>
+                          );
+                        },
+                      )}
                     </div>
                   </div>
                 ) : null}
                 <div className="markdown-body">
                   <h1>{String(parsedPage.metadata.title ?? slug)}</h1>
-                  {parsedPage.metadata.summary ? <p className="muted">{String(parsedPage.metadata.summary)}</p> : null}
+                  {parsedPage.metadata.summary ? (
+                    <p className="muted">
+                      {String(parsedPage.metadata.summary)}
+                    </p>
+                  ) : null}
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm, remarkWikiLinks]}
                     components={{
                       a: ({ href, children, ...props }) => {
-                        if (href?.startsWith("wiki:")) {
-                          const nextSlug = decodeURIComponent(href.slice("wiki:".length));
+                        if (href?.startsWith('wiki:')) {
+                          const nextSlug = decodeURIComponent(
+                            href.slice('wiki:'.length),
+                          );
                           return (
                             <button
                               type="button"
@@ -471,7 +575,12 @@ export function WikiPage() {
                           );
                         }
                         return (
-                          <a href={href} target="_blank" rel="noreferrer" {...props}>
+                          <a
+                            href={href}
+                            target="_blank"
+                            rel="noreferrer"
+                            {...props}
+                          >
                             {children}
                           </a>
                         );
@@ -497,17 +606,29 @@ export function WikiPage() {
           className="wiki-graph"
           actions={
             <div className="button-group">
-              <button className={`button ${mode === "global" ? "active" : ""}`} onClick={() => setMode("global")}>
+              <button
+                className={`button ${mode === 'global' ? 'active' : ''}`}
+                onClick={() => setMode('global')}
+              >
                 Global
               </button>
-              <button className={`button ${mode === "local" ? "active" : ""}`} onClick={() => setMode("local")}>
+              <button
+                className={`button ${mode === 'local' ? 'active' : ''}`}
+                onClick={() => setMode('local')}
+              >
                 Local
               </button>
             </div>
           }
         >
-          {graph.isError ? <div className="status-block error">{getErrorMessage(graph.error)}</div> : null}
-          {graph.isPending && !graph.data ? <div className="status-block loading">Loading graph...</div> : null}
+          {graph.isError ? (
+            <div className="status-block error">
+              {getErrorMessage(graph.error)}
+            </div>
+          ) : null}
+          {graph.isPending && !graph.data ? (
+            <div className="status-block loading">Loading graph...</div>
+          ) : null}
           <div className="graph-container" ref={containerRef}>
             <ForceGraph2D
               graphData={graphData}
@@ -527,7 +648,7 @@ export function WikiPage() {
                 ctx.fill();
 
                 if (slug === typedNode.slug) {
-                  ctx.strokeStyle = "#f5a97f";
+                  ctx.strokeStyle = '#f5a97f';
                   ctx.lineWidth = 2 / scale;
                   ctx.stroke();
                 }
@@ -536,13 +657,21 @@ export function WikiPage() {
                   const label = typedNode.title;
                   const fontSize = 11 / scale;
                   ctx.font = `${fontSize}px "IBM Plex Sans", sans-serif`;
-                  ctx.textAlign = "center";
-                  ctx.textBaseline = "middle";
-                  ctx.fillStyle = "rgba(202, 211, 245, 0.7)";
-                  ctx.fillText(label, node.x ?? 0, (node.y ?? 0) + radius + fontSize);
+                  ctx.textAlign = 'center';
+                  ctx.textBaseline = 'middle';
+                  ctx.fillStyle = 'rgba(202, 211, 245, 0.7)';
+                  ctx.fillText(
+                    label,
+                    node.x ?? 0,
+                    (node.y ?? 0) + radius + fontSize,
+                  );
                 }
               }}
-              linkColor={(link) => ((link as WikiGraphEdge).kind === "related" ? "#8aadf4" : "#5b6078")}
+              linkColor={(link) =>
+                (link as WikiGraphEdge).kind === 'related'
+                  ? '#8aadf4'
+                  : '#5b6078'
+              }
               onNodeClick={(node) => {
                 selectWikiSlug((node as WikiGraphNode).slug);
               }}

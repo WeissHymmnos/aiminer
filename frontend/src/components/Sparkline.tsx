@@ -30,14 +30,17 @@ export function Sparkline({ returns, title }: Props) {
   const toY = (p: number) => 95 - ((p - min) / range) * 90;
 
   const linePath = points
-    .map((p, i) => `${i === 0 ? "M" : "L"} ${toX(i).toFixed(2)} ${toY(p).toFixed(2)}`)
-    .join(" ");
+    .map(
+      (p, i) =>
+        `${i === 0 ? 'M' : 'L'} ${toX(i).toFixed(2)} ${toY(p).toFixed(2)}`,
+    )
+    .join(' ');
   const areaPath = `${linePath} L 100 95 L 0 95 Z`;
 
   const final = points[points.length - 1];
   const pct = ((final - 1) * 100).toFixed(2);
   const isUp = final >= 1;
-  const color = isUp ? "var(--ctp-green)" : "var(--ctp-red)";
+  const color = isUp ? 'var(--ctp-green)' : 'var(--ctp-red)';
   const baselineY = toY(1);
 
   return (
@@ -45,11 +48,15 @@ export function Sparkline({ returns, title }: Props) {
       <div className="plot-title">
         <span>{title}</span>
         <span style={{ marginLeft: 8, color, fontWeight: 600 }}>
-          {isUp ? "+" : ""}
+          {isUp ? '+' : ''}
           {pct}%
         </span>
       </div>
-      <svg viewBox="0 0 100 100" className="plot-svg" preserveAspectRatio="none">
+      <svg
+        viewBox="0 0 100 100"
+        className="plot-svg"
+        preserveAspectRatio="none"
+      >
         {/* 基线: 本金不变 (1.0) */}
         {baselineY >= 0 && baselineY <= 100 && (
           <line
@@ -73,7 +80,15 @@ export function Sparkline({ returns, title }: Props) {
           strokeLinejoin="round"
         />
       </svg>
-      <div className="muted" style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8rem", marginTop: 4 }}>
+      <div
+        className="muted"
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          fontSize: '0.8rem',
+          marginTop: 4,
+        }}
+      >
         <span>min {((min - 1) * 100).toFixed(2)}%</span>
         <span>{values.length} days</span>
         <span>max {((max - 1) * 100).toFixed(2)}%</span>

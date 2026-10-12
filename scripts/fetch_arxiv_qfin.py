@@ -1,9 +1,9 @@
-import urllib.request
-import urllib.parse
-import xml.etree.ElementTree as ET
 import os
 import ssl
 import time
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
 
 
 def fetch_arxiv_papers(output_dir="data/rag_docs/academic/arxiv_recent"):
@@ -27,7 +27,8 @@ def fetch_arxiv_papers(output_dir="data/rag_docs/academic/arxiv_recent"):
         # Add a delay and User-Agent to avoid 429 Too Many Requests
         time.sleep(2)
         req = urllib.request.Request(
-            url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            url,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
         )
         response = urllib.request.urlopen(req, context=ctx)
         data = response.read()
@@ -38,7 +39,9 @@ def fetch_arxiv_papers(output_dir="data/rag_docs/academic/arxiv_recent"):
         count = 0
         for entry in root.findall("atom:entry", ns):
             title = entry.find("atom:title", ns).text.replace("\n", " ").strip()
-            summary = entry.find("atom:summary", ns).text.replace("\n", " ").strip()
+            summary = (
+                entry.find("atom:summary", ns).text.replace("\n", " ").strip()
+            )
             published = entry.find("atom:published", ns).text
 
             authors = [
@@ -47,7 +50,9 @@ def fetch_arxiv_papers(output_dir="data/rag_docs/academic/arxiv_recent"):
             ]
             link = entry.find("atom:id", ns).text
 
-            safe_title = "".join([c if c.isalnum() else "_" for c in title])[:80]
+            safe_title = "".join([c if c.isalnum() else "_" for c in title])[
+                :80
+            ]
             filename = os.path.join(output_dir, f"{safe_title}.md")
 
             with open(filename, "w", encoding="utf-8") as f:

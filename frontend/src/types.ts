@@ -8,7 +8,8 @@ export interface Paginated<T> {
 
 export interface SwarmRunSummary {
   run_id: string;
-  status: "starting" | "pending" | "running" | "completed" | "failed" | "stopped";
+  status:
+    'starting' | 'pending' | 'running' | 'completed' | 'failed' | 'stopped';
   is_active: boolean;
   config: Record<string, any>;
   started_at?: string;
@@ -53,7 +54,7 @@ export interface StrategySummary {
   candidate_rank?: number | null;
   selection_score?: number | null;
   is_primary?: boolean | null;
-  strategy_mode: "cross_sectional" | "time_series";
+  strategy_mode: 'cross_sectional' | 'time_series';
   metrics?: {
     sharpe?: number;
     annual_return?: number;
@@ -66,7 +67,7 @@ export interface WikiGraphNode {
   id: string;
   slug: string;
   title: string;
-  type: "factor_card" | "strategy_family" | "market_profile" | "technical_ref";
+  type: 'factor_card' | 'strategy_family' | 'market_profile' | 'technical_ref';
   status: string;
   degree?: number;
   x?: number;
@@ -76,5 +77,5 @@ export interface WikiGraphNode {
 export interface WikiGraphEdge {
   source: string | WikiGraphNode;
   target: string | WikiGraphNode;
-  kind: "related" | "wikilink";
+  kind: 'related' | 'wikilink';
 }

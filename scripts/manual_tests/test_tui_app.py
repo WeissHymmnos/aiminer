@@ -1,5 +1,6 @@
-from aiminer.tui import TUIApp
 import multiprocessing
+
+from aiminer.tui import TUIApp
 
 if __name__ == "__main__":
     multiprocessing.set_start_method("spawn", force=True)

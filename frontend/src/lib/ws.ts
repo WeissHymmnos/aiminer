@@ -1,11 +1,16 @@
-import { useEffect, useState } from "react";
-import { getBearerlessToken, getStoredToken, TOKEN_CHANGED_EVENT, TOKEN_STORAGE_KEY } from "./api";
+import { useEffect, useState } from 'react';
+import {
+  getBearerlessToken,
+  getStoredToken,
+  TOKEN_CHANGED_EVENT,
+  TOKEN_STORAGE_KEY,
+} from './api';
 
 export type SocketEvent = Record<string, unknown>;
-export type SocketStatus = "connecting" | "open" | "closed" | "error";
+export type SocketStatus = 'connecting' | 'open' | 'closed' | 'error';
 
 function trimTrailingSlash(value: string) {
-  return value.replace(/\/+$/, "");
+  return value.replace(/\/+$/, '');
 }
 
 function getSocketOrigin() {
@@ -18,14 +23,14 @@ function getSocketOrigin() {
   if (configuredApiBase) {
     try {
       const apiUrl = new URL(configuredApiBase);
-      apiUrl.protocol = apiUrl.protocol === "https:" ? "wss:" : "ws:";
+      apiUrl.protocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:';
       return apiUrl.origin;
     } catch {
       // Relative API bases should continue to use the current origin.
     }
   }
 
-  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
   return `${protocol}://${window.location.host}`;
 }
 
@@ -33,7 +38,7 @@ function getSocketUrl(token: string) {
   const url = new URL(`${getSocketOrigin()}/ws`);
   const apiKey = getBearerlessToken(token);
   if (apiKey) {
-    url.searchParams.set("token", apiKey);
+    url.searchParams.set('token', apiKey);
   }
   return url.toString();
 }
@@ -54,10 +59,10 @@ function useStoredTokenSnapshot() {
     };
 
     window.addEventListener(TOKEN_CHANGED_EVENT, handleTokenChange);
-    window.addEventListener("storage", handleStorage);
+    window.addEventListener('storage', handleStorage);
     return () => {
       window.removeEventListener(TOKEN_CHANGED_EVENT, handleTokenChange);
-      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener('storage', handleStorage);
     };
   }, []);
 
@@ -67,7 +72,7 @@ function useStoredTokenSnapshot() {
 export function useSocketFeed() {
   const token = useStoredTokenSnapshot();
   const [events, setEvents] = useState<SocketEvent[]>([]);
-  const [status, setStatus] = useState<SocketStatus>("connecting");
+  const [status, setStatus] = useState<SocketStatus>('connecting');
 
   useEffect(() => {
     let active = true;
@@ -80,14 +85,16 @@ export function useSocketFeed() {
     function connect() {
       const url = getSocketUrl(token);
 
-      console.log(`[WebSocket] Connecting to ${url.replace(/([?&]token=)[^&]+/, "$1***")}...`);
+      console.log(
+        `[WebSocket] Connecting to ${url.replace(/([?&]token=)[^&]+/, '$1***')}...`,
+      );
       hadError = false;
-      setStatus("connecting");
-      
+      setStatus('connecting');
+
       socket = new WebSocket(url);
-      
+
       socket.onmessage = (event) => {
-        if (event.data === "pong") return;
+        if (event.data === 'pong') return;
         try {
           const payload = JSON.parse(event.data) as SocketEvent;
           setEvents((previous) => {
@@ -96,35 +103,37 @@ export function useSocketFeed() {
           });
           retry = 1000;
         } catch (e) {
-          console.warn("[WebSocket] Failed to parse message", e);
+          console.warn('[WebSocket] Failed to parse message', e);
         }
       };
 
       socket.onopen = () => {
-        console.log("[WebSocket] Connection established");
-        setStatus("open");
+        console.log('[WebSocket] Connection established');
+        setStatus('open');
         retry = 1000;
         pingTimer = window.setInterval(() => {
           if (socket?.readyState === WebSocket.OPEN) {
-            socket.send("ping");
+            socket.send('ping');
           }
         }, 15000);
       };
 
       socket.onclose = (event) => {
-        setStatus(hadError ? "error" : "closed");
+        setStatus(hadError ? 'error' : 'closed');
         window.clearInterval(pingTimer);
         if (!active) return;
-        
-        console.log(`[WebSocket] Closed (code: ${event.code}). Retrying in ${retry}ms...`);
+
+        console.log(
+          `[WebSocket] Closed (code: ${event.code}). Retrying in ${retry}ms...`,
+        );
         reconnectTimer = window.setTimeout(connect, retry);
         retry = Math.min(retry * 2, 15000);
       };
 
       socket.onerror = (error) => {
-        console.error("[WebSocket] Error occurred", error);
+        console.error('[WebSocket] Error occurred', error);
         hadError = true;
-        setStatus("error");
+        setStatus('error');
         socket?.close();
       };
     }

@@ -77,13 +77,17 @@ def test_main_backtest_metrics_survive_robustness_failure(monkeypatch):
     assert result["ic_abs"] == 0.042
 
 
-def test_eval_backtest_failure_returns_failed_metrics_not_simulated(monkeypatch):
+def test_eval_backtest_failure_returns_failed_metrics_not_simulated(
+    monkeypatch,
+):
     import aiminer.core.evaluator_factory as evaluator_factory
 
     def _raise_runtime_error(**_kwargs):
         raise RuntimeError("factor runtime failure")
 
-    monkeypatch.setattr(evaluator_factory, "build_evaluator", _raise_runtime_error)
+    monkeypatch.setattr(
+        evaluator_factory, "build_evaluator", _raise_runtime_error
+    )
     agent = _agent_without_init()
     agent._state_data_backend = "local"
     agent._state_market_mode = "single"
@@ -107,7 +111,9 @@ def test_eval_agent_skips_backend_for_invalid_factor_syntax():
     agent = _agent_without_init()
 
     def fail_if_called(*_args, **_kwargs):
-        raise AssertionError("invalid syntax must not reach the evaluator backend")
+        raise AssertionError(
+            "invalid syntax must not reach the evaluator backend"
+        )
 
     agent._execute_alphaeval_backtest = fail_if_called
 
@@ -138,9 +144,12 @@ def test_eval_agent_skips_backend_for_invalid_factor_syntax():
 
 
 def test_invalid_factor_still_routes_through_eval_for_failed_metrics():
-    assert route_after_factor(
-        {"code_expression": "Sub(Mul(1, $close)", "is_valid_syntax": False}
-    ) == "eval_agent"
+    assert (
+        route_after_factor(
+            {"code_expression": "Sub(Mul(1, $close)", "is_valid_syntax": False}
+        )
+        == "eval_agent"
+    )
 
 
 def test_evaluation_failure_is_detected_from_state_or_metrics():
@@ -179,7 +188,9 @@ def test_hybrid_knowledge_skips_wiki_update_for_evaluation_failure():
 
 def test_local_data_eval_robustness_does_not_use_ricequant_network(monkeypatch):
     def fail_if_called(*args, **kwargs):
-        raise AssertionError("RiceQuant robustness path should not run for local data")
+        raise AssertionError(
+            "RiceQuant robustness path should not run for local data"
+        )
 
     import aiminer.core.alphaeval.rq_eval as rq_eval
 
@@ -312,7 +323,10 @@ def test_agent_result_accepts_best_snapshot_despite_later_error():
                 "iteration": 6,
                 "hypothesis": "Recovered alpha",
                 "code": "Rank($close)",
-                "metrics": {"information_coefficient": 0.0278, "rank_ic": 0.0257},
+                "metrics": {
+                    "information_coefficient": 0.0278,
+                    "rank_ic": 0.0257,
+                },
                 "returns": {"2024-01-01": 0.01},
                 "is_simulated": False,
             },
@@ -354,7 +368,10 @@ def test_sub_agent_checkpoint_hydrates_resume_state():
 
 
 def test_strategy_stage_failure_is_nonfatal_and_keeps_best_factor_snapshot():
-    assert route_after_strategy({"error": "strategy agent failed"}) == "wiki_update"
+    assert (
+        route_after_strategy({"error": "strategy agent failed"})
+        == "wiki_update"
+    )
 
     state = {
         "iteration": 1,
@@ -369,7 +386,10 @@ def test_strategy_stage_failure_is_nonfatal_and_keeps_best_factor_snapshot():
     }
     update = _merge_strategy_update_into_best_snapshot(
         state,
-        {"strategy_results": [], "strategy_failure_reason": "panel_construction_failed"},
+        {
+            "strategy_results": [],
+            "strategy_failure_reason": "panel_construction_failed",
+        },
     )
 
     assert "error" not in update
