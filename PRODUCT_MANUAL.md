@@ -1,6 +1,6 @@
 # AI Alpha Miner 产品手册
 
-> **双轨产品线**：本项目提供 Python 参考实现（AI Alpha Miner）和 Rust 生产实现（RustMiner，位于 `~/Documents/rustminer`）。两者共享同一套数据格式、SQLite schema 和 JSON 契约，可根据场景选用或并行部署。详见第 12 章。
+> **双轨产品线**：本项目提供 Python 参考实现（AI Alpha Miner）和 Rust 生产实现（RustMiner，位于 `~/Documents/finance/archive/rustminer`）。两者共享同一套数据格式、SQLite schema 和 JSON 契约，可根据场景选用或并行部署。详见第 12 章。
 
 
 ## 1. 产品定位
@@ -610,7 +610,7 @@ RiceQuant 凭证可通过以下环境变量提供：
 
 ### 12.1 概述
 
-RustMiner（`~/Documents/rustminer`）是 AI Alpha Miner 的完整 Rust 重写版本，目标是在保持 Python 版本全部研究能力的同时，提供原生编译性能、单二进制分发和更强的工程可靠性。
+RustMiner（`~/Documents/finance/archive/rustminer`）是 AI Alpha Miner 的完整 Rust 重写版本，目标是在保持 Python 版本全部研究能力的同时，提供原生编译性能、单二进制分发和更强的工程可靠性。
 
 从产品演进角度，RustMiner 不是替代品，而是同一产品线的第二阶段——Python 版本侧重快速迭代和生态兼容，Rust 版本侧重生产部署和长期维护。
 

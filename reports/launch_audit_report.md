@@ -1,7 +1,7 @@
 # 上线前彻底检查报告
 
 审计日期：2026-04-25  
-仓库：`/home/wh/Documents/aiminer`  
+仓库：`/home/wh/Documents/finance/aiminer`  
 分支与提交：`master` / `be0387a`  
 审计方式：主 agent 本地验证 + 8 个专题 subagent 并行审计；未修改业务代码。
 
@@ -65,7 +65,7 @@
 
 | 命令 | 结果 |
 |---|---|
-| `pwd` | 成功，当前目录 `/home/wh/Documents/aiminer` |
+| `pwd` | 成功，当前目录 `/home/wh/Documents/finance/aiminer` |
 | `git status --short` | 初始仅 `?? PRODUCT_MANUAL.md`；测试后出现 `M data/test_db/kimi_embedding-2/chroma.sqlite3` |
 | `ls -la`、`find . -maxdepth 2 -type d`、`rg --files` | 成功，确认项目结构 |
 | `python -m py_compile api.py manager.py core/strategy.py tui.py` | 成功 |

@@ -7,6 +7,7 @@ dependencies:
   - python=3.10
   - pip
   - pip:
+      - -e .[all]
       - langchain>=0.1.0
       - langchain-community
       - langchain-chroma

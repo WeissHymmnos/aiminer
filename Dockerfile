@@ -36,6 +36,8 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel maturin
 
 # Copy locked requirements and install dependencies to a temporary location
 COPY requirements.txt requirements.lock.txt ./
+# Image ships the full swarm stack. Slim 3.12 FinAlpha installs use
+# finaince[reproduction] + reproagent; local conda uses `pip install -e ".[all]"`.
 RUN pip install --no-cache-dir --prefix=/install -r requirements.lock.txt
 
 # Copy and build the Polars Rust plugin

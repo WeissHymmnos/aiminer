@@ -10,6 +10,7 @@ data/wiki_db/
 data/wiki_vault/
 data/rag_docs/macro_news/
 data/local_futures/
+data/cache/
 data/test_db/
 data/*.lock
 results/
@@ -73,3 +74,4 @@ dist_plugins/
 local-dist/
 src-tauri/binaries/
 *.spec.bak
+.sisyphus/

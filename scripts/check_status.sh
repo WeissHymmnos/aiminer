@@ -3,7 +3,7 @@
 # Usage: bash scripts/check_status.sh [log_path]
 # If log_path omitted, uses the latest hermes_*.log
 
-cd /home/wh/Documents/aiminer
+cd /home/wh/Documents/finance/aiminer
 
 main_pid=$(pgrep -f 'python.*manager\.py' | head -1)
 if [ -z "$main_pid" ]; then

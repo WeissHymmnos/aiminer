@@ -16,8 +16,13 @@ AI Alpha Miner 是一款基于 **LangGraph** 和 **主从架构 (Master-Slave)**
 ```bash
 conda env create -f environment.yml
 conda activate aiminer
-pip install -r requirements.txt
+# Heavy stack (LangGraph / qlib / RiceQuant / TUI) is extras, not the slim default:
+pip install -e ".[all]"
 ```
+
+FinAlpha (`finaince`, Python 3.12) is the unified CLI/catalog/eval/review surface.
+Slim 3.12 installs are `reproagent` + `finaince[reproduction]` only; use `aiminer[all]`
+here when you need the full swarm.
 
 ### 启动多 Agent 协作挖掘
 ```bash
