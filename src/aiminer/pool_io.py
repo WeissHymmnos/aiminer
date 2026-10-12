@@ -133,6 +133,11 @@ def persist_alpha_pool_rows(
         for factor in factors:
             factor = dict(factor)
             factor.pop("_normalized_return_series", None)
+            _role = factor.get("role")
+            if _role and (
+                len(str(_role)) > 20 or str(_role).startswith("You are")
+            ):
+                factor["role"] = "遗传交叉"
             if not factor.get("id"):
                 factor["id"] = f"alpha_{uuid.uuid4().hex[:8]}"
             report_path = factor.get("report_path")

@@ -33,9 +33,7 @@ from aiminer.core.strategy import (
     strategy_templates,
 )
 
-# Optional heavy imports: present in the aiminer conda env; absent in the
-# 3.12 finaince env. Names stay on the module so existing tests can
-# monkeypatch them. cull_alpha_pool does not construct these agents.
+# Optional deps: keep names on the module so tests can monkeypatch them.
 try:
     from aiminer.sub_agent import AlphaResearcher
 except ImportError:  # pragma: no cover
@@ -58,6 +56,29 @@ except ImportError:  # pragma: no cover
     init_rq_auth = None  # type: ignore[misc, assignment]
 
 
+CROSSOVER_ROLE = "遗传交叉"
+
+
+def _normalize_role(role: str | None) -> str | None:
+    """Map leftover crossover prompts to 遗传交叉 (len>20 or starts with 'You are')."""
+    if not role:
+        return role
+    text = str(role).strip()
+    if len(text) > 20 or text.startswith("You are"):
+        return CROSSOVER_ROLE
+    return text
+
+
+def _is_local_embedding_mode(embedding_provider: str | None = None) -> bool:
+    try:
+        from aiminer.core.embeddings import resolve_embedding_backend
+
+        backend = resolve_embedding_backend(embedding_provider)
+        return backend.get("mode") == "local"
+    except Exception:
+        return False
+
+
 # --- Worker Process Utilities ---
 
 _WORKER_LOG_QUEUE = None
@@ -66,6 +87,13 @@ _WORKER_LOG_QUEUE = None
 def _init_worker_context(log_queue=None):
     global _WORKER_LOG_QUEUE
     _WORKER_LOG_QUEUE = log_queue
+    # One BLAS/tokenizer/Polars thread per spawned worker; more than that crashes Chroma HNSW.
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
+    os.environ.setdefault("MKL_NUM_THREADS", "1")
+    os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+    os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+    os.environ.setdefault("POLARS_MAX_THREADS", "1")
 
 
 # Global entry point for multiprocessing
@@ -73,10 +101,22 @@ def run_agent_task(kwargs):
     task_kwargs = dict(kwargs)
     if _WORKER_LOG_QUEUE is not None and "log_queue" not in task_kwargs:
         task_kwargs["log_queue"] = _WORKER_LOG_QUEUE
-    # Add a small random jitter to avoid simultaneous DB file access
-    time.sleep(random.uniform(0.1, 1.0))
+    # Process workers each load a local embedding model; stagger so they don't start together.
+    try:
+        is_spawned_worker = (
+            multiprocessing.current_process().name != "MainProcess"
+        )
+    except Exception:
+        is_spawned_worker = False
+    if is_spawned_worker:
+        time.sleep(random.uniform(0.5, 2.5))
+    else:
+        time.sleep(random.uniform(0.1, 0.8))
     agent = AlphaResearcher(**task_kwargs)
-    return agent.run()
+    result = agent.run()
+    if result and isinstance(result, dict) and result.get("role"):
+        result["role"] = _normalize_role(result.get("role"))
+    return result
 
 
 def _forward_worker_logs(worker_log_queue, parent_log_queue):
@@ -233,6 +273,49 @@ def _bounded_worker_count(task_count: int, configured_limit=None) -> int:
     if configured_limit is not None:
         hard_limit = min(hard_limit, int(configured_limit))
     return max(1, min(task_count, hard_limit))
+
+
+def _process_safe_worker_count(
+    task_count: int, configured_limit=None, *, swarm_executor: str | None = None
+) -> int:
+    """Cap ProcessPool size when each worker would load its own local embedding model.
+
+    Default cap is min(4, cpu//2). AIMINER_MAX_WORKERS_PER_SWARM can only lower it.
+    Skip the cap with AIMINER_DISABLE_CHROMA=1 or an API embedding provider.
+    """
+    base = _bounded_worker_count(task_count, configured_limit)
+    executor = (
+        swarm_executor or os.getenv("AIMINER_SWARM_EXECUTOR") or "process"
+    ).lower()
+    if executor != "process":
+        return base
+    if os.getenv("AIMINER_DISABLE_CHROMA", "").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return base
+    try:
+        from aiminer.core.settings import build_settings as _build_settings
+
+        settings = _build_settings({})
+        provider = settings.embedding_provider
+        if _is_local_embedding_mode(provider):
+            cpu = os.cpu_count() or 4
+            safe_cap = min(4, max(1, cpu // 2))
+            limited = min(base, safe_cap)
+            if limited < base:
+                logger.warning(
+                    f"[Parallel] Capping ProcessPool workers {base}->{limited} "
+                    f"for local embedding safety (cpu={cpu}, safe_cap={safe_cap}). "
+                    f"Set AIMINER_MAX_WORKERS_PER_SWARM to override lower, or use "
+                    f"AIMINER_DISABLE_CHROMA=1 / --embedding-provider glm to lift cap."
+                )
+            return limited
+    except Exception as exc:
+        logger.debug(f"[Parallel] worker cap detection failed: {exc}")
+    return base
 
 
 def _coerce_returns_series(returns) -> pd.Series:
@@ -716,11 +799,14 @@ class PortfolioManager:
                 counter += 1
 
     def evaluate_and_combine(self, results_list):
-        """Core logic: survival of the fittest and correlation culling."""
+        """Drop weak / correlated factors before they enter the pool."""
+        for item in results_list:
+            if isinstance(item, dict) and item.get("role"):
+                item["role"] = _normalize_role(item.get("role"))
         logger.info("=== Manager Evaluation & Synthesis ===")
         valid_factors = []
 
-        # 1. First-pass filter: Absolute performance threshold
+        # Keep factors whose |IC| clears the cull threshold.
         threshold = IC_CULL_THRESHOLD
         for res in results_list:
             if res.get("error"):
@@ -749,7 +835,7 @@ class PortfolioManager:
                     f"[Rejected:threshold] {res['role'][:30]}... generated factor IC ({perf:.4f}) below threshold {threshold}."
                 )
 
-        # 2. Second-pass filter: Correlation (multicollinearity) check
+        # Drop factors too correlated with ones already in the pool.
         final_pool = []
         for new_factor in valid_factors:
             is_redundant = False
@@ -944,7 +1030,10 @@ class PortfolioManager:
         crossover_kwargs["max_iterations"] = (
             iterations or self.crossover_iterations
         )
-        return run_agent_task(crossover_kwargs)
+        result = run_agent_task(crossover_kwargs)
+        if isinstance(result, dict):
+            result["role"] = CROSSOVER_ROLE
+        return result
 
     def _accept_crossover_result(
         self,
@@ -1031,78 +1120,13 @@ class PortfolioManager:
         if not factors_to_persist:
             return []
 
-        logger.info(
-            f"Generating reports and persisting {len(factors_to_persist)} factors..."
-        )
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            for factor in factors_to_persist:
-                factor.pop("_normalized_return_series", None)
-                if not factor.get("id"):
-                    factor["id"] = f"alpha_{uuid.uuid4().hex[:8]}"
-                report_path = factor.get(
-                    "report_path"
-                ) or self.summary_agent.generate_markdown_report(factor)
-                factor["report_path"] = report_path
+        from aiminer.pool_io import persist_alpha_pool_rows
 
-                metrics = factor.get("metrics") or {}
-                returns_dict = _serialize_returns(factor.get("returns"))
-                is_effective = factor.get("is_effective")
-
-                try:
-                    cursor.execute(
-                        """
-                        INSERT OR REPLACE INTO alpha_pool
-                            (id, role, hypothesis, code, ic, rank_ic, report_path,
-                             metrics_json, returns_json, is_effective, perf_metric,
-                             selection_score, best_strategy_id, best_strategy_metrics_json, execution_style,
-                             run_id, agent_id, iteration, evaluation_mode,
-                             evaluation_engine, data_backend, market_mode, market_profile,
-                             llm_provider, llm_model, is_simulated)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                        (
-                            factor.get("id"),
-                            factor.get("role"),
-                            factor.get("hypothesis"),
-                            factor.get("code"),
-                            metrics.get("information_coefficient", 0.0),
-                            metrics.get("rank_ic", 0.0),
-                            report_path,
-                            json.dumps(metrics, ensure_ascii=False),
-                            json.dumps(returns_dict, ensure_ascii=False),
-                            int(is_effective)
-                            if isinstance(is_effective, bool)
-                            else is_effective,
-                            factor.get("perf_metric"),
-                            factor.get("selection_score"),
-                            factor.get("best_strategy_id"),
-                            json.dumps(
-                                factor.get("best_strategy_metrics") or {},
-                                ensure_ascii=False,
-                            ),
-                            factor.get("execution_style"),
-                            factor.get("run_id", self.run_id),
-                            factor.get("agent_id"),
-                            factor.get("iteration"),
-                            factor.get("evaluation_mode"),
-                            factor.get("evaluation_engine"),
-                            factor.get("data_backend"),
-                            factor.get("market_mode"),
-                            factor.get("market_profile"),
-                            factor.get("llm_provider"),
-                            factor.get("llm_model"),
-                            int(factor.get("is_simulated", False)),
-                        ),
-                    )
-                except Exception as db_err:
-                    logger.warning(
-                        f"[DB] Failed to stage factor '{factor.get('hypothesis', '?')}': {db_err}"
-                    )
-
-        self._write_alpha_pool_json_backup()
-        logger.success(
-            f"Alpha Pool saved to {self.settings.results_path / 'alpha_pool.json'} and SQLite."
+        persist_alpha_pool_rows(
+            self.db_path,
+            self.settings.results_path,
+            factors_to_persist,
+            run_id=self.run_id,
         )
         return factors_to_persist
 
@@ -1163,10 +1187,17 @@ class PortfolioManager:
             all_results = []
             try:
                 if parallel:
-                    max_workers = _bounded_worker_count(
-                        len(self.researchers),
-                        self.max_swarm_workers,
-                    )
+                    if self.swarm_executor == "process":
+                        max_workers = _process_safe_worker_count(
+                            len(self.researchers),
+                            self.max_swarm_workers,
+                            swarm_executor=self.swarm_executor,
+                        )
+                    else:
+                        max_workers = _bounded_worker_count(
+                            len(self.researchers),
+                            self.max_swarm_workers,
+                        )
                     if self.swarm_executor == "thread":
                         logger.info(
                             "Running sub-agents in PARALLEL mode (ThreadPool)..."
@@ -1219,6 +1250,11 @@ class PortfolioManager:
                         logger.info(
                             "Running sub-agents in PARALLEL mode (Multi-Process)..."
                         )
+                        if max_workers < len(self.researchers):
+                            logger.info(
+                                f"[Parallel] ProcessPool workers capped to {max_workers}/{len(self.researchers)} "
+                                f"(local embedding cap); start jitter 0.5-2.5s."
+                            )
                         try:
                             executor = concurrent.futures.ProcessPoolExecutor(
                                 max_workers=max_workers,

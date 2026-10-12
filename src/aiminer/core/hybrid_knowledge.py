@@ -158,9 +158,11 @@ class HybridKnowledge:
             if not summary:
                 summary = f"{title} (IC {ic:.4f} / RankIC {rank_ic:.4f})"
 
-            # Tags derive from the role prompt + evaluation mode so linting
-            # can later cluster cards by their originating expert.
             role_prompt = (state.get("role_prompt") or "").strip()
+            if role_prompt and (
+                len(role_prompt) > 20 or role_prompt.startswith("You are")
+            ):
+                role_prompt = "遗传交叉"
             tags: List[str] = []
             if role_prompt:
                 tags.append(role_prompt[:40])

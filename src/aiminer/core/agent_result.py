@@ -8,17 +8,14 @@ import pandas as pd
 def compact_returns(daily_returns_dict) -> dict:
     if not daily_returns_dict:
         return {}
-
     series = pd.Series(daily_returns_dict)
     if series.empty:
         return {}
-
     series.index = pd.to_datetime(series.index, errors="coerce")
     series = pd.to_numeric(series, errors="coerce")
     valid_mask = series.index.notna() & series.notna()
     if not valid_mask.any():
         return {}
-
     series = series[valid_mask].sort_index()
     compact = {}
     for idx, value in series.items():
@@ -46,7 +43,6 @@ def factor_result_view(final_state: dict) -> dict:
             "ic_direction": final_state.get("ic_direction"),
             "ic_direction_label": final_state.get("ic_direction_label"),
         }
-
     return {
         "iteration": snapshot.get("iteration", final_state.get("iteration")),
         "hypothesis": snapshot.get("hypothesis")
@@ -110,6 +106,15 @@ def factor_result_view(final_state: dict) -> dict:
     }
 
 
+def _normalize_role_for_result(role_prompt: str | None) -> str | None:
+    if not role_prompt:
+        return role_prompt
+    text = str(role_prompt).strip()
+    if len(text) > 20 or text.startswith("You are"):
+        return "遗传交叉"
+    return text
+
+
 def state_to_agent_result(
     final_state: dict,
     *,
@@ -167,7 +172,9 @@ def state_to_agent_result(
             getattr(settings, "market_profiles", None)
             or final_state.get("market_profiles")
         ),
-        "role": role_prompt or final_state.get("role_prompt"),
+        "role": _normalize_role_for_result(
+            role_prompt or final_state.get("role_prompt")
+        ),
         "hypothesis": factor_view.get("hypothesis"),
         "code": factor_view.get("code"),
         "metrics": metrics,
