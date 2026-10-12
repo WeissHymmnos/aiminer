@@ -73,389 +73,50 @@ except ImportError:  # pragma: no cover
     init_rq_auth = None  # type: ignore[misc, assignment]
 
 
-CROSSOVER_ROLE = "遗传交叉"
-
-
-def _normalize_role(role: str | None) -> str | None:
-    """Map leftover crossover prompts to 遗传交叉 (len>20 or starts with 'You are')."""
-    if not role:
-        return role
-    text = str(role).strip()
-    if len(text) > 20 or text.startswith("You are"):
-        return CROSSOVER_ROLE
-    return text
-
-
-def _is_local_embedding_mode(embedding_provider: str | None = None) -> bool:
-    try:
-        from aiminer.core.embeddings import resolve_embedding_backend
-
-        backend = resolve_embedding_backend(embedding_provider)
-        return backend.get("mode") == "local"
-    except Exception:
-        return False
-
-
-# --- Worker Process Utilities ---
-
-_WORKER_LOG_QUEUE = None
-
-
-def _init_worker_context(log_queue=None):
-    global _WORKER_LOG_QUEUE
-    _WORKER_LOG_QUEUE = log_queue
-    # One BLAS/tokenizer/Polars thread per spawned worker; more than that crashes Chroma HNSW.
-    os.environ.setdefault("OMP_NUM_THREADS", "1")
-    os.environ.setdefault("MKL_NUM_THREADS", "1")
-    os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
-    os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
-    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
-    os.environ.setdefault("POLARS_MAX_THREADS", "1")
-
-
-# Global entry point for multiprocessing
-def run_agent_task(kwargs):
-    task_kwargs = dict(kwargs)
-    if _WORKER_LOG_QUEUE is not None and "log_queue" not in task_kwargs:
-        task_kwargs["log_queue"] = _WORKER_LOG_QUEUE
-    # Process workers each load a local embedding model; stagger so they don't start together.
-    try:
-        is_spawned_worker = (
-            multiprocessing.current_process().name != "MainProcess"
-        )
-    except Exception:
-        is_spawned_worker = False
-    if is_spawned_worker:
-        time.sleep(random.uniform(0.5, 2.5))
-    else:
-        time.sleep(random.uniform(0.1, 0.8))
-    agent = AlphaResearcher(**task_kwargs)
-    result = agent.run()
-    if result and isinstance(result, dict) and result.get("role"):
-        result["role"] = _normalize_role(result.get("role"))
-    return result
-
-
-def _forward_worker_logs(worker_log_queue, parent_log_queue):
-    """Bridge log records from ProcessPool workers back to the swarm log queue.
-
-    In spawn mode, a raw multiprocessing.Queue cannot be passed as task args
-    into a nested ProcessPoolExecutor. Workers therefore write into a
-    Manager-backed queue proxy, and this helper forwards those records into the
-    inherited queue used by the API/WebSocket layer.
-    """
-    while True:
-        try:
-            record = worker_log_queue.get()
-        except Exception:
-            break
-        if record is None:
-            break
-        try:
-            parent_log_queue.put(record)
-        except Exception:
-            break
-
-
-def _serialize_returns(returns) -> dict:
-    """Convert a pandas Series (or dict) of returns into a JSON-safe
-    {iso_date: float} dict. Used for both SQLite persistence and the
-    legacy JSON backup so they stay structurally identical."""
-    if returns is None or not hasattr(returns, "items"):
-        return {}
-    out = {}
-    for k, v in returns.items():
-        try:
-            key = k.isoformat() if hasattr(k, "isoformat") else str(k)
-            out[key] = float(v)
-        except (TypeError, ValueError):
-            continue
-    return out
-
-
-def _configured_worker_limit(explicit_value, env_name: str):
-    raw = explicit_value if explicit_value is not None else os.getenv(env_name)
-    if raw in (None, ""):
-        return None
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        logger.warning(f"[Parallel] Ignoring invalid {env_name}={raw!r}")
-        return None
-    return value if value > 0 else None
-
-
-def _configured_timeout(
-    explicit_value, env_name: str, default: float | None = None
-):
-    raw = explicit_value if explicit_value is not None else os.getenv(env_name)
-    if raw in (None, ""):
-        return default
-    try:
-        value = float(raw)
-    except (TypeError, ValueError):
-        logger.warning(f"[Parallel] Ignoring invalid {env_name}={raw!r}")
-        return default
-    return value if value > 0 else None
-
-
-def _configured_positive_int(
-    explicit_value, env_name: str, default: int
-) -> int:
-    raw = explicit_value if explicit_value is not None else os.getenv(env_name)
-    if raw in (None, ""):
-        return default
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        logger.warning(f"[Config] Ignoring invalid {env_name}={raw!r}")
-        return default
-    if value <= 0:
-        logger.warning(f"[Config] Ignoring non-positive {env_name}={raw!r}")
-        return default
-    return value
-
-
-def _configured_swarm_executor(explicit_value) -> str:
-    raw = (
-        explicit_value
-        if explicit_value is not None
-        else os.getenv("AIMINER_SWARM_EXECUTOR")
-    )
-    value = str(raw or "process").strip().lower()
-    aliases = {
-        "processes": "process",
-        "multiprocess": "process",
-        "multi-process": "process",
-        "threads": "thread",
-        "threaded": "thread",
-    }
-    value = aliases.get(value, value)
-    if value not in {"process", "thread"}:
-        logger.warning(
-            f"[Parallel] Ignoring invalid AIMINER_SWARM_EXECUTOR={raw!r}; using 'process'."
-        )
-        return "process"
-    return value
-
-
-def _terminate_process_pool(executor) -> None:
-    terminate_workers = getattr(executor, "terminate_workers", None)
-    if callable(terminate_workers):
-        try:
-            terminate_workers()
-            return
-        except Exception as exc:
-            logger.debug(f"[Parallel] terminate_workers failed: {exc}")
-
-    processes = getattr(executor, "_processes", None)
-    if not isinstance(processes, dict):
-        return
-    for process in list(processes.values()):
-        terminate = getattr(process, "terminate", None)
-        if callable(terminate):
-            try:
-                terminate()
-            except Exception as exc:
-                logger.debug(f"[Parallel] process terminate failed: {exc}")
-
-
-def _is_broken_process_pool_error(exc: BaseException) -> bool:
-    if isinstance(exc, BrokenProcessPool):
-        return True
-    message = str(exc).lower()
-    exc_name = type(exc).__name__.lower()
-    return (
-        "brokenprocesspool" in exc_name
-        or "process pool was terminated abruptly" in message
-        or "process pool is not usable anymore" in message
-    )
-
-
-def _cancel_pending_futures(futures, completed) -> int:
-    pending = set(futures) - set(completed)
-    for future in pending:
-        try:
-            future.cancel()
-        except Exception as exc:
-            logger.debug(f"[Parallel] future cancel failed: {exc}")
-    return len(pending)
-
-
-def _bounded_worker_count(task_count: int, configured_limit=None) -> int:
-    if task_count <= 1:
-        return 1
-    cpu_limit = os.cpu_count() or 1
-    hard_limit = cpu_limit
-    if configured_limit is not None:
-        hard_limit = min(hard_limit, int(configured_limit))
-    return max(1, min(task_count, hard_limit))
-
-
-def _process_safe_worker_count(
-    task_count: int, configured_limit=None, *, swarm_executor: str | None = None
-) -> int:
-    """Cap ProcessPool size when each worker would load its own local embedding model.
-
-    Default cap is min(4, cpu//2). AIMINER_MAX_WORKERS_PER_SWARM can only lower it.
-    Skip the cap with AIMINER_DISABLE_CHROMA=1 or an API embedding provider.
-    """
-    base = _bounded_worker_count(task_count, configured_limit)
-    executor = (
-        swarm_executor or os.getenv("AIMINER_SWARM_EXECUTOR") or "process"
-    ).lower()
-    if executor != "process":
-        return base
-    if os.getenv("AIMINER_DISABLE_CHROMA", "").lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }:
-        return base
-    try:
-        from aiminer.core.settings import build_settings as _build_settings
-
-        settings = _build_settings({})
-        provider = settings.embedding_provider
-        if _is_local_embedding_mode(provider):
-            cpu = os.cpu_count() or 4
-            safe_cap = min(4, max(1, cpu // 2))
-            limited = min(base, safe_cap)
-            if limited < base:
-                logger.warning(
-                    f"[Parallel] Capping ProcessPool workers {base}->{limited} "
-                    f"for local embedding safety (cpu={cpu}, safe_cap={safe_cap}). "
-                    f"Set AIMINER_MAX_WORKERS_PER_SWARM to override lower, or use "
-                    f"AIMINER_DISABLE_CHROMA=1 / --embedding-provider glm to lift cap."
-                )
-            return limited
-    except Exception as exc:
-        logger.debug(f"[Parallel] worker cap detection failed: {exc}")
-    return base
-
-
-def _coerce_returns_series(returns) -> pd.Series:
-    if isinstance(returns, pd.Series):
-        series = returns.copy(deep=False)
-    elif isinstance(returns, dict):
-        series = pd.Series(returns, dtype=float)
-    elif returns is None:
-        return pd.Series(dtype=float)
-    else:
-        try:
-            series = pd.Series(returns, dtype=float)
-        except Exception:
-            return pd.Series(dtype=float)
-
-    if series.empty:
-        return pd.Series(dtype=float)
-
-    if not isinstance(series.index, pd.DatetimeIndex):
-        series.index = pd.to_datetime(series.index, errors="coerce")
-    series = pd.to_numeric(series, errors="coerce")
-    valid_mask = series.index.notna() & series.notna()
-    if not valid_mask.any():
-        return pd.Series(dtype=float)
-    return series[valid_mask].sort_index()
-
-
-def _factor_return_series(factor: dict) -> pd.Series:
-    cached = factor.get("_normalized_return_series")
-    if isinstance(cached, pd.Series):
-        return cached
-    series = _coerce_returns_series(
-        factor.get("strategy_daily_returns") or factor.get("returns")
-    )
-    factor["_normalized_return_series"] = series
-    return series
-
-
-def _series_correlation(
-    left: pd.Series, right: pd.Series, min_overlap: int = 10
-):
-    if left is None or right is None or left.empty or right.empty:
-        return None
-
-    overlap = left.index.intersection(right.index)
-    if len(overlap) < min_overlap:
-        return None
-
-    left_aligned = left.reindex(overlap)
-    right_aligned = right.reindex(overlap)
-    valid_mask = left_aligned.notna() & right_aligned.notna()
-    if int(valid_mask.sum()) < min_overlap:
-        return None
-
-    corr = left_aligned[valid_mask].corr(right_aligned[valid_mask])
-    return float(corr) if pd.notna(corr) else None
-
-
-def _invert_returns(returns):
-    if isinstance(returns, pd.Series):
-        return -returns
-    if isinstance(returns, dict):
-        inverted = {}
-        for key, value in returns.items():
-            try:
-                inverted[key] = -float(value)
-            except (TypeError, ValueError):
-                continue
-        return inverted
-    if returns is None:
-        return returns
-    try:
-        return -pd.Series(returns, dtype=float)
-    except Exception:
-        return returns
-
-
-def _is_simulated_factor(factor: dict) -> bool:
-    metrics = factor.get("metrics") or {}
-    return bool(factor.get("is_simulated") or metrics.get("_simulated"))
-
-
-def _atomic_write_json(path, payload) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    with tmp_path.open("w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=4, ensure_ascii=False)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp_path, path)
-
-
-def _orient_negative_ic_factor(factor: dict, threshold: float) -> dict:
-    perf = float(factor.get("perf_metric", 0.0) or 0.0)
-    if perf >= -threshold:
-        return factor
-
-    factor["raw_perf_metric"] = perf
-    factor["perf_metric"] = abs(perf)
-    factor["signal_direction"] = -1
-    factor["returns"] = _invert_returns(factor.get("returns"))
-    factor.pop("_normalized_return_series", None)
-
-    metrics = dict(factor.get("metrics") or {})
-    for key in ("information_coefficient", "ic", "rank_ic"):
-        if key in metrics:
-            try:
-                metrics[f"raw_{key}"] = float(metrics[key])
-                metrics[key] = abs(float(metrics[key]))
-            except (TypeError, ValueError):
-                pass
-    if metrics:
-        factor["metrics"] = metrics
-
-    selection = factor.get("selection_score")
-    try:
-        if selection is not None and float(selection) < 0:
-            factor["selection_score"] = abs(float(selection))
-    except (TypeError, ValueError):
-        pass
-
-    return factor
-
+from aiminer.crossover import (
+    CROSSOVER_ROLE,
+    accept_crossover_result,
+    build_crossover_role,
+    run_crossover_agent,
+    select_crossover_parents,
+)
+from aiminer.persistence import (
+    _atomic_write_json,
+    _serialize_returns,
+    backfill_alpha_pool_from_json,
+    init_portfolio_db,
+    persist_alpha_factors,
+    recover_checkpoint_results,
+    write_alpha_pool_json_backup,
+)
+from aiminer.scheduler import (
+    _WORKER_LOG_QUEUE,
+    _bounded_worker_count,
+    _cancel_pending_futures,
+    _configured_positive_int,
+    _configured_swarm_executor,
+    _configured_timeout,
+    _configured_worker_limit,
+    _forward_worker_logs,
+    _init_worker_context,
+    _is_broken_process_pool_error,
+    _is_local_embedding_mode,
+    _normalize_role,
+    _process_safe_worker_count,
+    _terminate_process_pool,
+    run_agent_task,
+)
+from aiminer.selector import (
+    _coerce_returns_series,
+    _factor_return_series,
+    _invert_returns,
+    _is_simulated_factor,
+    _orient_negative_ic_factor,
+    _series_correlation,
+    cull_alpha_pool,
+    dedupe_alpha_pool_by_returns,
+    factor_score,
+)
 
 load_dotenv()
 
@@ -559,253 +220,22 @@ class PortfolioManager:
         """
         self.settings.results_path.mkdir(parents=True, exist_ok=True)
         self.db_path = str(self.settings.db_path)
-        with sqlite3.connect(self.db_path) as conn:
-            # WAL allows concurrent reads during writes (swarm writes while
-            # TUI/API reads — no more "database is locked" errors).
-            conn.execute("PRAGMA journal_mode=WAL")
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS alpha_pool (
-                    id TEXT PRIMARY KEY,
-                    role TEXT,
-                    hypothesis TEXT,
-                    code TEXT,
-                    ic REAL,
-                    rank_ic REAL,
-                    report_path TEXT,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    metrics_json TEXT,
-                    returns_json TEXT,
-                    is_effective INTEGER,
-                    perf_metric REAL,
-                    selection_score REAL,
-                    best_strategy_id TEXT,
-                    best_strategy_metrics_json TEXT,
-                    execution_style TEXT,
-                    run_id TEXT,
-                    agent_id TEXT,
-                    iteration INTEGER,
-                    evaluation_mode TEXT,
-                    evaluation_engine TEXT,
-                    data_backend TEXT,
-                    market_mode TEXT,
-                    market_profile TEXT,
-                    llm_provider TEXT,
-                    llm_model TEXT,
-                    is_simulated INTEGER,
-                    dsr REAL,
-                    n_trials INTEGER
-                )
-            """)
-            cursor.execute(
-                "CREATE INDEX IF NOT EXISTS idx_alpha_timestamp ON alpha_pool(timestamp)"
-            )
-            cursor.execute(
-                "CREATE INDEX IF NOT EXISTS idx_alpha_run_id ON alpha_pool(run_id)"
-            )
-            # Idempotent migration for pre-existing databases created before
-            # the extended schema landed.
-            for col, ddl in [
-                (
-                    "metrics_json",
-                    "ALTER TABLE alpha_pool ADD COLUMN metrics_json TEXT",
-                ),
-                (
-                    "returns_json",
-                    "ALTER TABLE alpha_pool ADD COLUMN returns_json TEXT",
-                ),
-                (
-                    "is_effective",
-                    "ALTER TABLE alpha_pool ADD COLUMN is_effective INTEGER",
-                ),
-                (
-                    "perf_metric",
-                    "ALTER TABLE alpha_pool ADD COLUMN perf_metric REAL",
-                ),
-                (
-                    "selection_score",
-                    "ALTER TABLE alpha_pool ADD COLUMN selection_score REAL",
-                ),
-                (
-                    "best_strategy_id",
-                    "ALTER TABLE alpha_pool ADD COLUMN best_strategy_id TEXT",
-                ),
-                (
-                    "best_strategy_metrics_json",
-                    "ALTER TABLE alpha_pool ADD COLUMN best_strategy_metrics_json TEXT",
-                ),
-                (
-                    "execution_style",
-                    "ALTER TABLE alpha_pool ADD COLUMN execution_style TEXT",
-                ),
-                ("run_id", "ALTER TABLE alpha_pool ADD COLUMN run_id TEXT"),
-                ("agent_id", "ALTER TABLE alpha_pool ADD COLUMN agent_id TEXT"),
-                (
-                    "iteration",
-                    "ALTER TABLE alpha_pool ADD COLUMN iteration INTEGER",
-                ),
-                (
-                    "evaluation_mode",
-                    "ALTER TABLE alpha_pool ADD COLUMN evaluation_mode TEXT",
-                ),
-                (
-                    "evaluation_engine",
-                    "ALTER TABLE alpha_pool ADD COLUMN evaluation_engine TEXT",
-                ),
-                (
-                    "data_backend",
-                    "ALTER TABLE alpha_pool ADD COLUMN data_backend TEXT",
-                ),
-                (
-                    "market_mode",
-                    "ALTER TABLE alpha_pool ADD COLUMN market_mode TEXT",
-                ),
-                (
-                    "market_profile",
-                    "ALTER TABLE alpha_pool ADD COLUMN market_profile TEXT",
-                ),
-                (
-                    "llm_provider",
-                    "ALTER TABLE alpha_pool ADD COLUMN llm_provider TEXT",
-                ),
-                (
-                    "llm_model",
-                    "ALTER TABLE alpha_pool ADD COLUMN llm_model TEXT",
-                ),
-                (
-                    "is_simulated",
-                    "ALTER TABLE alpha_pool ADD COLUMN is_simulated INTEGER",
-                ),
-                ("dsr", "ALTER TABLE alpha_pool ADD COLUMN dsr REAL"),
-                (
-                    "n_trials",
-                    "ALTER TABLE alpha_pool ADD COLUMN n_trials INTEGER",
-                ),
-            ]:
-                try:
-                    cursor.execute(ddl)
-                except sqlite3.OperationalError:
-                    pass  # column already exists
-
-            # Portfolio table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS portfolio_pool (
-                    id TEXT PRIMARY KEY,
-                    run_id TEXT,
-                    method TEXT,
-                    rationale TEXT,
-                    weights_json TEXT,
-                    returns_json TEXT,
-                    diversification_ratio REAL,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            conn.commit()
-        ensure_strategy_table(self.db_path)
-        ensure_agent_checkpoint_table(self.db_path)
+        init_portfolio_db(self.db_path, self.settings.results_path)
         self._backfill_from_json()
 
     def _backfill_from_json(self):
-        """One-shot backfill: populate extended columns for rows created
-        before the schema change, pulling data from the configured alpha_pool.json
-        when the id still matches. Rows with no match remain NULL — the
-        frontend handles that gracefully."""
+        """One-shot backfill: populate extended columns from JSON backup."""
         json_path = self.settings.results_path / "alpha_pool.json"
-        if not json_path.exists():
-            return
-
-        # Fast path: if every row already has metrics_json populated, skip entirely.
-        with sqlite3.connect(self.db_path) as conn:
-            null_count = conn.execute(
-                "SELECT COUNT(*) FROM alpha_pool WHERE metrics_json IS NULL"
-            ).fetchone()[0]
-        if null_count == 0:
-            return
-
-        try:
-            with json_path.open("r", encoding="utf-8") as f:
-                pool = json.load(f)
-        except Exception as e:
-            logger.warning(f"[DB Backfill] Failed to read {json_path}: {e}")
-            return
-        if not isinstance(pool, list) or not pool:
-            return
-
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            for entry in pool:
-                fid = entry.get("id")
-                if not fid:
-                    continue
-                cursor.execute(
-                    "SELECT metrics_json FROM alpha_pool WHERE id=?", (fid,)
-                )
-                row = cursor.fetchone()
-                if not row or row[0]:
-                    continue  # row missing or already backfilled
-                metrics_json = json.dumps(
-                    entry.get("metrics") or {}, ensure_ascii=False
-                )
-                returns_json = json.dumps(
-                    entry.get("returns") or {}, ensure_ascii=False
-                )
-                is_effective = entry.get("is_effective")
-                cursor.execute(
-                    """UPDATE alpha_pool
-                       SET metrics_json=?, returns_json=?, is_effective=?, perf_metric=?
-                       WHERE id=?""",
-                    (
-                        metrics_json,
-                        returns_json,
-                        int(is_effective)
-                        if isinstance(is_effective, bool)
-                        else is_effective,
-                        entry.get("perf_metric"),
-                        fid,
-                    ),
-                )
-            conn.commit()
+        backfill_alpha_pool_from_json(self.db_path, json_path)
 
     def _write_alpha_pool_json_backup(self):
-        """Mirror SQLite alpha_pool into the legacy JSON file atomically.
-
-        SQLite is the source of truth. Keeping the JSON backup as a full DB
-        mirror avoids stale current-run-only snapshots being mistaken for the
-        complete alpha pool.
-        """
-        output_path = self.settings.results_path / "alpha_pool.json"
+        """Mirror SQLite alpha_pool into the legacy JSON file atomically."""
         if not os.path.exists(self.db_path):
-            _atomic_write_json(output_path, [])
+            _atomic_write_json(
+                self.settings.results_path / "alpha_pool.json", []
+            )
             return
-
-        records = []
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            try:
-                rows = conn.execute(
-                    "SELECT * FROM alpha_pool ORDER BY timestamp DESC"
-                ).fetchall()
-            except sqlite3.OperationalError as exc:
-                logger.warning(
-                    f"[JSON Backup] Failed to read alpha_pool: {exc}"
-                )
-                return
-
-        for row in rows:
-            item = dict(row)
-            for source, target in (
-                ("metrics_json", "metrics"),
-                ("returns_json", "returns"),
-                ("best_strategy_metrics_json", "best_strategy_metrics"),
-            ):
-                raw = item.pop(source, None)
-                try:
-                    item[target] = json.loads(raw) if raw else {}
-                except Exception:
-                    item[target] = {}
-            records.append(item)
-
-        _atomic_write_json(output_path, records)
+        write_alpha_pool_json_backup(self.db_path, self.settings.results_path)
 
     # --- Factor Pool Management ---
 
@@ -979,41 +409,9 @@ class PortfolioManager:
         reason: str = "parallel interruption",
     ) -> list[dict]:
         """Recover best per-agent snapshots after an interrupted parallel swarm."""
-        try:
-            checkpoints = load_agent_checkpoints(self.db_path, self.run_id)
-        except Exception as exc:
-            logger.warning(
-                f"[Checkpoint] Failed to load agent checkpoints: {exc}"
-            )
-            return current_results
-
-        if not checkpoints:
-            return current_results
-
-        by_agent = {
-            item.get("agent_id") or f"completed_{idx}": item
-            for idx, item in enumerate(current_results)
-        }
-        recovered = 0
-        for item in checkpoints:
-            agent_id = item.get("agent_id")
-            if not agent_id:
-                continue
-            existing = by_agent.get(agent_id)
-            if existing is not None:
-                if existing.get("error") and not item.get("error"):
-                    by_agent[agent_id] = item
-                    recovered += 1
-                continue
-            by_agent[agent_id] = item
-            recovered += 1
-
-        if recovered:
-            logger.warning(
-                f"[Checkpoint] Recovered {recovered} best agent result(s) "
-                f"from checkpoint after {reason}."
-            )
-        return list(by_agent.values())
+        return recover_checkpoint_results(
+            self.db_path, self.run_id, current_results, reason=reason
+        )
 
     def _dedupe_alpha_pool_by_returns(self, *, stage: str) -> None:
         if len(self.alpha_pool) < 2:
@@ -1080,28 +478,10 @@ class PortfolioManager:
         self, factors: list[dict] | None = None
     ) -> tuple[dict, dict]:
         pool = list(factors if factors is not None else self.alpha_pool)
-        if len(pool) < 2:
-            raise ValueError(
-                "At least two factors are required for genetic crossover."
-            )
-        ranked = sorted(
-            pool,
-            key=lambda item: self._factor_score(item, "perf_metric"),
-            reverse=True,
-        )
-        return ranked[0], ranked[1]
+        return select_crossover_parents(pool, score_fn=self._factor_score)
 
     def _build_crossover_role(self, top1: dict, top2: dict) -> str:
-        return (
-            "You are an AI Genetic Crossover Expert. Your task is to combine two high-performing alpha factors into a single, "
-            "superior hybrid factor. You excel at extracting orthogonal components and merging them logically.\n"
-            "Here are the two parent factors:\n"
-            f"Parent 1 (IC: {self._factor_score(top1, 'perf_metric'):.4f}): {top1.get('hypothesis') or 'N/A'}\n"
-            f"Code: {top1.get('code') or 'N/A'}\n\n"
-            f"Parent 2 (IC: {self._factor_score(top2, 'perf_metric'):.4f}): {top2.get('hypothesis') or 'N/A'}\n"
-            f"Code: {top2.get('code') or 'N/A'}\n\n"
-            "Extract the best ideas from both and synthesize a new Alpha factor."
-        )
+        return build_crossover_role(top1, top2, score_fn=self._factor_score)
 
     def _run_crossover_agent(
         self,
@@ -1111,18 +491,16 @@ class PortfolioManager:
         iterations: int | None = None,
         agent_id: str = "agent_crossover",
     ) -> dict:
-        logger.info("Spawning Crossover Agent...")
-        crossover_kwargs = dict(self.kwargs)
-        crossover_kwargs["role_prompt"] = self._build_crossover_role(top1, top2)
-        crossover_kwargs["run_id"] = self.run_id
-        crossover_kwargs["agent_id"] = agent_id
-        crossover_kwargs["max_iterations"] = (
-            iterations or self.crossover_iterations
+        return run_crossover_agent(
+            top1,
+            top2,
+            run_id=self.run_id,
+            kwargs=self.kwargs,
+            iterations=iterations or self.crossover_iterations,
+            agent_id=agent_id,
+            score_fn=self._factor_score,
+            run_task_fn=run_agent_task,
         )
-        result = run_agent_task(crossover_kwargs)
-        if isinstance(result, dict):
-            result["role"] = CROSSOVER_ROLE
-        return result
 
     def _accept_crossover_result(
         self,
@@ -1131,28 +509,19 @@ class PortfolioManager:
         comparison_pool: list[dict] | None = None,
         threshold: float = 0.01,
     ) -> tuple[bool, str]:
-        if crossover_result.get("error"):
-            return False, "errored"
-        if _is_simulated_factor(crossover_result):
-            return False, "simulated"
-        if self._factor_score(crossover_result, "perf_metric") <= threshold:
-            return False, "threshold"
-
-        new_returns = _coerce_returns_series(crossover_result.get("returns"))
-        if not new_returns.empty:
-            for existing_factor in list(comparison_pool or self.alpha_pool):
-                existing_returns = _factor_return_series(existing_factor)
-                if existing_returns.empty:
-                    continue
-                corr = _series_correlation(new_returns, existing_returns)
-                if corr is not None and corr > 0.7:
-                    return False, "correlated"
-
-        crossover_result["id"] = (
-            crossover_result.get("id") or f"alpha_{uuid.uuid4().hex[:8]}"
+        accepted, reason = accept_crossover_result(
+            crossover_result,
+            comparison_pool=(
+                comparison_pool
+                if comparison_pool is not None
+                else self.alpha_pool
+            ),
+            threshold=threshold,
+            score_fn=self._factor_score,
         )
-        self.alpha_pool.append(crossover_result)
-        return True, "accepted"
+        if accepted:
+            self.alpha_pool.append(crossover_result)
+        return accepted, reason
 
     def run_genetic_crossover(
         self,
@@ -1216,80 +585,14 @@ class PortfolioManager:
         factors_to_persist = list(
             factors if factors is not None else self.alpha_pool
         )
-        if not factors_to_persist:
-            return []
-
-        effective_n_trials = max(
-            self.n_trials,
-            len(self.trial_sharpes),
-            len(factors_to_persist),
-            1,
-        )
-        from aiminer.core.alphaeval.multiple_testing import (
-            deflated_sharpe_ratio,
-        )
-
-        for factor in factors_to_persist:
-            if factor.get("n_trials") is None:
-                factor["n_trials"] = effective_n_trials
-
-            if factor.get("dsr") is None:
-                metrics = factor.get("metrics") or {}
-                sr = metrics.get("sharpe")
-                if sr is None:
-                    sr = factor.get("perf_metric", 0.0)
-                try:
-                    sr_val = float(sr) if sr is not None else 0.0
-                except (ValueError, TypeError):
-                    sr_val = 0.0
-
-                returns = factor.get("returns") or {}
-                if isinstance(returns, dict) and len(returns) >= 4:
-                    try:
-                        rets = np.asarray(
-                            list(returns.values()), dtype=float
-                        )
-                        rets = rets[np.isfinite(rets)]
-                    except Exception:
-                        rets = np.array([], dtype=float)
-                else:
-                    rets = np.array([], dtype=float)
-
-                if len(rets) >= 4:
-                    sample_len = len(rets)
-                    skew = float(scipy.stats.skew(rets))
-                    kurt = float(
-                        scipy.stats.kurtosis(rets, fisher=False)
-                    )
-                else:
-                    sample_len = 252
-                    skew = 0.0
-                    kurt = 3.0
-
-                factor_n = factor.get("n_trials", effective_n_trials)
-                trials = (
-                    self.trial_sharpes
-                    if self.trial_sharpes
-                    else [sr_val]
-                )
-                factor["dsr"] = deflated_sharpe_ratio(
-                    estimated_sharpe=sr_val,
-                    var_sharpe_or_trials=trials,
-                    n_trials=factor_n,
-                    skewness=skew,
-                    kurtosis=kurt,
-                    sample_length=sample_len,
-                )
-
-        from aiminer.pool_io import persist_alpha_pool_rows
-
-        persist_alpha_pool_rows(
+        return persist_alpha_factors(
             self.db_path,
             self.settings.results_path,
             factors_to_persist,
             run_id=self.run_id,
+            trial_sharpes=self.trial_sharpes,
+            n_trials=self.n_trials,
         )
-        return factors_to_persist
 
     # --- Swarm Execution ---
 

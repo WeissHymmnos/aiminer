@@ -68,15 +68,7 @@ class DataValidationReport(BaseModel):
             if issue.severity == ValidationSeverity.WARNING
         )
 
-
-class DataContractError(ValueError):
-    """Raised when data violates a required contract schema."""
-
-    def __init__(
-        self, message: str, report: DataValidationReport | None = None
-    ):
-        super().__init__(message)
-        self.report = report
+from aiminer.core.exceptions import DataContractError
 
 
 class OHLCVContract(BaseModel):
