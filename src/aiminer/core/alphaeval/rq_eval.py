@@ -1209,10 +1209,18 @@ class RiceQuantEval:
             }
 
             def _get_n(n):
+                if isinstance(n, (pd.Series, pd.DataFrame)):
+                    try:
+                        val = n.iloc[-1]
+                        if isinstance(val, pd.Series):
+                            val = val.iloc[-1]
+                        return int(val)
+                    except (TypeError, ValueError, AttributeError, IndexError):
+                        return 20
                 try:
                     return int(float(n))
-                except:
-                    return 5
+                except (TypeError, ValueError):
+                    return 20
 
             def If(cond, a, b):
                 if isinstance(a, (int, float)):
@@ -1246,6 +1254,70 @@ class RiceQuantEval:
                     res = res | a
                 return res
 
+            def _dry_ts_rank(df, n=20):
+                df = _ensure_df(df)
+                nn = max(1, _get_n(n))
+                if nn == 1:
+                    return pd.DataFrame(0.5, index=df.index, columns=df.columns)
+
+                def _ts_rank_row(x):
+                    if len(x) < nn:
+                        return np.nan
+                    last = x.iloc[-1]
+                    if pd.isna(last):
+                        return np.nan
+                    valid = x.dropna()
+                    if len(valid) == 0:
+                        return np.nan
+                    return float((valid <= last).sum()) / len(valid)
+
+                return df.rolling(nn, min_periods=1).apply(
+                    _ts_rank_row, raw=False
+                )
+
+            def _dry_ts_argmax(df, n=20):
+                df = _ensure_df(df)
+                nn = max(1, _get_n(n))
+
+                def _row(x):
+                    if len(x) < nn:
+                        return np.nan
+                    return (
+                        float(np.nanargmax(x))
+                        if not np.all(np.isnan(x))
+                        else np.nan
+                    )
+
+                return df.rolling(nn, min_periods=1).apply(_row, raw=True)
+
+            def _dry_ts_argmin(df, n=20):
+                df = _ensure_df(df)
+                nn = max(1, _get_n(n))
+
+                def _row(x):
+                    if len(x) < nn:
+                        return np.nan
+                    return (
+                        float(np.nanargmin(x))
+                        if not np.all(np.isnan(x))
+                        else np.nan
+                    )
+
+                return df.rolling(nn, min_periods=1).apply(_row, raw=True)
+
+            def _dry_wma(df, n=20):
+                df = _ensure_df(df)
+                nn = max(1, _get_n(n))
+                weights = np.arange(1, nn + 1, dtype=float)
+                weights /= weights.sum()
+                return df.rolling(nn, min_periods=1).apply(
+                    lambda x: (
+                        np.dot(x[-len(weights) :], weights[-len(x) :])
+                        / weights[-len(x) :].sum()
+                    ),
+                    raw=True,
+                )
+
             context = {
                 "fields": dummy_fields,
                 "np": np,
@@ -1277,9 +1349,7 @@ class RiceQuantEval:
                 "Or": Or,
                 "Greater": lambda a, b: a > b,
                 "Less": lambda a, b: a < b,
-                "Ts_Rank": lambda df, n=20: df.rolling(max(1, _get_n(n))).apply(
-                    lambda x: x.rank(pct=True).iloc[-1]
-                ),
+                "Ts_Rank": _dry_ts_rank,
                 "Ts_Percentile": lambda df, n=20, p=50: df.rolling(
                     max(1, _get_n(n))
                 ).apply(lambda x: np.percentile(x, float(p))),
@@ -1302,7 +1372,7 @@ class RiceQuantEval:
                 "Minus": lambda a, b: a - b,
                 "Pow": lambda a, b: a**b,
                 "Neg": lambda a: -a,
-                "Inv": lambda a: 1.0 / a,
+                "Inv": lambda a: 1.0 / (a + 1e-9),
                 "Max": lambda a, b: np.maximum(a, b),
                 "Min": lambda a, b: np.minimum(a, b),
                 "Divide": lambda a, b: a / b,
@@ -1324,12 +1394,8 @@ class RiceQuantEval:
                 "Cov": lambda df1, df2, n=20: df1.rolling(
                     max(1, _get_n(n))
                 ).cov(df2),
-                "Ts_ArgMax": lambda df, n=20: df.rolling(
-                    max(1, _get_n(n))
-                ).apply(lambda x: len(x) - 1 - x.argmax()),
-                "Ts_ArgMin": lambda df, n=20: df.rolling(
-                    max(1, _get_n(n))
-                ).apply(lambda x: len(x) - 1 - x.argmin()),
+                "Ts_ArgMax": _dry_ts_argmax,
+                "Ts_ArgMin": _dry_ts_argmin,
                 "Clip": lambda df, lower, upper: _ensure_df(df).clip(
                     lower=lower, upper=upper
                 ),
@@ -1342,16 +1408,10 @@ class RiceQuantEval:
                     if df is None
                     else _ensure_df(df).rolling(max(1, _get_n(n))).count()
                 ),
-                "Exp": lambda df: np.exp(_ensure_df(df).clip(upper=50)),
+                "Exp": lambda df: np.exp(_ensure_df(df).clip(upper=500)),
                 "Ceil": lambda df: np.ceil(df),
                 "Floor": lambda df: np.floor(df),
-                "WMA": lambda df, n=20: df.rolling(max(1, _get_n(n))).apply(
-                    lambda x: (
-                        np.arange(1, len(x) + 1)
-                        @ x
-                        / np.arange(1, len(x) + 1).sum()
-                    )
-                ),
+                "WMA": _dry_wma,
                 "Const": lambda x: x,
             }
 
