@@ -158,3 +158,47 @@ def test_evaluator_factory_config_parsing():
     assert cfg.slippage_model == "square_root"
     assert cfg.impact_gamma == 0.25
     assert cfg.portfolio_value == 2e7
+
+
+def test_market_impact_flat_raw_data():
+    model = SquareRootImpactModel(base_cost_bps=5.0, portfolio_value=1e6)
+    weights = pd.DataFrame(
+        {"AAPL": [0.5, 0.5]},
+        index=pd.date_range("2024-01-01", periods=2),
+    )
+    flat_raw = pd.DataFrame(
+        {
+            "datetime": pd.date_range("2024-01-01", periods=2),
+            "instrument": ["AAPL", "AAPL"],
+            "close": [100.0, 101.0],
+            "volume": [10000.0, 12000.0],
+            "total_turnover": [1000000.0, 1212000.0],
+        }
+    )
+    drag, rates = model.compute_drag(weights, raw_data=flat_raw)
+    assert len(drag) == 2
+    assert not drag.isna().any()
+
+
+def test_market_impact_zero_volume_illiquid_asset():
+    model = SquareRootImpactModel(base_cost_bps=5.0, portfolio_value=1e6)
+    weights = pd.DataFrame(
+        {"ILLIQ": [0.2, 0.4]},
+        index=pd.date_range("2024-01-01", periods=2),
+    )
+    raw = pd.DataFrame(
+        {
+            "close": [10.0, 10.0],
+            "volume": [0.0, 0.0],
+            "total_turnover": [0.0, 0.0],
+        },
+        index=pd.MultiIndex.from_product(
+            [pd.date_range("2024-01-01", periods=2), ["ILLIQ"]],
+            names=["datetime", "instrument"],
+        ),
+    )
+    drag, rates = model.compute_drag(weights, raw_data=raw)
+    assert len(drag) == 2
+    assert not drag.isna().any()
+    assert np.isfinite(drag.iloc[1])
+

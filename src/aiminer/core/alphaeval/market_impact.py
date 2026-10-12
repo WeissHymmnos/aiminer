@@ -88,38 +88,112 @@ class ParticipationMarketImpactModel(MarketImpactModel):
         self.default_daily_vol = float(default_daily_vol)
         self.max_participation = float(max_participation)
 
+    @staticmethod
+    def _pivot_to_matrix(
+        raw_data: pd.DataFrame | None,
+        col_names: list[str],
+        weights_df: pd.DataFrame,
+    ) -> pd.DataFrame | None:
+        """Pivot raw_data to (datetime x instrument) DataFrame."""
+        if raw_data is None or raw_data.empty:
+            return None
+        try:
+            if isinstance(raw_data.index, pd.MultiIndex):
+                names = raw_data.index.names
+                inst_lvl = next(
+                    (
+                        n
+                        for n in names
+                        if n in ("instrument", "order_book_id", "symbol")
+                    ),
+                    names[1] if len(names) > 1 else None,
+                )
+                dt_lvl = next(
+                    (
+                        n
+                        for n in names
+                        if n in ("datetime", "date", "timestamp")
+                    ),
+                    names[0] if len(names) > 0 else None,
+                )
+                target_col = next(
+                    (c for c in col_names if c in raw_data.columns), None
+                )
+                if target_col is None:
+                    return None
+                series = raw_data[target_col]
+                if inst_lvl is not None and dt_lvl is not None:
+                    if series.index.duplicated().any():
+                        series = series.groupby(level=[dt_lvl, inst_lvl]).mean()
+                    matrix = series.unstack(level=inst_lvl)
+                    return matrix.reindex(
+                        index=weights_df.index, columns=weights_df.columns
+                    )
+            work = raw_data.copy()
+            inst_col = next(
+                (
+                    c
+                    for c in work.columns
+                    if c in ("instrument", "order_book_id", "symbol")
+                ),
+                None,
+            )
+            dt_col = next(
+                (
+                    c
+                    for c in work.columns
+                    if c in ("datetime", "date", "timestamp")
+                ),
+                None,
+            )
+            target_col = next(
+                (c for c in col_names if c in work.columns), None
+            )
+            if inst_col and dt_col and target_col:
+                work[dt_col] = pd.to_datetime(work[dt_col])
+                matrix = (
+                    work.groupby([dt_col, inst_col])[target_col]
+                    .mean()
+                    .unstack(level=inst_col)
+                )
+                return matrix.reindex(
+                    index=weights_df.index, columns=weights_df.columns
+                )
+        except Exception:
+            return None
+        return None
+
     def _extract_adv(
         self,
         weights_df: pd.DataFrame,
         raw_data: pd.DataFrame | None,
     ) -> pd.DataFrame:
         """Extract or estimate Average Daily Traded Value (ADV) matrix."""
+        fallback_adv = self.portfolio_value * 5.0
+        adv_matrix = None
         if raw_data is not None and not raw_data.empty:
-            if "total_turnover" in raw_data.columns:
-                adv_source = raw_data["total_turnover"]
-            elif "volume" in raw_data.columns and "close" in raw_data.columns:
-                adv_source = raw_data["volume"] * raw_data["close"]
-            else:
-                adv_source = None
-
-            if adv_source is not None:
-                adv_matrix = adv_source.unstack(level="instrument")
-                reindexed = adv_matrix.reindex(
-                    index=weights_df.index, columns=weights_df.columns
+            adv_matrix = self._pivot_to_matrix(
+                raw_data, ["total_turnover"], weights_df
+            )
+            if adv_matrix is None:
+                vol_mat = self._pivot_to_matrix(
+                    raw_data, ["volume"], weights_df
                 )
-                adv_rolling = reindexed.rolling(
-                    window=self.adv_window, min_periods=1
-                ).mean()
-                return (
-                    adv_rolling.replace(0, np.nan)
-                    .ffill()
-                    .bfill()
-                    .fillna(1e7)
+                px_mat = self._pivot_to_matrix(
+                    raw_data, ["close"], weights_df
                 )
+                if vol_mat is not None and px_mat is not None:
+                    adv_matrix = vol_mat * px_mat
 
-        # Fallback default: assume ADV = 5x portfolio value
+        if adv_matrix is not None and not adv_matrix.empty:
+            adv_rolling = adv_matrix.rolling(
+                window=self.adv_window, min_periods=1
+            ).mean()
+            clean = adv_rolling.mask(adv_rolling <= 0, np.nan)
+            return clean.ffill().bfill().fillna(fallback_adv)
+
         return pd.DataFrame(
-            self.portfolio_value * 5.0,
+            fallback_adv,
             index=weights_df.index,
             columns=weights_df.columns,
         )
@@ -132,10 +206,14 @@ class ParticipationMarketImpactModel(MarketImpactModel):
     ) -> pd.DataFrame:
         """Extract or estimate rolling daily asset return volatility."""
         ret_matrix = None
-        if raw_data is not None and "close" in raw_data.columns:
-            close_mat = raw_data["close"].unstack(level="instrument")
-            ret_matrix = close_mat.pct_change()
-        elif label_df is not None:
+        if raw_data is not None and not raw_data.empty:
+            close_mat = self._pivot_to_matrix(
+                raw_data, ["close"], weights_df
+            )
+            if close_mat is not None:
+                ret_matrix = close_mat.pct_change()
+
+        if ret_matrix is None and label_df is not None:
             ret_matrix = label_df
 
         if ret_matrix is not None and not ret_matrix.empty:
