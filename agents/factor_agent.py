@@ -1,12 +1,21 @@
 from __future__ import annotations
-from typing import Dict, Any
-from langchain_core.prompts import ChatPromptTemplate
-import json
+
+import ast
 import re
+from typing import Any, Dict
+
+from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
-from workflow.state import AlphaMinerState
+
+from core.json_parser import (
+    escape_control_chars_in_strings,
+    parse_llm_json,
+    parse_llm_model,
+    strip_markdown_json,
+)
 from core.llm import get_llm
 from schemas.messages import FormalizationOutput, ImplementationOutput
+from workflow.state import AlphaMinerState
 
 
 class FactorAgent:
@@ -31,7 +40,6 @@ class FactorAgent:
         "Sum",
         "Ref",
         "Delta",
-        "EMA",
         "Ts_Rank",
         "Ts_Max",
         "Ts_Min",
@@ -145,95 +153,12 @@ Logic / conditional:
             temperature=0.1, provider=provider, model_name=model
         )  # Lower temperature for strictness
 
-    @staticmethod
-    def _strip_markdown_json(text: str) -> str:
-        """Remove markdown code block wrapper and sanitize common JSON issues."""
-        text = text.strip()
-        # Remove markdown blocks (more robust with DOTALL)
-        if "```json" in text:
-            text = re.sub(r".*?```json\s*", "", text, flags=re.DOTALL)
-            text = re.sub(r"\s*```.*", "", text, flags=re.DOTALL)
-        elif "```" in text:
-            text = re.sub(r".*?```\s*", "", text, flags=re.DOTALL)
-            text = re.sub(r"\s*```.*", "", text, flags=re.DOTALL)
-
-        # Remove potential preamble or postamble (look for first { and last })
-        first_brace = text.find("{")
-        last_brace = text.rfind("}")
-        if first_brace != -1 and last_brace != -1:
-            text = text[first_brace : last_brace + 1]
-
-        # Strip strictly-illegal non-printables but PRESERVE \n \t \r — those are
-        # common inside LaTeX formulas returned by the LLM and are tolerated by
-        # json.loads(..., strict=False) downstream in _parse_llm_json().
-        text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]", " ", text)
-
-        return text.strip()
-
-    @staticmethod
-    def _parse_llm_json(text: str) -> dict:
-        """Parse a JSON object emitted by an LLM, tolerant of common quirks.
-
-        Pydantic's model_validate_json uses a strict RFC-8259 parser which
-        rejects literal control characters (\\n, \\t, \\r) inside string
-        values — but LLMs frequently emit multi-line LaTeX formulas like
-        '\\\\begin{bmatrix}\\n...\\n\\\\end{bmatrix}' where the newlines are
-        raw bytes, not escape sequences. Python's stdlib json supports
-        strict=False which accepts those. We use that as the primary parser
-        so downstream pydantic validation runs on a dict, bypassing the
-        strict JSON path entirely.
-        """
-        cleaned = FactorAgent._strip_markdown_json(text)
-
-        # First attempt: lenient parse (accepts literal control chars in strings)
-        try:
-            return json.loads(cleaned, strict=False)
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-        # Second attempt: fix stray single backslashes common in LaTeX
-        # formulas (e.g. "\alpha" → "\\alpha"). The negative lookbehind avoids
-        # double-escaping already-escaped backslashes, and we intentionally do
-        # NOT exclude [bfnrt] so LaTeX commands like \text, \frac, \begin get
-        # escaped (in a math formula, \t is never a JSON tab escape).
-        fixed = re.sub(r'(?<!\\)\\(?!(?:["\\/]|u[0-9a-fA-F]{4}))', r"\\\\", cleaned)
-        try:
-            return json.loads(fixed, strict=False)
-        except (json.JSONDecodeError, ValueError) as e:
-            # Last-resort: escape any remaining raw control chars inside string
-            # values. This walks the text, tracks string context, and replaces
-            # \n/\t/\r with their escaped forms only inside string literals.
-            escaped = FactorAgent._escape_control_chars_in_strings(fixed)
-            try:
-                return json.loads(escaped, strict=False)
-            except (json.JSONDecodeError, ValueError):
-                raise ValueError(f"Unparseable LLM JSON response: {e}") from e
-
-    @staticmethod
-    def _escape_control_chars_in_strings(text: str) -> str:
-        """Escape raw \\n/\\t/\\r inside JSON string literals. Tracks string
-        context via an unescaped-quote counter."""
-        out = []
-        in_string = False
-        i = 0
-        while i < len(text):
-            ch = text[i]
-            if ch == '"' and (i == 0 or text[i - 1] != "\\"):
-                in_string = not in_string
-                out.append(ch)
-            elif in_string and ch == "\n":
-                out.append("\\n")
-            elif in_string and ch == "\t":
-                out.append("\\t")
-            elif in_string and ch == "\r":
-                out.append("\\r")
-            else:
-                out.append(ch)
-            i += 1
-        return "".join(out)
+    # JSON parsing and sanitization helpers delegated to core.json_parser
+    _strip_markdown_json = staticmethod(strip_markdown_json)
+    _parse_llm_json = staticmethod(parse_llm_json)
+    _escape_control_chars_in_strings = staticmethod(escape_control_chars_in_strings)
 
     def _validate_qlib_expression(self, expr: str) -> tuple:
-        import ast
 
         if not expr or not expr.strip():
             return False, "Expression is empty."
@@ -417,8 +342,7 @@ Logic / conditional:
             raw_form_response = form_chain.invoke(
                 {"hypothesis": hypothesis_desc, "rationale": rationale}
             )
-            form_dict = self._parse_llm_json(raw_form_response.content)
-            form_result = FormalizationOutput.model_validate(form_dict)
+            form_result = parse_llm_model(raw_form_response.content, FormalizationOutput)
 
             logger.info(f"[FactorAgent] Formalized Math: {form_result.math_formula}")
 
@@ -498,8 +422,9 @@ Logic / conditional:
                     }
                 )
 
-                impl_dict = self._parse_llm_json(raw_impl_response.content)
-                impl_result = ImplementationOutput.model_validate(impl_dict)
+                impl_result = parse_llm_model(
+                    raw_impl_response.content, ImplementationOutput
+                )
 
                 code_expression = impl_result.code_expression
 

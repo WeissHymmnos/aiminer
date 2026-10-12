@@ -1,13 +1,15 @@
 from __future__ import annotations
-from typing import Dict, Any
-import re
-from datetime import datetime
+
+from typing import Any, Dict
+
 from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
-from workflow.state import AlphaMinerState
+
 from core.hybrid_knowledge import HybridKnowledge
+from core.json_parser import parse_llm_model, strip_markdown_json
 from core.llm import get_llm
 from schemas.messages import HypothesisOutput
+from workflow.state import AlphaMinerState
 
 
 class IdeaAgent:
@@ -27,19 +29,7 @@ class IdeaAgent:
     @staticmethod
     def _strip_markdown_json(text: str) -> str:
         """Remove markdown code block wrapper and sanitize control characters from JSON response."""
-        text = text.strip()
-        if text.startswith("```json"):
-            text = re.sub(r"^```json\s*", "", text)
-            text = re.sub(r"\s*```$", "", text)
-        elif text.startswith("```"):
-            text = re.sub(r"^```\s*", "", text)
-            text = re.sub(r"\s*```$", "", text)
-
-        # Remove control characters except newlines and tabs that are part of JSON structure
-        # Replace control characters within string values with spaces
-        text = re.sub(r"[\x00-\x08\x0b-\x0c\x0e-\x1f]", " ", text)
-
-        return text.strip()
+        return strip_markdown_json(text)
 
     def __call__(self, state: AlphaMinerState) -> Dict[str, Any]:
         iteration = state.get("iteration", 0)
@@ -160,6 +150,7 @@ class IdeaAgent:
 
         chain = prompt | self.llm
 
+        raw_response = None
         try:
             logger.info(
                 f"[IdeaAgent] LLM ({self.llm.model_name}) is thinking deeply about hypothesis for iteration {iteration}..."
@@ -167,8 +158,7 @@ class IdeaAgent:
             raw_response = chain.invoke(
                 {"context": combined_context, "iteration": iteration}
             )
-            cleaned_json = self._strip_markdown_json(raw_response.content)
-            result = HypothesisOutput.model_validate_json(cleaned_json)
+            result = parse_llm_model(raw_response.content, HypothesisOutput)
 
             logger.info(f"[IdeaAgent] Hypothesis Generated: {result.hypothesis_name}")
 
@@ -185,10 +175,8 @@ class IdeaAgent:
             }
         except Exception as e:
             logger.error(f"[IdeaAgent] Failed to generate hypothesis: {e}")
-            try:
+            if raw_response is not None:
                 logger.debug(
                     f"[IdeaAgent] Raw LLM response that failed parsing:\n{raw_response.content}"
                 )
-            except NameError:
-                pass  # raw_response not yet assigned (e.g. LLM call itself failed)
             return {"error": str(e), "messages": [f"[IdeaAgent] Error: {e}"]}

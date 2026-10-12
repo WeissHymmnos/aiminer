@@ -1,5 +1,5 @@
-from typing import TypedDict, Annotated, List, Dict, Optional
 import operator
+from typing import Annotated, Dict, List, Optional, TypedDict
 
 
 class AlphaMinerState(TypedDict, total=False):

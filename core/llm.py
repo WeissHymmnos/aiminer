@@ -9,9 +9,9 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, Optional
 
-from loguru import logger
-from langchain_openai import ChatOpenAI
 from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_openai import ChatOpenAI
+from loguru import logger
 
 # Canonical env aliases for each provider (first match wins).
 _PROVIDER_KEY_ENVS: Dict[str, tuple[str, ...]] = {
@@ -209,3 +209,76 @@ def get_llm(
         return ChatOpenAI(**kwargs, request_timeout=60)
     except TypeError:
         return ChatOpenAI(**kwargs, timeout=60)
+
+
+def create_chroma_embedding_function(
+    embedding_provider: Optional[str] = None,
+    use_gpu: bool = False,
+    caller: str = "",
+) -> tuple[Any, str]:
+    """Create a ChromaDB embedding function and associated directory version tag.
+
+    Supports local SentenceTransformer (with mirror fallback) and API-based
+    embeddings (OpenAI, Moonshot/Kimi, DashScope/Qwen, Zhipu/GLM, etc.) with
+    graceful fallback to local BGE embeddings if no API keys are present.
+
+    Returns:
+        (embedding_function, model_tag): Tuple of initialized embedding function
+        and a filesystem-safe tag string for ChromaDB persistence isolation.
+    """
+    from chromadb.utils.embedding_functions import (
+        OpenAIEmbeddingFunction,
+        SentenceTransformerEmbeddingFunction,
+    )
+
+    prefix = f"{caller}: " if caller else ""
+    use_local = (embedding_provider == "local") or (
+        os.getenv("USE_LOCAL_EMBEDDING", "false").lower() == "true"
+    )
+
+    if use_local:
+        model_name = "Qwen/Qwen3-Embedding-4B"
+        model_tag = model_name.replace("/", "_")
+        device = "cuda" if use_gpu else "cpu"
+        logger.info(
+            f"{prefix}Initializing LARGE LOCAL embedding model ({model_name}) on {device}..."
+        )
+        try:
+            embedding_fn = SentenceTransformerEmbeddingFunction(
+                model_name=model_name, device=device, trust_remote_code=True
+            )
+        except Exception as e:
+            logger.warning(
+                f"{prefix}Hub connection sluggish ({e}). Trying mirror fallback..."
+            )
+            os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+            embedding_fn = SentenceTransformerEmbeddingFunction(
+                model_name=model_name, device=device, trust_remote_code=True
+            )
+        return embedding_fn, model_tag
+
+    try:
+        cfg = get_llm_config(provider=embedding_provider)
+        provider = cfg["provider"]
+        emb_defaults = get_embedding_defaults(provider)
+        api_key = emb_defaults.get("api_key_override") or cfg["api_key"]
+
+        logger.info(f"{prefix}Initializing API-based embedding ({provider})...")
+        embedding_fn = OpenAIEmbeddingFunction(
+            api_key=api_key,
+            model_name=emb_defaults["model_name"],
+            api_base=emb_defaults["api_base"],
+        )
+        model_tag = f"{provider}_{emb_defaults['model_name'].replace('/', '_')}"
+        return embedding_fn, model_tag
+    except Exception as e:
+        logger.warning(
+            f"{prefix}No valid API key or provider found for embeddings ({e}). "
+            "Falling back to LOCAL bge-large."
+        )
+        model_tag = "bge-large"
+        embedding_fn = SentenceTransformerEmbeddingFunction(
+            model_name="BAAI/bge-large-zh-v1.5"
+        )
+        return embedding_fn, model_tag
+

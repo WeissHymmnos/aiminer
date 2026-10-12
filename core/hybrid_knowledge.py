@@ -1,9 +1,11 @@
 import re
-from core.rag import RAGModule
-from core.wiki import LLMWiki
-from core.template_renderer import TemplateRenderer
 from typing import Any, Dict, List, Optional
+
 from loguru import logger
+
+from core.rag import RAGModule
+from core.template_renderer import TemplateRenderer
+from core.wiki import LLMWiki
 
 
 class HybridKnowledge:

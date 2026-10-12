@@ -4,7 +4,6 @@ import unittest
 import rqdatac as rq
 from dotenv import load_dotenv
 
-
 load_dotenv()
 
 

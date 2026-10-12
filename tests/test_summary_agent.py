@@ -1,7 +1,9 @@
-import unittest
 import os
+import unittest
+from unittest.mock import MagicMock, patch
+
 import pandas as pd
-from unittest.mock import patch, MagicMock
+
 from agents.summary_agent import SummaryAgent
 
 

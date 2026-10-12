@@ -1,5 +1,10 @@
+from __future__ import annotations
+
+from typing import Any, Optional
+
 import pandas as pd
 from loguru import logger
+
 from workflow.graph import build_workflow
 
 
@@ -10,15 +15,15 @@ class AlphaResearcher:
         max_iterations: int = 5,
         evaluation_mode: str = "ricequant",
         evaluation_engine: str = "pandas",
-        market_start: str = None,
-        market_end: str = None,
-        llm_provider: str = None,
-        llm_model: str = None,
-        embedding_provider: str = None,
+        market_start: Optional[str] = None,
+        market_end: Optional[str] = None,
+        llm_provider: Optional[str] = None,
+        llm_model: Optional[str] = None,
+        embedding_provider: Optional[str] = None,
         use_gpu: bool = False,
         rebuild_rag: bool = False,
         wiki_bootstrap: bool = False,
-        log_queue=None,
+        log_queue: Any = None,
     ):
         self.role_prompt = role_prompt
         self.max_iterations = max_iterations
@@ -26,6 +31,8 @@ class AlphaResearcher:
         self.evaluation_engine = evaluation_engine
         self.market_start = market_start
         self.market_end = market_end
+        self.wiki_bootstrap = wiki_bootstrap
+        self._sink_id: Optional[int] = None
 
         # If a log_queue is provided, add a sink to forward logs to the main process
         if log_queue:
@@ -34,10 +41,11 @@ class AlphaResearcher:
                 log_data = {
                     "level": record["level"].name,
                     "message": record["message"],
-                    "role": self.role_prompt[:20] # Truncate for clarity
+                    "role": self.role_prompt[:20],  # Truncate for clarity
                 }
                 log_queue.put(log_data)
-            logger.add(q_sink, level="INFO", format="{message}")
+
+            self._sink_id = logger.add(q_sink, level="INFO", format="{message}")
 
         logger.info(f"[Sub-Agent] Initializing Role: {self.role_prompt}")
 
@@ -82,6 +90,12 @@ class AlphaResearcher:
         except Exception as e:
             logger.error(f"[Sub-Agent] Workflow execution failed: {e}")
             final_state["error"] = f"Workflow exception: {e}"
+        finally:
+            if self._sink_id is not None:
+                try:
+                    logger.remove(self._sink_id)
+                except ValueError:
+                    pass
 
         metrics = final_state.get("backtest_metrics", {})
         daily_returns_dict = final_state.get("daily_returns", {})

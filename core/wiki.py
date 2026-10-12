@@ -1,84 +1,30 @@
+from __future__ import annotations
+
 import os
 import re
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, List, Tuple
-from loguru import logger
+from typing import Any, Dict, List, Optional
+
 import chromadb
-from chromadb.utils.embedding_functions import (
-    OpenAIEmbeddingFunction,
-    SentenceTransformerEmbeddingFunction,
-)
-from core.llm import get_llm_config, get_embedding_defaults
+from loguru import logger
 
+from core.frontmatter import dump_frontmatter, parse_frontmatter
+from core.llm import create_chroma_embedding_function
 
-# --- Frontmatter helpers (avoid PyYAML dep) ---
-
-_FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
-
-
-def _parse_frontmatter(text: str) -> Tuple[Dict[str, Any], str]:
-    """Parse a minimal YAML-style frontmatter block. Supports scalar and
-    flow-list values (e.g. `tags: [a, b]`). Returns (meta, body)."""
-    m = _FRONTMATTER_RE.match(text)
-    if not m:
-        return {}, text
-    meta: Dict[str, Any] = {}
-    for line in m.group(1).splitlines():
-        if ":" not in line:
-            continue
-        k, _, v = line.partition(":")
-        k = k.strip()
-        v = v.strip()
-        if not k:
-            continue
-        if v.startswith("[") and v.endswith("]"):
-            items = [s.strip().strip('"').strip("'") for s in v[1:-1].split(",")]
-            meta[k] = [s for s in items if s]
-        else:
-            meta[k] = v.strip('"').strip("'")
-    return meta, text[m.end():]
-
-
-def _dump_frontmatter(meta: Dict[str, Any]) -> str:
-    """Write a minimal, stable YAML-ish frontmatter block."""
-    lines = ["---"]
-    for k in ("title", "slug", "type", "status", "summary", "updated", "tags", "related"):
-        if k not in meta:
-            continue
-        v = meta[k]
-        if isinstance(v, (list, tuple)):
-            items = ", ".join(f'"{str(x).replace(chr(34), chr(92) + chr(34))}"' for x in v)
-            lines.append(f"{k}: [{items}]")
-        elif isinstance(v, bool):
-            lines.append(f"{k}: {str(v).lower()}")
-        elif isinstance(v, (int, float)):
-            lines.append(f"{k}: {v}")
-        else:
-            safe = str(v).replace('"', '\\"').replace("\n", " ")
-            lines.append(f'{k}: "{safe}"')
-    # Preserve any extra keys caller passed (e.g. ic, rank_ic, iteration)
-    for k, v in meta.items():
-        if k in {"title", "slug", "type", "status", "summary", "updated", "tags", "related"}:
-            continue
-        if isinstance(v, (list, tuple)):
-            items = ", ".join(f'"{x}"' for x in v)
-            lines.append(f"{k}: [{items}]")
-        elif isinstance(v, bool):
-            lines.append(f"{k}: {str(v).lower()}")
-        elif isinstance(v, (int, float)):
-            lines.append(f"{k}: {v}")
-        else:
-            safe = str(v).replace('"', '\\"').replace("\n", " ")
-            lines.append(f'{k}: "{safe}"')
-    lines.append("---")
-    return "\n".join(lines) + "\n\n"
-
+# Frontmatter helpers delegated to core.frontmatter for consistency
+_parse_frontmatter = parse_frontmatter
+_dump_frontmatter = dump_frontmatter
 
 _WIKILINK_RE = re.compile(r"\[\[([A-Za-z0-9_\-]+)\]\]")
 
 
 class LLMWiki:
-    def __init__(self, db_dir: str = "data/wiki_db", wiki_vault: str = "data/wiki_vault", embedding_provider: str = None):
+    def __init__(
+        self,
+        db_dir: str = "data/wiki_db",
+        wiki_vault: str = "data/wiki_vault",
+        embedding_provider: str = None,
+    ):
         self.wiki_vault = wiki_vault
         os.makedirs(self.wiki_vault, exist_ok=True)
         # When True, add_or_update_page skips the per-write recompile and
@@ -88,45 +34,17 @@ class LLMWiki:
         # Karpathy logic: initialize core metadata files
         self.index_file = os.path.join(self.wiki_vault, "index.md")
         self.log_file = os.path.join(self.wiki_vault, "log.md")
-        self._ensure_file(self.index_file, "# Wiki Index\n\nWelcome to the compiled knowledge base.\n")
+        self._ensure_file(
+            self.index_file, "# Wiki Index\n\nWelcome to the compiled knowledge base.\n"
+        )
         self._ensure_file(self.log_file, "# Wiki Maintenance Log\n\n")
-
-        # ... (Previous embedding initialization remains for search speed) ...
-        # [Existing embedding code here, truncated for replace call brevity]
-        use_local = (embedding_provider == "local") or (
-            os.getenv("USE_LOCAL_EMBEDDING", "false").lower() == "true"
+        self.embedding_fn, self.model_tag = create_chroma_embedding_function(
+            embedding_provider=embedding_provider,
+            use_gpu=False,
+            caller="Wiki",
         )
 
-        model_tag = "api"
-        if use_local:
-            model_name = "Qwen/Qwen3-Embedding-4B"
-            model_tag = model_name.replace("/", "_")
-            logger.info(f"Wiki: Initializing LOCAL embedding model ({model_name})...")
-            self.embedding_fn = SentenceTransformerEmbeddingFunction(
-                model_name=model_name, trust_remote_code=True
-            )
-        else:
-            try:
-                cfg = get_llm_config(provider=embedding_provider)
-                provider = cfg["provider"]
-                emb_defaults = get_embedding_defaults(provider)
-                api_key = emb_defaults.get("api_key_override") or cfg["api_key"]
-
-                logger.info(f"Wiki: Initializing API-based embedding ({provider})...")
-                self.embedding_fn = OpenAIEmbeddingFunction(
-                    api_key=api_key,
-                    model_name=emb_defaults["model_name"],
-                    api_base=emb_defaults["api_base"],
-                )
-                model_tag = f"{provider}_{emb_defaults['model_name'].replace('/', '_')}"
-            except Exception:
-                logger.warning("Wiki: Falling back to LOCAL bge-large for embeddings.")
-                model_tag = "bge-large"
-                self.embedding_fn = SentenceTransformerEmbeddingFunction(
-                    model_name="BAAI/bge-large-zh-v1.5"
-                )
-
-        self.db_dir = os.path.join(db_dir, model_tag)
+        self.db_dir = os.path.join(db_dir, self.model_tag)
         os.makedirs(self.db_dir, exist_ok=True)
         self.client = chromadb.PersistentClient(path=self.db_dir)
         self.wiki_col = self.client.get_or_create_collection(
@@ -137,7 +55,7 @@ class LLMWiki:
         """List all pages in the wiki."""
         where = {"type": type_filter} if type_filter else None
         results = self.wiki_col.get(where=where, include=["documents", "metadatas"])
-        
+
         pages = []
         if results["ids"]:
             for doc, meta in zip(results["documents"], results["metadatas"]):

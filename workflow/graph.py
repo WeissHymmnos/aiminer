@@ -1,11 +1,13 @@
 from __future__ import annotations
-from langgraph.graph import StateGraph, END
+
+from langgraph.graph import END, StateGraph
 from loguru import logger
-from workflow.state import AlphaMinerState
-from agents.idea_agent import IdeaAgent
-from agents.factor_agent import FactorAgent
+
 from agents.eval_agent import EvalAgent
+from agents.factor_agent import FactorAgent
+from agents.idea_agent import IdeaAgent
 from core.hybrid_knowledge import HybridKnowledge
+from workflow.state import AlphaMinerState
 
 
 # Routing Functions

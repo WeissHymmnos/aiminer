@@ -1,6 +1,7 @@
-import akshare as ak
 import os
 from datetime import datetime
+
+import akshare as ak
 
 
 def generate_market_metadata():

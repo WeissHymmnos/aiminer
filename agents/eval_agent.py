@@ -1,14 +1,17 @@
 from __future__ import annotations
-from typing import Dict, Any
-from langchain_core.prompts import ChatPromptTemplate
-import random
+
 import hashlib
-import re
+import random
+from typing import Any, Dict
+
+from langchain_core.prompts import ChatPromptTemplate
 from loguru import logger
-from workflow.state import AlphaMinerState
+
 from core.hybrid_knowledge import HybridKnowledge
+from core.json_parser import parse_llm_model, strip_markdown_json
 from core.llm import get_llm
 from schemas.messages import ReflexiveReviewOutput
+from workflow.state import AlphaMinerState
 
 
 class EvalAgent:
@@ -18,16 +21,24 @@ class EvalAgent:
         self.knowledge = knowledge
         self.llm = get_llm(temperature=0.4, provider=provider, model_name=model)
 
+    _strip_markdown_json = staticmethod(strip_markdown_json)
+
     @staticmethod
-    def _strip_markdown_json(text: str) -> str:
-        text = text.strip()
-        if text.startswith("```json"):
-            text = re.sub(r"^```json\s*", "", text)
-            text = re.sub(r"\s*```$", "", text)
-        elif text.startswith("```"):
-            text = re.sub(r"^```\s*", "", text)
-            text = re.sub(r"\s*```$", "", text)
-        return text.strip()
+    def _generate_simulated_metrics(code: str) -> Dict[str, Any]:
+        """Generate deterministic fallback metrics based on code hash."""
+        seed = int(hashlib.md5(code.encode()).hexdigest()[:8], 16)
+        rng = random.Random(seed)
+        return {
+            "information_coefficient": round(rng.uniform(-0.05, 0.15), 3),
+            "rank_ic": round(rng.uniform(-0.05, 0.15), 3),
+            "rre": round(rng.uniform(0.0, 1.0), 3),
+            "pfs1": round(rng.uniform(0.0, 1.0), 6),
+            "pfs2": round(rng.uniform(0.0, 1.0), 6),
+            "diversity": round(rng.uniform(0.0, 1.0), 3),
+            "llm_score": round(rng.uniform(50.0, 100.0), 2),
+            "daily_returns": {},
+            "_simulated": True,
+        }
 
     def _execute_alphaeval_backtest(
         self,
@@ -80,39 +91,11 @@ class EvalAgent:
         except (FileNotFoundError, ValueError, ImportError) as e:
             logger.error(f"RiceQuant evaluation failed: {e}")
             logger.info("Falling back to simulated metrics.")
-
-            seed = int(hashlib.md5(code.encode()).hexdigest()[:8], 16)
-            rng = random.Random(seed)
-
-            return {
-                "information_coefficient": round(rng.uniform(-0.05, 0.15), 3),
-                "rank_ic": round(rng.uniform(-0.05, 0.15), 3),
-                "rre": round(rng.uniform(0.0, 1.0), 3),
-                "pfs1": round(rng.uniform(0.0, 1.0), 6),
-                "pfs2": round(rng.uniform(0.0, 1.0), 6),
-                "diversity": round(rng.uniform(0.0, 1.0), 3),
-                "llm_score": round(rng.uniform(50.0, 100.0), 2),
-                "daily_returns": {},
-                "_simulated": True,
-            }
+            return self._generate_simulated_metrics(code)
         except Exception as e:
             logger.warning(f"RiceQuant backtest unexpected failure: {e}")
             logger.info("Falling back to simulated metrics.")
-
-            seed = int(hashlib.md5(code.encode()).hexdigest()[:8], 16)
-            rng = random.Random(seed)
-
-            return {
-                "information_coefficient": round(rng.uniform(-0.05, 0.15), 3),
-                "rank_ic": round(rng.uniform(-0.05, 0.15), 3),
-                "rre": round(rng.uniform(0.0, 1.0), 3),
-                "pfs1": round(rng.uniform(0.0, 1.0), 6),
-                "pfs2": round(rng.uniform(0.0, 1.0), 6),
-                "diversity": round(rng.uniform(0.0, 1.0), 3),
-                "llm_score": round(rng.uniform(50.0, 100.0), 2),
-                "daily_returns": {},
-                "_simulated": True,
-            }
+            return self._generate_simulated_metrics(code)
 
     def __call__(self, state: AlphaMinerState) -> Dict[str, Any]:
         code = state.get("code_expression", "")
@@ -178,9 +161,8 @@ class EvalAgent:
             raw_review_response = review_chain.invoke(
                 {"hypothesis": hypothesis_desc, "code": code, "metrics": str(metrics)}
             )
-            cleaned_review_json = self._strip_markdown_json(raw_review_response.content)
-            review_result = ReflexiveReviewOutput.model_validate_json(
-                cleaned_review_json
+            review_result = parse_llm_model(
+                raw_review_response.content, ReflexiveReviewOutput
             )
 
             logger.info(f"[EvalAgent] Review Summary: {review_result.review_summary}")

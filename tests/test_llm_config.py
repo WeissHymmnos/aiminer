@@ -5,10 +5,10 @@ import unittest
 from unittest import mock
 
 from core.llm import (
-    get_llm_config,
-    get_embedding_defaults,
-    get_provider_base_url,
     EMBEDDING_DEFAULTS,
+    get_embedding_defaults,
+    get_llm_config,
+    get_provider_base_url,
 )
 
 
@@ -71,6 +71,26 @@ class TestLLMConfig(unittest.TestCase):
     def test_embedding_defaults_cover_core_providers(self):
         for name in ("openai", "glm", "kimi", "qwen"):
             self.assertIn(name, EMBEDDING_DEFAULTS)
+
+    @mock.patch("chromadb.utils.embedding_functions.OpenAIEmbeddingFunction")
+    def test_create_chroma_embedding_function_api(self, mock_openai_fn):
+        from core.llm import create_chroma_embedding_function
+
+        mock_openai_fn.return_value = "mock_fn"
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test-emb"}, clear=False):
+            fn, tag = create_chroma_embedding_function(embedding_provider="openai")
+            self.assertEqual(fn, "mock_fn")
+            self.assertEqual(tag, "openai_text-embedding-3-large")
+            mock_openai_fn.assert_called_once()
+
+    @mock.patch("chromadb.utils.embedding_functions.SentenceTransformerEmbeddingFunction")
+    def test_create_chroma_embedding_function_local(self, mock_st_fn):
+        from core.llm import create_chroma_embedding_function
+
+        mock_st_fn.return_value = "mock_local_fn"
+        fn, tag = create_chroma_embedding_function(embedding_provider="local")
+        self.assertEqual(fn, "mock_local_fn")
+        self.assertEqual(tag, "Qwen_Qwen3-Embedding-4B")
 
 
 if __name__ == "__main__":

@@ -5,23 +5,26 @@ Copyright (C) 2026 AI Alpha Miner contributors
 SPDX-License-Identifier: AGPL-3.0-only
 """
 
-import os
+from __future__ import annotations
+
 import argparse
-import pandas as pd
-from loguru import logger
 import concurrent.futures
-from dotenv import load_dotenv
-import multiprocessing
-import time
-import random
-
-import sqlite3
 import json
+import multiprocessing
+import os
+import random
+import sqlite3
+import time
 import uuid
+from typing import Any
 
-from sub_agent import AlphaResearcher
+import pandas as pd
+from dotenv import load_dotenv
+from loguru import logger
+
 from agents.summary_agent import SummaryAgent
 from core.alphaeval.rq_eval import init_rq_auth
+from sub_agent import AlphaResearcher
 
 
 # Global entry point for multiprocessing
@@ -179,6 +182,38 @@ class PortfolioManager:
                 task_kwargs["log_queue"] = log_queue
             self.researchers.append(task_kwargs)
 
+    @staticmethod
+    def _is_redundant_factor(
+        candidate_returns: pd.Series,
+        pool: list[dict[str, Any]],
+        max_corr: float = 0.7,
+        min_overlap: int = 10,
+    ) -> tuple[bool, float | None]:
+        """Check if candidate returns are highly correlated with any factor in the pool."""
+        if candidate_returns is None or (
+            hasattr(candidate_returns, "empty") and candidate_returns.empty
+        ):
+            return True, None
+
+        for existing_factor in pool:
+            existing_returns = existing_factor.get("returns")
+            if existing_returns is None or (
+                hasattr(existing_returns, "empty") and existing_returns.empty
+            ):
+                continue
+
+            aligned_df = pd.concat(
+                [candidate_returns, existing_returns], axis=1, join="inner"
+            ).dropna()
+            if len(aligned_df) < min_overlap:
+                continue
+
+            corr = aligned_df.iloc[:, 0].corr(aligned_df.iloc[:, 1])
+            if pd.notna(corr) and corr > max_corr:
+                return True, float(corr)
+
+        return False, None
+
     def evaluate_and_combine(self, results_list):
         """Core logic: survival of the fittest and correlation culling."""
         logger.info("=== Manager Evaluation & Synthesis ===")
@@ -206,45 +241,27 @@ class PortfolioManager:
         # 2. Second-pass filter: Correlation (multicollinearity) check
         final_pool = []
         for new_factor in valid_factors:
-            is_redundant = False
             new_returns = new_factor.get("returns", pd.Series(dtype=float))
-
             if new_returns.empty:
                 logger.warning(
                     f"[Culled] {new_factor['role'][:30]}... has empty returns series."
                 )
                 continue
 
-            for existing_factor in final_pool:
-                existing_returns = existing_factor.get("returns")
-                if existing_returns is None or (
-                    hasattr(existing_returns, "empty") and existing_returns.empty
-                ):
-                    continue
-
-                # Align indices and drop NaN pairs before computing correlation
-                aligned_df = pd.concat(
-                    [new_returns, existing_returns], axis=1, join="inner"
-                ).dropna()
-                if len(aligned_df) < 10:
-                    continue  # Not enough clean overlap; treat as uncorrelated
-
-                corr = aligned_df.iloc[:, 0].corr(aligned_df.iloc[:, 1])
-
-                if pd.notna(corr) and corr > 0.7:
-                    is_redundant = True
-                    logger.info(
-                        f"[Redundant] {new_factor['role'][:30]}... highly correlated (Corr: {corr:.2f}) with existing factor."
-                    )
-                    break
-
-            if not is_redundant:
-                # Assign unique ID
-                new_factor["id"] = f"alpha_{uuid.uuid4().hex[:8]}"
-                final_pool.append(new_factor)
-                logger.success(
-                    f"[Accepted] {new_factor['role'][:30]}... (IC: {new_factor['perf_metric']:.4f}) added to Alpha Pool."
+            is_redundant, corr = self._is_redundant_factor(new_returns, final_pool)
+            if is_redundant:
+                corr_str = f"Corr: {corr:.2f}" if corr is not None else "insufficient data"
+                logger.info(
+                    f"[Redundant] {new_factor['role'][:30]}... highly correlated ({corr_str}) with existing factor."
                 )
+                continue
+
+            # Assign unique ID
+            new_factor["id"] = f"alpha_{uuid.uuid4().hex[:8]}"
+            final_pool.append(new_factor)
+            logger.success(
+                f"[Accepted] {new_factor['role'][:30]}... (IC: {new_factor['perf_metric']:.4f}) added to Alpha Pool."
+            )
 
         self.alpha_pool = final_pool
         return self.alpha_pool
@@ -334,25 +351,10 @@ class PortfolioManager:
                 not crossover_result.get("error")
                 and crossover_result.get("perf_metric", 0.0) > 0.01
             ):
-                # Correlation check against existing pool
-                is_redundant = False
                 new_returns = crossover_result.get("returns", pd.Series(dtype=float))
-                if not new_returns.empty:
-                    for existing_factor in self.alpha_pool:
-                        existing_returns = existing_factor.get("returns")
-                        if existing_returns is None or (
-                            hasattr(existing_returns, "empty")
-                            and existing_returns.empty
-                        ):
-                            continue
-                        aligned_df = pd.concat(
-                            [new_returns, existing_returns], axis=1, join="inner"
-                        ).dropna()
-                        if len(aligned_df) >= 10:
-                            corr = aligned_df.iloc[:, 0].corr(aligned_df.iloc[:, 1])
-                            if pd.notna(corr) and corr > 0.7:
-                                is_redundant = True
-                                break
+                is_redundant, corr = self._is_redundant_factor(
+                    new_returns, self.alpha_pool
+                )
                 if not is_redundant:
                     logger.success(
                         f"[Crossover Success] Hybrid factor IC: {crossover_result['perf_metric']:.4f}"
@@ -360,8 +362,9 @@ class PortfolioManager:
                     crossover_result["id"] = f"alpha_{uuid.uuid4().hex[:8]}"
                     self.alpha_pool.append(crossover_result)
                 else:
+                    corr_str = f" (Corr: {corr:.2f})" if corr is not None else ""
                     logger.warning(
-                        "[Crossover Failed] Hybrid factor is highly correlated with existing factors."
+                        f"[Crossover Failed] Hybrid factor is highly correlated{corr_str} with existing factors."
                     )
             else:
                 logger.warning(

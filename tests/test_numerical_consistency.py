@@ -1,8 +1,10 @@
 import unittest
-import pandas as pd
+
 import numpy as np
-from core.alphaeval.rq_eval import RiceQuantEval
+import pandas as pd
 from loguru import logger
+
+from core.alphaeval.rq_eval import RiceQuantEval
 
 
 class TestNumericalConsistency(unittest.TestCase):

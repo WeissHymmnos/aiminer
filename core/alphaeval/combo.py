@@ -1,8 +1,9 @@
 import os
+from typing import Dict, List, Optional
+
 import numpy as np
 import pandas as pd
 from scipy.optimize import differential_evolution
-from typing import Dict, List, Optional
 
 # import warnings
 # warnings.filterwarnings("ignore")

@@ -1,12 +1,14 @@
-import os
-import json
 import glob
+import json
+import os
 import uuid
-from typing import List, Dict
+from typing import Dict, List
+
 import chromadb
-from loguru import logger
-from core.llm import get_llm_config, get_embedding_defaults
 from dotenv import load_dotenv
+from loguru import logger
+
+from core.llm import create_chroma_embedding_function
 
 # Load environment variables
 load_dotenv()
@@ -26,68 +28,18 @@ class RAGModule:
         embedding_provider: str = None,
         use_gpu: bool = False,
     ):
-        from chromadb.utils.embedding_functions import (
-            OpenAIEmbeddingFunction,
-            SentenceTransformerEmbeddingFunction,
-        )
-
         self.docs_dir = docs_dir
         self.rebuild = rebuild
         os.makedirs(self.docs_dir, exist_ok=True)
 
-        # Check if local embedding is forced
-        use_local = (embedding_provider == "local") or (
-            os.getenv("USE_LOCAL_EMBEDDING", "false").lower() == "true"
+        self.embedding_fn, self.model_tag = create_chroma_embedding_function(
+            embedding_provider=embedding_provider,
+            use_gpu=use_gpu,
+            caller="RAG",
         )
 
-        model_tag = "api"
-        if use_local:
-            model_name = "Qwen/Qwen3-Embedding-4B"
-            model_tag = model_name.replace("/", "_")  # Safe for filesystem
-            device = "cuda" if use_gpu else "cpu"
-            logger.info(
-                f"Initializing LARGE LOCAL embedding model ({model_name}) on {device}..."
-            )
-            try:
-                self.embedding_fn = SentenceTransformerEmbeddingFunction(
-                    model_name=model_name, device=device, trust_remote_code=True
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Note: Hub connection sluggish ({e}). Trying mirror fallback..."
-                )
-                os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-                self.embedding_fn = SentenceTransformerEmbeddingFunction(
-                    model_name=model_name, device=device, trust_remote_code=True
-                )
-        else:
-            # Auto-detect API provider (defaults centralized in core.llm)
-            try:
-                cfg = get_llm_config(provider=embedding_provider)
-                provider = cfg["provider"]
-                model_tag = provider
-                emb_defaults = get_embedding_defaults(provider)
-                api_key = emb_defaults.get("api_key_override") or cfg["api_key"]
-
-                logger.info(f"Initializing API-based embedding ({provider})...")
-                self.embedding_fn = OpenAIEmbeddingFunction(
-                    api_key=api_key,
-                    model_name=emb_defaults["model_name"],
-                    api_base=emb_defaults["api_base"],
-                )
-                # Version by provider AND model name to prevent dimension mismatch
-                model_tag = f"{provider}_{emb_defaults['model_name'].replace('/', '_')}"
-            except (ValueError, KeyError):
-                logger.warning(
-                    "No API key or provider found for embeddings. Falling back to LOCAL bge-large."
-                )
-                model_tag = "bge-large"
-                self.embedding_fn = SentenceTransformerEmbeddingFunction(
-                    model_name="BAAI/bge-large-zh-v1.5"
-                )
-
         # Version the DB directory by model_tag to avoid dimension mismatch
-        self.db_dir = os.path.join(db_dir, model_tag)
+        self.db_dir = os.path.join(db_dir, self.model_tag)
         os.makedirs(self.db_dir, exist_ok=True)
 
         # Initialize ChromaDB
@@ -171,9 +123,9 @@ class RAGModule:
                 # We look for yearly patterns like 2021-2026
                 rel_path = os.path.relpath(file_path, self.docs_dir)
                 path_parts = rel_path.split(os.sep)
-                
+
                 metadata = {"source": file_path}
-                
+
                 # Simple heuristic for type and year
                 if len(path_parts) >= 1:
                     metadata["type"] = path_parts[0]
@@ -181,7 +133,7 @@ class RAGModule:
                     # Check if second part is a year
                     if path_parts[1].isdigit() and len(path_parts[1]) == 4:
                         metadata["year"] = path_parts[1]
-                
+
                 with open(file_path, "r", encoding="utf-8") as f:
                     content = f.read()
 
@@ -190,11 +142,11 @@ class RAGModule:
                     if not chunk.strip():
                         continue
                     all_chunks.append(chunk)
-                    
+
                     chunk_metadata = metadata.copy()
                     chunk_metadata["chunk"] = i
                     all_metadatas.append(chunk_metadata)
-                    
+
                     all_ids.append(f"doc_{doc_id_counter}")
                     doc_id_counter += 1
             except Exception as e:
@@ -217,12 +169,12 @@ class RAGModule:
 
     def _safe_query(self, collection, query: str, n_results: int, max_retries: int = 3):
         # Query a collection safely with retry logic, backoff, and file-level lock protection.
-        import time
         import fcntl
+        import time
         last_error = None
-        
+
         lock_file = os.path.join(self.db_dir, "rag_read.lock")
-        
+
         for attempt in range(max_retries):
             try:
                 # Use shared lock for reading
@@ -233,16 +185,16 @@ class RAGModule:
                         if count == 0:
                             return None
                         actual_n = min(n_results, count)
-                        
+
                         # Executing the query with potential timeout
                         return collection.query(query_texts=[query], n_results=actual_n)
                     finally:
                         fcntl.flock(lf, fcntl.LOCK_UN)
-                
+
             except Exception as e:
                 last_error = e
                 err_msg = str(e).lower()
-                
+
                 # If it's a timeout or locking error, wait and retry
                 if any(x in err_msg for x in ["timeout", "timed out", "rate limit", "database is locked"]):
                     wait_time = (attempt + 1) * 2
@@ -252,11 +204,11 @@ class RAGModule:
                     )
                     time.sleep(wait_time)
                     continue
-                
+
                 # For other errors, log and return empty
                 logger.warning(f"ChromaDB query failed with non-timeout error: {e}. Returning empty results.")
                 return None
-                
+
         logger.error(f"ChromaDB query failed after {max_retries} retries. Final error: {last_error}")
         return None
 

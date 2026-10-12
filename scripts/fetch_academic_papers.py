@@ -1,8 +1,8 @@
-import urllib.request
-import urllib.parse
-import xml.etree.ElementTree as ET
 import os
 import ssl
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
 
 
 def fetch_arxiv_papers(query, max_results=50, output_dir="data/rag_docs/academic"):

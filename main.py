@@ -5,19 +5,22 @@ Copyright (C) 2026 AI Alpha Miner contributors
 SPDX-License-Identifier: AGPL-3.0-only
 """
 
-import os
-import sys
+from __future__ import annotations
+
 import argparse
 import json
+import os
 import subprocess
+import sys
 from datetime import datetime
+
 from dotenv import load_dotenv
 from loguru import logger
 
+from workflow.graph import build_workflow
+
 # Load environment variables first, before initializing any agents or LangChain modules
 load_dotenv()
-
-from workflow.graph import build_workflow
 
 
 def setup_logging(verbose: bool = False):
@@ -255,7 +258,7 @@ def main():
                     logger.error(f"Error in {node_name}: {state_update['error']}")
 
         logger.info("=== Execution Complete ===")
-        
+
         # Final Summary Generation with plots
         if final_state.get("code_expression") and not final_state.get("is_simulated"):
             try:

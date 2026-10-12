@@ -1,9 +1,9 @@
-import urllib.request
-import urllib.parse
-import xml.etree.ElementTree as ET
 import os
 import ssl
 import time
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
 
 
 def fetch_arxiv_papers(output_dir="data/rag_docs/academic/arxiv_recent"):

@@ -1,10 +1,13 @@
 from __future__ import annotations
+
 from typing import List, Optional
-from loguru import logger
-from core.wiki import LLMWiki
-from core.rag import RAGModule
-from core.llm import get_llm
+
 from langchain_core.prompts import ChatPromptTemplate
+from loguru import logger
+
+from core.llm import get_llm
+from core.rag import RAGModule
+from core.wiki import LLMWiki
 
 
 class WikiBootstrapper:

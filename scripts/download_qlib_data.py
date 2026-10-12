@@ -1,6 +1,6 @@
 import os
-import sys
 import subprocess
+import sys
 
 
 def download_qlib_data(region="cn"):

@@ -1,11 +1,15 @@
+import ast
 import os
+from pathlib import Path
+from typing import List, Optional
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import rqdatac as rq
-from typing import List, Optional
-from loguru import logger
 from dotenv import load_dotenv
-import ast
+from loguru import logger
+from matplotlib import font_manager
 
 # Load environment variables
 load_dotenv()
@@ -88,10 +92,6 @@ def init_rq_auth():
 
     raise ValueError("RiceQuant Auth Failed: No valid credentials found or accepted.")
 
-
-import matplotlib.pyplot as plt
-from matplotlib import font_manager
-from pathlib import Path
 
 class RiceQuantEval:
     """
@@ -241,7 +241,7 @@ class RiceQuantEval:
             .apply(lambda x: x.shift(-1) / x - 1)
         )
         self.label_data = label_s.to_frame(name="label").reorder_levels(["datetime", "instrument"]).sort_index()
-        
+
         # Ensure consistent datetime type
         if not pd.api.types.is_datetime64_any_dtype(self.label_data.index.get_level_values("datetime")):
             idx = self.label_data.index
@@ -553,9 +553,9 @@ class RiceQuantEval:
             "Correlation": Corr,
             "Sign": Sign,
             "Sqrt": Sqrt,
-            "Exp": lambda df: np.exp(df),
-            "Pow": lambda a, b: a**b,
-            "Inv": lambda df: 1.0 / (df + 1e-9),
+            "Exp": Exp,
+            "Pow": Pow,
+            "Inv": Inv,
             "Ts_ArgMax": Ts_ArgMax,
             "Ts_ArgMin": Ts_ArgMin,
             "Ts_Max": lambda df, n: df.rolling(max(1, _get_n(n))).max(),
@@ -569,9 +569,7 @@ class RiceQuantEval:
             "Divi": lambda a, b: a / b,
             "Plus": lambda a, b: a + b,
             "Minus": lambda a, b: a - b,
-            "Pow": Pow,
             "Neg": Neg,
-            "Inv": Inv,
             "Max": Max,
             "Min": Min,
             # Extended aliases for Polars compiler / LLM-generated expressions
@@ -586,7 +584,6 @@ class RiceQuantEval:
             "NotEqual": lambda a, b: a != b,
             "Not": lambda a: ~a,
             # Math functions missing from original context
-            "Exp": Exp,
             "Ceil": Ceil,
             "Floor": Floor,
             "Scale": Scale,
@@ -631,8 +628,11 @@ class RiceQuantEval:
                 compiled_expr = compile(tree, filename="<ast>", mode="eval")
                 res_matrix = eval(compiled_expr, {"__builtins__": {}}, context)
 
-                # Stack back to multi-index
-                res_series = res_matrix.stack(dropna=False)
+                # Stack back to multi-index (future_stack=True for pandas >= 2.1)
+                try:
+                    res_series = res_matrix.stack(future_stack=True)
+                except (TypeError, ValueError):
+                    res_series = res_matrix.stack(dropna=False)
                 factor_matrices.append(res_series)
 
             except Exception as e:
@@ -654,6 +654,7 @@ class RiceQuantEval:
         """
         logger.info("Computing factors using Polars Engine...")
         import polars as pl
+
         from .polars_engine import PolarsEngine
 
         # 1. Prepare Polars DataFrame from raw_data
@@ -690,11 +691,11 @@ class RiceQuantEval:
 
         # Convert back to Pandas for normalization and downstream
         factor_df = result_df.to_pandas()
-        
+
         # Ensure datetime is back to datetime64[ns] to match label_data
         if not pd.api.types.is_datetime64_any_dtype(factor_df["datetime"]):
             factor_df["datetime"] = pd.to_datetime(factor_df["datetime"])
-            
+
         factor_df = factor_df.set_index(["datetime", "instrument"]).sort_index()
 
         self.factor_data = self._normalize_factors(factor_df)
@@ -891,9 +892,9 @@ class RiceQuantEval:
         ic_series = all_data.groupby(level="datetime").apply(
             lambda x: x["factor"].corr(x["label"])
         ).fillna(0)
-        
+
         self.ic = round(float(ic_series.mean()), 4)
-        
+
         # OOS IC calculation
         oos_mask = ic_series.index >= pd.to_datetime(self.oos_split_date)
         if oos_mask.any():

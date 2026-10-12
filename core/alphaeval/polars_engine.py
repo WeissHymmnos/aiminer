@@ -1,9 +1,15 @@
-import polars as pl
-import polars_plugins as lib
-from polars.plugins import register_plugin_function
+from __future__ import annotations
+
+import ast as _ast
 import math
-from loguru import logger
 import os
+from functools import reduce
+
+import polars as pl
+from loguru import logger
+from polars.plugins import register_plugin_function
+
+import polars_plugins as lib
 
 
 # Find the binary plugin path
@@ -77,48 +83,56 @@ def CSZScore(x, n=None):
 
 
 def _get_int(n, op_name="Operator"):
+    if isinstance(n, pl.Expr):
+        raise ValueError(
+            f"{op_name} expects a constant integer for the period argument, not a dynamic series. "
+            f"Fix the formula to use a fixed number (e.g., 5, 10, 20)."
+        )
     try:
-        if isinstance(n, pl.Expr):
-            raise ValueError(f"{op_name} expects a constant integer for the period argument, not a dynamic series. Fix the formula to use a fixed number (e.g., 5, 10, 20).")
         return int(float(n))
-    except (ValueError, TypeError) as e:
-        if "expects a constant" in str(e): raise e
+    except (ValueError, TypeError):
         raise ValueError(f"Invalid period value '{n}' for {op_name}. Must be an integer.")
 
 
 def Mean(x, n=None):
-    if isinstance(x, (int, float)): return pl.lit(float(x))
+    if isinstance(x, (int, float)):
+        return pl.lit(float(x))
     if n is None:
         return x.mean().over("datetime")
     return x.rolling_mean(window_size=_get_int(n, "Mean")).over("instrument")
 
 
 def Std(x, n=None):
-    if isinstance(x, (int, float)): return pl.lit(0.0)
+    if isinstance(x, (int, float)):
+        return pl.lit(0.0)
     if n is None:
         return x.std().over("datetime")
     return x.rolling_std(window_size=_get_int(n, "Std")).over("instrument")
 
 
 def Median(x, n=None):
-    if isinstance(x, (int, float)): return pl.lit(float(x))
+    if isinstance(x, (int, float)):
+        return pl.lit(float(x))
     if n is None:
         return x.median().over("datetime")
     return x.rolling_median(window_size=_get_int(n, "Median")).over("instrument")
 
 
 def Sum(x, n):
-    if isinstance(x, (int, float)): return pl.lit(float(x) * _get_int(n, "Sum"))
+    if isinstance(x, (int, float)):
+        return pl.lit(float(x) * _get_int(n, "Sum"))
     return x.rolling_sum(window_size=_get_int(n, "Sum")).over("instrument")
 
 
 def Ref(x, n):
-    if isinstance(x, (int, float)): return pl.lit(float(x))
+    if isinstance(x, (int, float)):
+        return pl.lit(float(x))
     return x.shift(_get_int(n, "Ref")).over("instrument")
 
 
 def Delta(x, n):
-    if isinstance(x, (int, float)): return pl.lit(0.0)
+    if isinstance(x, (int, float)):
+        return pl.lit(0.0)
     return (x - x.shift(_get_int(n, "Delta"))).over("instrument")
 
 
@@ -208,14 +222,10 @@ def NotEqual(a, b):
 
 
 def And(*args):
-    from functools import reduce
-
     return reduce(lambda a, b: a & b, args)
 
 
 def Or(*args):
-    from functools import reduce
-
     return reduce(lambda a, b: a | b, args)
 
 
@@ -277,15 +287,27 @@ def Ts_ArgMin(x, n):
     return register_ts_argmin(x, _get_int(n, "Ts_ArgMin")).over("instrument")
 
 
-# Aliases for compiler mapping (in case compiler generates function calls instead of operators)
-Add = lambda a, b: a + b
-Sub = lambda a, b: a - b
-Mul = lambda a, b: a * b
-Div = lambda a, b: a / b
-Mult = lambda a, b: a * b
-Divi = lambda a, b: a / b
-Plus = lambda a, b: a + b
-Minus = lambda a, b: a - b
+# Functions for compiler mapping and operator evaluation
+def Add(a, b):
+    return a + b
+
+
+def Sub(a, b):
+    return a - b
+
+
+def Mul(a, b):
+    return a * b
+
+
+def Div(a, b):
+    return a / b
+
+
+Mult = Mul
+Divi = Div
+Plus = Add
+Minus = Sub
 
 
 def EMA(x, n):
@@ -325,18 +347,32 @@ def Ts_Percentile(x, n, p=50):
     )
 
 
-# Math aliases
-Pow = lambda a, b: a**b
-Neg = lambda a: -a
-Inv = lambda a: 1.0 / a
-Max = lambda a, b: pl.max_horizontal(a, b)
-Min = lambda a, b: pl.min_horizontal(a, b)
+# Math functions and aliases
+def Pow(a, b):
+    return a**b
+
+
+def Neg(a):
+    return -a
+
+
+def Inv(a):
+    return 1.0 / a
+
+
+def Max(a, b):
+    return pl.max_horizontal(a, b)
+
+
+def Min(a, b):
+    return pl.min_horizontal(a, b)
+
 
 # Extended aliases for LLM-generated expressions
-Divide = lambda a, b: a / b
-Multiply = lambda a, b: a * b
-Subtract = lambda a, b: a - b
-Negate = lambda a: -a
+Divide = Div
+Multiply = Mul
+Subtract = Sub
+Negate = Neg
 
 
 class _ColFallback(dict):
@@ -718,8 +754,6 @@ class PolarsEngine:
     @staticmethod
     def _is_bare_col(node) -> bool:
         """Return True if the AST node is a bare pl.col(...) call (no nesting)."""
-        import ast as _ast
-
         # pl.col('name')
         if isinstance(node, _ast.Call):
             if (

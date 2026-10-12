@@ -1,10 +1,12 @@
+import json
 import os
+import re
+from typing import List, Optional
+
 import numpy as np
 import pandas as pd
 from openai import OpenAI
-import re
-import json
-from typing import List, Optional
+
 from .combo import WeightCalculator
 
 # import warnings
@@ -30,8 +32,8 @@ class AlphaEval:
         instruments: Optional[List[str]] = None,
         daily_normalize: bool = True,
     ):
-        from qlib.data import D
         from qlib import auto_init
+        from qlib.data import D
 
         self.alphacombo = None
         self.factor_expressions = factor_expressions
@@ -183,7 +185,7 @@ class AlphaEval:
 
         for date, group in all_data.groupby(level="datetime"):
             f = group["factor"]
-            l = group["label"]
+            lbl = group["label"]
 
             long_cut = f.quantile(1 - 0.2)
             short_cut = f.quantile(0.2)
@@ -191,10 +193,10 @@ class AlphaEval:
             longs = set(f[f >= long_cut].index.get_level_values("instrument"))
             shorts = set(f[f <= short_cut].index.get_level_values("instrument"))
 
-            long_ret = l[f >= long_cut].mean()
-            short_ret = -l[f <= short_cut].mean()
+            long_ret = lbl[f >= long_cut].mean()
+            short_ret = -lbl[f <= short_cut].mean()
             pnl = (long_ret + short_ret) / 2
-            market_mean = l.mean()
+            market_mean = lbl.mean()
 
             if prev_longs is None:
                 turnover = float("nan")

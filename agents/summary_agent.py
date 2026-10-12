@@ -1,10 +1,12 @@
 import os
-import pandas as pd
+from typing import Any, Dict
+
 import matplotlib.pyplot as plt
-from typing import Dict, Any
-from loguru import logger
-from core.llm import get_llm
+import pandas as pd
 from langchain_core.prompts import ChatPromptTemplate
+from loguru import logger
+
+from core.llm import get_llm
 
 
 class SummaryAgent:

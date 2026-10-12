@@ -54,6 +54,11 @@ venv/
 ENV/
 env/
 
+# ---- Node / Frontend ----
+node_modules/
+**/node_modules/
+.npm/
+
 # ---- Secrets (never commit) ----
 .env
 .env.local

@@ -1,13 +1,12 @@
-import os
 import argparse
+import os
+import re
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
 from html import unescape
-import re
 from urllib.parse import quote
 from urllib.request import Request, urlopen
-import xml.etree.ElementTree as ET
-
 
 DEFAULT_MARKET_WINDOW_DAYS = 365
 DEFAULT_MARKET_LOOKBACK_DAYS = 365

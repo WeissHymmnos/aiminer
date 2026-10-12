@@ -1,4 +1,5 @@
 import unittest
+
 from agents.factor_agent import FactorAgent
 
 

@@ -1,9 +1,11 @@
 import unittest
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 import polars as pl
-from core.alphaeval.rq_eval import RiceQuantEval
+
 from core.alphaeval.polars_engine import PolarsEngine
+from core.alphaeval.rq_eval import RiceQuantEval
 
 
 class TestPolarsRefactor(unittest.TestCase):
