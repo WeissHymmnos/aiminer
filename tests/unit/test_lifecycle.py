@@ -78,17 +78,20 @@ def test_decay_transition_to_degraded_and_recovery():
     rec = mgr.get_factor("alpha_01")
     assert rec.status == FactorStatus.ACTIVE
 
-    # IC drops below decay threshold: 0.02 -> rolling avg = (0.05 + 0.02)/2 = 0.035 >= 0.03
+    # IC drops below decay threshold:
+    # 0.02 -> rolling avg = (0.05 + 0.02)/2 = 0.035 >= 0.03
     mgr.record_evaluation("alpha_01", ic=0.02)
     assert rec.status == FactorStatus.ACTIVE
 
-    # Next IC drops to 0.01 -> rolling avg = (0.02 + 0.01)/2 = 0.015 < 0.03 -> DEGRADED
+    # Next IC drops to 0.01 ->
+    # rolling avg = (0.02 + 0.01)/2 = 0.015 < 0.03 -> DEGRADED
     mgr.record_evaluation("alpha_01", ic=0.01)
     assert rec.status == FactorStatus.DEGRADED
     assert rec.degraded_at is not None
     assert "decay threshold" in (rec.degradation_reason or "")
 
-    # Rebound: IC jumps to 0.06 -> rolling avg = (0.01 + 0.06)/2 = 0.035 >= 0.03 -> ACTIVE
+    # Rebound: IC jumps to 0.06 ->
+    # rolling avg = (0.01 + 0.06)/2 = 0.035 >= 0.03 -> ACTIVE
     mgr.record_evaluation("alpha_01", ic=0.06)
     assert rec.status == FactorStatus.ACTIVE
     assert rec.consecutive_degraded_count == 0
@@ -140,7 +143,8 @@ def test_decay_drop_pct_from_peak():
     )
     # Peak IC = 0.10
     mgr.register_factor("alpha_01", "expr", initial_ic=0.10)
-    # Rolling becomes (0.10 + 0.04) / 2 = 0.07 (still > decay_threshold 0.01, but peak is 0.10)
+    # Rolling becomes (0.10 + 0.04) / 2 = 0.07
+    # (still > decay_threshold 0.01, but peak is 0.10)
     # Next drop to 0.04 -> rolling = (0.04 + 0.04) / 2 = 0.04
     # (0.10 - 0.04) / 0.10 = 60% drop >= 50% drop threshold -> DEGRADED
     mgr.record_evaluation("alpha_01", ic=0.04)
@@ -228,3 +232,37 @@ def test_sqlite_persistence(tmp_path: Path):
     assert loaded.get_factor("f1").status == FactorStatus.ACTIVE
     assert loaded.get_factor("f2").status == FactorStatus.DEGRADED
     assert loaded.get_factor("f2").degradation_reason == "Subpar perf"
+
+
+def test_invalid_cull_and_decay_threshold_order():
+    with pytest.raises(LifecycleError, match="cannot exceed decay_threshold"):
+        FactorLifecycleManager(decay_threshold=0.01, cull_threshold=0.05)
+
+
+def test_invalid_rolling_window_error():
+    mgr = FactorLifecycleManager()
+    mgr.register_factor("f1", "expr", initial_ic=0.05)
+    with pytest.raises(LifecycleError, match="window must be >= 1"):
+        mgr.calculate_rolling_ic("f1", window=0)
+
+
+def test_consecutive_degraded_streak_resets_on_healthy_period():
+    mgr = FactorLifecycleManager(
+        decay_threshold=0.03,
+        cull_threshold=0.0,
+        consecutive_degraded_limit=3,
+        window_size=1,
+        allow_recovery=False,
+    )
+    mgr.register_factor("f1", "expr", initial_ic=0.05)
+    # 1st degraded period
+    mgr.record_evaluation("f1", ic=0.01)
+    rec = mgr.get_factor("f1")
+    assert rec.status == FactorStatus.DEGRADED
+    assert rec.consecutive_degraded_count == 1
+
+    # Healthy period (ic=0.05 >= decay_threshold 0.03) ->
+    # streak broken, count reset
+    mgr.record_evaluation("f1", ic=0.05)
+    assert rec.status == FactorStatus.DEGRADED  # recovery disabled
+    assert rec.consecutive_degraded_count == 0

@@ -134,6 +134,7 @@ class RunManifest:
     llm_config: Dict[str, Any]
     prompt_info: Dict[str, Any]
     environment: Dict[str, Any]
+    universe: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -170,6 +171,11 @@ class RunManifest:
             llm_config=dict(data.get("llm_config") or {}),
             prompt_info=dict(data.get("prompt_info") or {}),
             environment=dict(data.get("environment") or {}),
+            universe=(
+                str(data["universe"])
+                if data.get("universe") is not None
+                else None
+            ),
             metadata=dict(data.get("metadata") or {}),
         )
 
@@ -181,6 +187,7 @@ class RunManifest:
             "date_window": self.date_window,
             "market_profile": self.market_profile,
             "market_mode": self.market_mode,
+            "universe": self.universe,
             "llm_config": self.llm_config,
             "prompt_info": self.prompt_info,
         }
@@ -196,6 +203,7 @@ class RunManifest:
             "date_window",
             "market_profile",
             "market_mode",
+            "universe",
             "llm_config",
             "prompt_info",
         ):
@@ -252,6 +260,7 @@ def generate_run_manifest(
     market_end: str = "2023-12-31",
     market_profile: str = "cn_stock",
     market_mode: str = "single",
+    universe: Optional[str] = None,
     llm_provider: str = "openai",
     llm_model: str = "gpt-4o",
     llm_temperature: float = 0.7,
@@ -297,6 +306,7 @@ def generate_run_manifest(
         date_window=date_window,
         market_profile=market_profile,
         market_mode=market_mode,
+        universe=universe,
         llm_config=llm_cfg,
         prompt_info=prompt_info,
         environment=env_info,

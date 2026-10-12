@@ -109,8 +109,7 @@ class FactorLifecycleRecord:
             else raw_status
         )
         history = [
-            FactorEvaluation.from_dict(h)
-            for h in data.get("history", [])
+            FactorEvaluation.from_dict(h) for h in data.get("history", [])
         ]
         return cls(
             factor_id=str(data["factor_id"]),
@@ -146,7 +145,8 @@ class FactorLifecycleRecord:
 
 
 class FactorLifecycleManager:
-    """Manages factor lifecycle transitions, IC decay monitoring, and culling."""
+    """Manages factor lifecycle transitions, IC decay monitoring, and culling.
+    """
 
     def __init__(
         self,
@@ -171,13 +171,16 @@ class FactorLifecycleManager:
                 their rolling IC rebounds above decay threshold.
         """
         if window_size < 1:
-            raise LifecycleError(
-                f"window_size must be >= 1, got {window_size}"
-            )
+            raise LifecycleError(f"window_size must be >= 1, got {window_size}")
         if consecutive_degraded_limit < 1:
             raise LifecycleError(
                 "consecutive_degraded_limit must be >= 1, "
                 f"got {consecutive_degraded_limit}"
+            )
+        if float(cull_threshold) > float(decay_threshold):
+            raise LifecycleError(
+                f"cull_threshold ({cull_threshold}) cannot exceed "
+                f"decay_threshold ({decay_threshold})"
             )
         self.decay_threshold = float(decay_threshold)
         self.cull_threshold = float(cull_threshold)
@@ -232,6 +235,8 @@ class FactorLifecycleManager:
         record = self.get_factor(factor_id)
         if not record.history:
             return None
+        if window is not None and window < 1:
+            raise LifecycleError(f"window must be >= 1, got {window}")
         w = window if window is not None else self.window_size
         recent_evals = record.history[-w:]
         return sum(e.ic for e in recent_evals) / len(recent_evals)
@@ -320,8 +325,9 @@ class FactorLifecycleManager:
                         factor_id,
                         reason=(
                             f"Factor remained degraded for "
-                            f"{record.consecutive_degraded_count} consecutive "
-                            f"windows (limit: {self.consecutive_degraded_limit})"
+                            f"{record.consecutive_degraded_count} "
+                            f"consecutive windows "
+                            f"(limit: {self.consecutive_degraded_limit})"
                         ),
                     )
             elif self.allow_recovery and rolling_ic >= self.decay_threshold:
@@ -332,6 +338,8 @@ class FactorLifecycleManager:
                         f"threshold {self.decay_threshold:.4f}"
                     ),
                 )
+            else:
+                record.consecutive_degraded_count = 0
         return record
 
     def _is_decayed(
@@ -364,12 +372,11 @@ class FactorLifecycleManager:
             and record.peak_ic is not None
             and record.peak_ic > 0
         ):
-            drop_pct = (
-                (record.peak_ic - rolling_ic) / record.peak_ic * 100.0
-            )
+            drop_pct = (record.peak_ic - rolling_ic) / record.peak_ic * 100.0
             return (
                 f"Rolling IC {rolling_ic:.4f} dropped {drop_pct:.1f}% from "
-                f"peak IC {record.peak_ic:.4f} (limit {self.decay_drop_pct*100:.1f}%)"
+                f"peak IC {record.peak_ic:.4f} "
+                f"(limit {self.decay_drop_pct * 100:.1f}%)"
             )
         return f"IC decay detected (rolling IC {rolling_ic:.4f})"
 

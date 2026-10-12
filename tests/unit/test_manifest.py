@@ -1,4 +1,5 @@
-"""Unit tests for reproducible run manifest generation and environment capture."""
+"""Unit tests for reproducible run manifest generation and environment capture.
+"""
 
 from __future__ import annotations
 
@@ -65,7 +66,8 @@ def test_manifest_hash_reproducibility():
         market_end="2022-12-31",
     )
     m2 = generate_run_manifest(
-        run_id="run_b",  # different run_id should not affect reproducibility hash
+        # different run_id should not affect reproducibility hash
+        run_id="run_b",
         seed=42,
         market_start="2020-01-01",
         market_end="2022-12-31",
@@ -108,8 +110,9 @@ def test_manifest_save_and_load(tmp_path: Path):
     loaded = RunManifest.load(manifest_file)
     assert loaded.run_id == "save_load_test"
     assert loaded.random_seed == 777
-    assert loaded.prompt_info["template_hash"] == (
-        manifest.prompt_info["template_hash"]
+    assert (
+        loaded.prompt_info["template_hash"]
+        == (manifest.prompt_info["template_hash"])
     )
     assert loaded.manifest_hash() == manifest.manifest_hash()
 
@@ -134,3 +137,23 @@ def test_manifest_corrupted_json(tmp_path: Path):
     bad_file.write_text("{ corrupt json ...", encoding="utf-8")
     with pytest.raises(ManifestError, match="Failed to load run manifest"):
         RunManifest.load(bad_file)
+
+
+def test_manifest_universe_support(tmp_path: Path):
+    manifest = generate_run_manifest(
+        run_id="run_univ_test",
+        universe="csi300",
+        market_profile="cn_stock",
+    )
+    assert manifest.universe == "csi300"
+    manifest_file = tmp_path / "univ_manifest.json"
+    manifest.save(manifest_file)
+
+    loaded = RunManifest.load(manifest_file)
+    assert loaded.universe == "csi300"
+
+    # Verify diff detects universe difference
+    other = generate_run_manifest(run_id="run_univ_test", universe="csi500")
+    diff = manifest.diff(other)
+    assert "universe" in diff
+    assert diff["universe"] == {"self": "csi300", "other": "csi500"}
