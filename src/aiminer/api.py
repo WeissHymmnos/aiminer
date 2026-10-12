@@ -116,6 +116,27 @@ _MANIFEST_LOCKS: Dict[str, threading.RLock] = {}
 _MANIFEST_LOCKS_GUARD = threading.Lock()
 
 
+import sys
+
+import aiminer.routers as routers
+from aiminer.routers import (
+    admin_router,
+    backtest_router,
+    strategy_router,
+    swarm_router,
+    websocket_router,
+    wiki_router,
+)
+
+# Backward-compatibility for callers importing aiminer.api.routers
+sys.modules.setdefault("aiminer.api.routers", routers)
+sys.modules.setdefault("aiminer.api.routers.admin", routers.admin)
+sys.modules.setdefault("aiminer.api.routers.backtest", routers.backtest)
+sys.modules.setdefault("aiminer.api.routers.strategy", routers.strategy)
+sys.modules.setdefault("aiminer.api.routers.swarm", routers.swarm)
+sys.modules.setdefault("aiminer.api.routers.websocket", routers.websocket)
+sys.modules.setdefault("aiminer.api.routers.wiki", routers.wiki)
+
 app = FastAPI(title="AIMiner Alpha Workstation API")
 
 app.add_middleware(
@@ -124,6 +145,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "DELETE", "PUT"],
     allow_headers=["Authorization", "Content-Type", "X-API-Key"],
 )
+
 
 
 # --- Runtime Helpers ---
@@ -2097,7 +2119,7 @@ async def shutdown_event() -> None:
 
 
 # --- Utility / Health Endpoints ---
-@app.get("/", response_model=None)
+@admin_router.get("/", response_model=None)
 def read_index():
     index_path = _frontend_index_path()
     if index_path:
@@ -2108,7 +2130,7 @@ def read_index():
     )
 
 
-@app.get("/api/health")
+@admin_router.get("/api/health")
 def health() -> Dict[str, Any]:
     return {
         "status": "ok",
@@ -2118,13 +2140,13 @@ def health() -> Dict[str, Any]:
     }
 
 
-@app.get("/api/readiness")
+@admin_router.get("/api/readiness")
 def readiness() -> Dict[str, Any]:
     return _readiness_payload()
 
 
 # --- Factor Pool Endpoints ---
-@app.get("/api/results")
+@backtest_router.get("/api/results")
 def get_results(
     run_id: Optional[str] = Query(default=None),
     offset: int = Query(default=0, ge=0),
@@ -2161,7 +2183,7 @@ def get_results(
     return _paginate_rows(list(rows), offset, limit)
 
 
-@app.get("/api/factors/{factor_id}")
+@backtest_router.get("/api/factors/{factor_id}")
 def get_factor_detail(factor_id: str) -> Dict[str, Any]:
     factor_id = _safe_segment(factor_id)
     if not DB_PATH.exists():
@@ -2189,7 +2211,7 @@ def get_factor_detail(factor_id: str) -> Dict[str, Any]:
     return payload
 
 
-@app.post("/api/factors/crossover")
+@backtest_router.post("/api/factors/crossover")
 def run_factor_crossover(
     req: FactorCrossoverRequest,
     actor: Actor = Depends(_require_actor),
@@ -2236,7 +2258,7 @@ def run_factor_crossover(
     return result
 
 
-@app.get("/api/charts/{factor_id}")
+@backtest_router.get("/api/charts/{factor_id}")
 def get_chart(factor_id: str) -> FileResponse:
     factor_id = _safe_segment(factor_id)
     path = CHART_DIR / f"{factor_id}_curve.png"
@@ -2245,7 +2267,7 @@ def get_chart(factor_id: str) -> FileResponse:
     return FileResponse(str(path), media_type="image/png")
 
 
-@app.get("/api/reports/{factor_id}", response_class=PlainTextResponse)
+@backtest_router.get("/api/reports/{factor_id}", response_class=PlainTextResponse)
 def get_report(factor_id: str) -> PlainTextResponse:
     factor_id = _safe_segment(factor_id)
     path = REPORT_DIR / f"{factor_id}.md"
@@ -2258,7 +2280,7 @@ def get_report(factor_id: str) -> PlainTextResponse:
 
 
 # --- Wiki / Knowledge Endpoints ---
-@app.get("/api/wiki/index")
+@wiki_router.get("/api/wiki/index")
 def wiki_index(
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=LIST_PAGE_LIMIT_DEFAULT, ge=1),
@@ -2288,7 +2310,7 @@ def wiki_index(
     }
 
 
-@app.get("/api/wiki/page/{slug}", response_class=PlainTextResponse)
+@wiki_router.get("/api/wiki/page/{slug}", response_class=PlainTextResponse)
 def wiki_page(slug: str) -> PlainTextResponse:
     slug = _safe_segment(slug)
     path = WIKI_DIR / f"{slug}.md"
@@ -2300,7 +2322,7 @@ def wiki_page(slug: str) -> PlainTextResponse:
     )
 
 
-@app.get("/api/wiki/graph")
+@wiki_router.get("/api/wiki/graph")
 def wiki_graph() -> Dict[str, Any]:
     return _build_wiki_graph()
 
@@ -2330,7 +2352,7 @@ class WikiPageUpdateRequest(BaseModel):
     )
 
 
-@app.post("/api/admin/reset")
+@admin_router.post("/api/admin/reset")
 def admin_reset(
     req: ResetRequest,
     actor: Actor = Depends(_require_actor),
@@ -2364,7 +2386,7 @@ def admin_reset(
     return summary
 
 
-@app.post("/api/wiki/lint")
+@wiki_router.post("/api/wiki/lint")
 def wiki_lint(
     stale_days: int = 30,
     actor: Actor = Depends(_require_actor),
@@ -2379,7 +2401,7 @@ def wiki_lint(
         raise HTTPException(500, f"lint failed: {exc}")
 
 
-@app.put("/api/wiki/page/{slug}")
+@wiki_router.put("/api/wiki/page/{slug}")
 def wiki_update_page(
     slug: str,
     req: WikiPageUpdateRequest,
@@ -2405,7 +2427,7 @@ def wiki_update_page(
     }
 
 
-@app.post("/api/wiki/migrate")
+@wiki_router.post("/api/wiki/migrate")
 def wiki_migrate(
     dry_run: bool = False,
     actor: Actor = Depends(_require_actor),
@@ -2420,7 +2442,7 @@ def wiki_migrate(
         raise HTTPException(500, f"migrate failed: {exc}")
 
 
-@app.post("/api/backtest/validate")
+@backtest_router.post("/api/backtest/validate")
 def backtest_validate(
     req: BacktestRequest,
     actor: Actor = Depends(_require_actor),
@@ -2430,7 +2452,7 @@ def backtest_validate(
     return {"ok": bool(ok), "message": msg}
 
 
-@app.post("/api/backtest/run")
+@backtest_router.post("/api/backtest/run")
 async def backtest_run(
     req: BacktestRequest,
     actor: Actor = Depends(_require_actor),
@@ -2489,7 +2511,7 @@ async def backtest_run(
     return result
 
 
-@app.get("/api/backtest/history")
+@backtest_router.get("/api/backtest/history")
 def backtest_history(
     actor: Actor = Depends(_require_actor),
 ) -> List[Dict[str, Any]]:
@@ -2497,7 +2519,7 @@ def backtest_history(
     return manual_runner.list_jobs(include_returns=False)
 
 
-@app.get("/api/backtest/{job_id}")
+@backtest_router.get("/api/backtest/{job_id}")
 def backtest_get(
     job_id: str,
     actor: Actor = Depends(_require_actor),
@@ -2510,7 +2532,7 @@ def backtest_get(
     return payload
 
 
-@app.delete("/api/backtest/{job_id}")
+@backtest_router.delete("/api/backtest/{job_id}")
 def backtest_delete(
     job_id: str,
     actor: Actor = Depends(_require_actor),
@@ -2523,7 +2545,7 @@ def backtest_delete(
 
 
 # --- Strategy Endpoints ---
-@app.post("/api/strategy/run")
+@strategy_router.post("/api/strategy/run")
 async def strategy_run(
     req: StrategyRunRequest,
     actor: Actor = Depends(_require_actor),
@@ -2559,7 +2581,7 @@ async def strategy_run(
     return result
 
 
-@app.get("/api/strategy/history")
+@strategy_router.get("/api/strategy/history")
 def strategy_history(
     actor: Actor = Depends(_require_actor),
 ) -> List[Dict[str, Any]]:
@@ -2567,7 +2589,7 @@ def strategy_history(
     return manual_runner.list_strategy_jobs(include_returns=False)
 
 
-@app.get("/api/strategies")
+@strategy_router.get("/api/strategies")
 def get_strategies(
     run_id: Optional[str] = Query(default=None),
     offset: int = Query(default=0, ge=0),
@@ -2612,7 +2634,7 @@ def get_strategies(
     return paged
 
 
-@app.get("/api/strategies/{strategy_id}")
+@strategy_router.get("/api/strategies/{strategy_id}")
 def get_strategy(strategy_id: str) -> Dict[str, Any]:
     strategy_id = _safe_segment(strategy_id)
     if not DB_PATH.exists():
@@ -2632,7 +2654,7 @@ def get_strategy(strategy_id: str) -> Dict[str, Any]:
     return _row_to_strategy_detail(row)
 
 
-@app.delete("/api/strategy/{strategy_id}")
+@strategy_router.delete("/api/strategy/{strategy_id}")
 def delete_strategy(
     strategy_id: str,
     actor: Actor = Depends(_require_actor),
@@ -2655,7 +2677,7 @@ def delete_strategy(
     return {"status": "deleted", "strategy_id": strategy_id}
 
 
-@app.get("/api/strategies/{strategy_id}/charts/{kind}")
+@strategy_router.get("/api/strategies/{strategy_id}/charts/{kind}")
 def get_strategy_chart(strategy_id: str, kind: str) -> FileResponse:
     strategy_id = _safe_segment(strategy_id)
     if kind not in {"equity", "turnover"}:
@@ -2678,7 +2700,7 @@ def get_strategy_chart(strategy_id: str, kind: str) -> FileResponse:
 
 
 # --- Swarm Endpoints ---
-@app.get("/api/swarm/status")
+@swarm_router.get("/api/swarm/status")
 def swarm_status(actor: Actor = Depends(_require_actor)) -> Dict[str, Any]:
     _audit(actor, "swarm.status", "global")
     return {
@@ -2688,7 +2710,7 @@ def swarm_status(actor: Actor = Depends(_require_actor)) -> Dict[str, Any]:
     }
 
 
-@app.get("/api/swarm/runs")
+@swarm_router.get("/api/swarm/runs")
 def list_swarm_runs(
     status_filter: Optional[str] = Query(default=None, alias="status"),
     offset: int = Query(default=0, ge=0),
@@ -2701,7 +2723,7 @@ def list_swarm_runs(
     )
 
 
-@app.post("/api/swarm/runs")
+@swarm_router.post("/api/swarm/runs")
 def start_swarm(
     config: SwarmConfig,
     actor: Actor = Depends(_require_actor),
@@ -2781,7 +2803,7 @@ def start_swarm(
     return {"status": "started", "run_id": run_id}
 
 
-@app.get("/api/swarm/runs/{run_id}")
+@swarm_router.get("/api/swarm/runs/{run_id}")
 def get_swarm_run(
     run_id: str,
     actor: Actor = Depends(_require_actor),
@@ -2794,7 +2816,7 @@ def get_swarm_run(
     return _annotate_run_manifest(run_id, manifest, run_state, persist=True)
 
 
-@app.get("/api/swarm/runs/{run_id}/logs")
+@swarm_router.get("/api/swarm/runs/{run_id}/logs")
 def get_swarm_run_logs(
     run_id: str,
     offset: int = Query(default=0, ge=0),
@@ -2816,7 +2838,7 @@ def get_swarm_run_logs(
     )
 
 
-@app.post("/api/swarm/runs/{run_id}/stop")
+@swarm_router.post("/api/swarm/runs/{run_id}/stop")
 def stop_swarm(
     run_id: str,
     actor: Actor = Depends(_require_actor),
@@ -2875,7 +2897,7 @@ def stop_swarm(
     return {"status": "stopping", "run_id": run_id}
 
 
-@app.delete("/api/swarm/runs/{run_id}")
+@swarm_router.delete("/api/swarm/runs/{run_id}")
 def delete_swarm_run(
     run_id: str,
     actor: Actor = Depends(_require_actor),
@@ -2901,7 +2923,7 @@ def delete_swarm_run(
     return {"status": "deleted", "run_id": run_id}
 
 
-@app.websocket("/ws")
+@websocket_router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
     token = websocket.query_params.get("token")
     if not AUTH_DISABLED:
@@ -2941,7 +2963,7 @@ if FRONTEND_DIST_DIR:
         )
 
 
-@app.get("/{full_path:path}", response_model=None)
+@admin_router.get("/{full_path:path}", response_model=None)
 def frontend_fallback(full_path: str):
     include_spa = os.getenv("AIMINER_INCLUDE_SPA", "1").lower() in {
         "1",
@@ -2956,6 +2978,14 @@ def frontend_fallback(full_path: str):
     if index_path:
         return HTMLResponse(index_path.read_text(encoding="utf-8"))
     return PlainTextResponse("frontend not built", status_code=404)
+
+
+app.include_router(admin_router)
+app.include_router(backtest_router)
+app.include_router(strategy_router)
+app.include_router(swarm_router)
+app.include_router(wiki_router)
+app.include_router(websocket_router)
 
 
 # --- Application Entry Point ---
