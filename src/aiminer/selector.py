@@ -185,9 +185,9 @@ def dedupe_alpha_pool_by_returns(
         new_returns = _factor_return_series(factor)
         is_redundant = False
         for existing_factor in final_pool:
-            same_market = factor.get(
+            same_market = factor.get("market_profile") == existing_factor.get(
                 "market_profile"
-            ) == existing_factor.get("market_profile")
+            )
             if not same_market:
                 continue
 

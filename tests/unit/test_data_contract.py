@@ -260,8 +260,7 @@ def test_forward_survivorship_timezone_aware():
     df = pd.DataFrame(
         {
             "datetime": (
-                pd.to_datetime(["2024-01-01", "2024-01-02"])
-                .tz_localize("UTC")
+                pd.to_datetime(["2024-01-01", "2024-01-02"]).tz_localize("UTC")
             ),
             "instrument": ["AAPL", "AAPL"],
             "open": [10.0, 10.0],
@@ -324,4 +323,3 @@ def test_tick_data_nat_timestamps_rejected():
     )
     with pytest.raises(DataContractError, match="invalid timestamps"):
         DataContractValidator.validate_tick_data(bad_ticks, strict=True)
-

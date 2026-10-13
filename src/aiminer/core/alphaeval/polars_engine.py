@@ -4,52 +4,88 @@ import os
 from loguru import logger
 import polars as pl
 from polars.plugins import register_plugin_function
-import polars_plugins as lib
+
+try:
+    import polars_plugins as lib
+except ImportError:
+    lib = None
 
 from aiminer.core.alphaeval.expr_validator import validate_factor_expression
 
 
 # Find the binary plugin path
 def get_plugin_path():
-    lib_dir = os.path.dirname(lib.__file__)
-    # Maturin usually puts the .so in the package dir
-    for f in os.listdir(lib_dir):
-        if f.endswith(".so"):
-            return os.path.join(lib_dir, f)
-    # Fallback to lib.__file__ if no .so found (might fail later)
-    return lib.__file__
+    try:
+        if lib is None:
+            return None
+        file_path = getattr(lib, "__file__", None)
+        if not file_path:
+            return None
+        lib_dir = os.path.dirname(file_path)
+        if not os.path.isdir(lib_dir):
+            return None
+        for f in os.listdir(lib_dir):
+            if f.endswith(".so") or f.endswith(".pyd"):
+                return os.path.join(lib_dir, f)
+        return None
+    except Exception:
+        return None
 
 
 PLUGIN_PATH = get_plugin_path()
 
 
 def register_ts_rank(expr, window_size):
-    return register_plugin_function(
-        plugin_path=PLUGIN_PATH,
-        function_name="ts_rank",
-        args=[expr],
-        kwargs={"window_size": int(window_size)},
-        is_elementwise=False,
+    if PLUGIN_PATH and os.path.exists(PLUGIN_PATH):
+        try:
+            return register_plugin_function(
+                plugin_path=PLUGIN_PATH,
+                function_name="ts_rank",
+                args=[expr],
+                kwargs={"window_size": int(window_size)},
+                is_elementwise=False,
+            )
+        except Exception:
+            pass
+    return expr.rolling_map(
+        lambda win: (win <= win[-1]).sum() / len(win),
+        window_size=int(window_size),
     )
 
 
 def register_ts_argmax(expr, window_size):
-    return register_plugin_function(
-        plugin_path=PLUGIN_PATH,
-        function_name="ts_argmax",
-        args=[expr],
-        kwargs={"window_size": int(window_size)},
-        is_elementwise=False,
+    if PLUGIN_PATH and os.path.exists(PLUGIN_PATH):
+        try:
+            return register_plugin_function(
+                plugin_path=PLUGIN_PATH,
+                function_name="ts_argmax",
+                args=[expr],
+                kwargs={"window_size": int(window_size)},
+                is_elementwise=False,
+            )
+        except Exception:
+            pass
+    return expr.rolling_map(
+        lambda win: float(win.arg_max()) if win.arg_max() is not None else None,
+        window_size=int(window_size),
     )
 
 
 def register_ts_argmin(expr, window_size):
-    return register_plugin_function(
-        plugin_path=PLUGIN_PATH,
-        function_name="ts_argmin",
-        args=[expr],
-        kwargs={"window_size": int(window_size)},
-        is_elementwise=False,
+    if PLUGIN_PATH and os.path.exists(PLUGIN_PATH):
+        try:
+            return register_plugin_function(
+                plugin_path=PLUGIN_PATH,
+                function_name="ts_argmin",
+                args=[expr],
+                kwargs={"window_size": int(window_size)},
+                is_elementwise=False,
+            )
+        except Exception:
+            pass
+    return expr.rolling_map(
+        lambda win: float(win.arg_min()) if win.arg_min() is not None else None,
+        window_size=int(window_size),
     )
 
 

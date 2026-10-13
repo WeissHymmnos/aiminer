@@ -106,9 +106,7 @@ class SwarmRunExecutionTracker:
         Returns:
             (registered, active_run_id)
         """
-        cfg_str = json.dumps(
-            config or {}, ensure_ascii=False, default=str
-        )
+        cfg_str = json.dumps(config or {}, ensure_ascii=False, default=str)
         with sqlite3.connect(self.db_path, timeout=30) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -217,9 +215,7 @@ class SwarmRunExecutionTracker:
         factors_count: int | None = None,
     ) -> None:
         """Mark a run as successfully completed."""
-        m_json = json.dumps(
-            metrics or {}, ensure_ascii=False, default=str
-        )
+        m_json = json.dumps(metrics or {}, ensure_ascii=False, default=str)
         with sqlite3.connect(self.db_path, timeout=30) as conn:
             if factors_count is not None:
                 conn.execute(
@@ -370,9 +366,7 @@ class HeartbeatMonitor:
             try:
                 self.tracker.update_heartbeat(self.run_id)
             except Exception as exc:
-                logger.warning(
-                    f"Heartbeat failed for {self.run_id}: {exc}"
-                )
+                logger.warning(f"Heartbeat failed for {self.run_id}: {exc}")
             time.sleep(self.interval)
 
     def stop(self) -> None:

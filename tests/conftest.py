@@ -1,9 +1,15 @@
-from __future__ import annotations
-
+import os
 from pathlib import Path
 import sys
 
 import pytest
+
+# Ensure hermetic defaults for unit tests in clean/CI environments
+os.environ.setdefault(
+    "OPENAI_API_KEY", "mock-openai-key-for-hermetic-unit-tests"
+)
+os.environ.setdefault("AIMINER_DISABLE_CHROMA", "1")
+os.environ.setdefault("AIMINER_COST_BPS", "5.0")
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"

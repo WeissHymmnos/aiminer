@@ -145,8 +145,7 @@ class FactorLifecycleRecord:
 
 
 class FactorLifecycleManager:
-    """Manages factor lifecycle transitions, IC decay monitoring, and culling.
-    """
+    """Manages factor lifecycle transitions, IC decay monitoring, and culling."""
 
     def __init__(
         self,

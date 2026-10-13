@@ -553,7 +553,12 @@ def load_all_zip_contracts_panel(
     """Every CSV in the daily zip is one tradable contract (no dominant splice)."""
     if daily_zip is None:
         daily_zip = (
-            Path.home() / "Documents" / "finance" / "data" / "raw" / "daily_20000101_20260331.zip"
+            Path.home()
+            / "Documents"
+            / "finance"
+            / "data"
+            / "raw"
+            / "daily_20000101_20260331.zip"
         )
     daily_zip = Path(daily_zip).expanduser()
     if not daily_zip.exists():

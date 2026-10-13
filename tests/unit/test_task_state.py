@@ -155,9 +155,7 @@ def test_heartbeat_monitor_lifecycle(tmp_path):
     assert row["last_heartbeat_at"] is not None
 
 
-def test_portfolio_manager_cancellation_and_idempotency(
-    tmp_path, monkeypatch
-):
+def test_portfolio_manager_cancellation_and_idempotency(tmp_path, monkeypatch):
     db_file = tmp_path / "mgr_test.db"
     tracker = SwarmRunExecutionTracker(db_file)
 
@@ -204,4 +202,3 @@ def test_portfolio_manager_failure_records_error(tmp_path, monkeypatch):
     assert run_info is not None
     assert run_info["status"] == "failed"
     assert "Fatal explosion" in run_info["error_message"]
-

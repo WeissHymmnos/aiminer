@@ -107,7 +107,7 @@ class TestDeflatedSharpeRatio:
         for i in range(len(dsr_values) - 1):
             assert dsr_values[i] >= dsr_values[i + 1], (
                 f"DSR at N={trial_counts[i]} ({dsr_values[i]:.6f}) should be "
-                f">= DSR at N={trial_counts[i+1]} ({dsr_values[i+1]:.6f})"
+                f">= DSR at N={trial_counts[i + 1]} ({dsr_values[i + 1]:.6f})"
             )
         # N=1 should be strictly greater than N=100
         assert dsr_values[0] > dsr_values[-1]
@@ -122,9 +122,7 @@ class TestDeflatedSharpeRatio:
 
     def test_dsr_single_trial_equals_psr(self):
         psr = probabilistic_sharpe_ratio(0.5, sr_benchmark=0.0)
-        dsr = deflated_sharpe_ratio(
-            0.5, var_sharpe_or_trials=0.0, n_trials=1
-        )
+        dsr = deflated_sharpe_ratio(0.5, var_sharpe_or_trials=0.0, n_trials=1)
         assert pytest.approx(psr, abs=1e-6) == dsr
 
     def test_dsr_nan_input(self):

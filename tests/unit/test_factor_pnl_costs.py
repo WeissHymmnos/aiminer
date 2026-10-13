@@ -133,7 +133,9 @@ def test_cost_bps_zero_yields_net_equal_gross():
         evaluator.daily_returns_series.values,
         evaluator.gross_daily_returns_series.values,
     )
-    assert np.allclose(net_ret.values, evaluator.gross_daily_returns_series.values)
+    assert np.allclose(
+        net_ret.values, evaluator.gross_daily_returns_series.values
+    )
     assert evaluator.sharpe == pytest.approx(evaluator.gross_sharpe)
     assert evaluator.max_dd == pytest.approx(evaluator.gross_max_dd)
 
@@ -268,6 +270,7 @@ def test_evaluator_factory_cost_bps():
             market_profiles=["cn_stock"],
             cost_bps=6.5,
         ),
+        skip_auth=True,
     )
     assert getattr(ev, "cost_bps", None) == 6.5
 

@@ -68,6 +68,7 @@ class DataValidationReport(BaseModel):
             if issue.severity == ValidationSeverity.WARNING
         )
 
+
 from aiminer.core.exceptions import DataContractError
 
 
@@ -393,9 +394,7 @@ class DataContractValidator:
                 report.add_issue(
                     rule="valid_timestamps",
                     severity=ValidationSeverity.ERROR,
-                    message=(
-                        f"{nat_count} rows have invalid timestamps."
-                    ),
+                    message=(f"{nat_count} rows have invalid timestamps."),
                     count=nat_count,
                 )
 
@@ -405,9 +404,7 @@ class DataContractValidator:
                     report.add_issue(
                         rule="unique_keys",
                         severity=ValidationSeverity.ERROR,
-                        message=(
-                            f"{int(dupes)} duplicate pairs found."
-                        ),
+                        message=(f"{int(dupes)} duplicate pairs found."),
                         count=int(dupes),
                     )
 
@@ -417,9 +414,7 @@ class DataContractValidator:
                     report.add_issue(
                         rule="calendar_continuity",
                         severity=ValidationSeverity.WARNING,
-                        message=(
-                            f"{len(gaps)} calendar gap(s) detected."
-                        ),
+                        message=(f"{len(gaps)} calendar gap(s) detected."),
                         gaps=gaps[:5],
                     )
 
@@ -551,9 +546,7 @@ class DataContractValidator:
             report.add_issue(
                 rule="crossed_book",
                 severity=ValidationSeverity.ERROR,
-                message=(
-                    f"{int(crossed.sum())} rows have crossed book."
-                ),
+                message=(f"{int(crossed.sum())} rows have crossed book."),
                 count=int(crossed.sum()),
             )
 
@@ -679,9 +672,7 @@ class DataContractValidator:
             report.add_issue(
                 rule="valid_tick_prices",
                 severity=ValidationSeverity.ERROR,
-                message=(
-                    f"{int(bad_px.sum())} tick rows have invalid price."
-                ),
+                message=(f"{int(bad_px.sum())} tick rows have invalid price."),
             )
 
         vol = pd.to_numeric(work["volume"], errors="coerce")
@@ -712,9 +703,7 @@ class DataContractValidator:
                 report.add_issue(
                     rule="monotonic_tick_timestamps",
                     severity=ValidationSeverity.ERROR,
-                    message=(
-                        f"Tick timestamps for {inst} are not monotonic."
-                    ),
+                    message=(f"Tick timestamps for {inst} are not monotonic."),
                     instrument=inst,
                 )
 

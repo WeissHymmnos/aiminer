@@ -4,10 +4,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from aiminer.core.futures_super import (
     assert_factors_in_pool,
     load_pool_factors,
     select_strategy_factors,
+)
+
+HAS_LIVE_POOL = (
+    Path("results/alpha_miner.db").exists()
+    or Path("results/alpha_pool.json").exists()
+)
+pytestmark = pytest.mark.skipif(
+    not HAS_LIVE_POOL, reason="Requires live alpha factor pool on disk"
 )
 
 

@@ -98,8 +98,7 @@ def init_portfolio_db(
             "alpha_pool(timestamp)"
         )
         cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_alpha_run_id ON "
-            "alpha_pool(run_id)"
+            "CREATE INDEX IF NOT EXISTS idx_alpha_run_id ON alpha_pool(run_id)"
         )
 
         # Idempotent migration for existing columns

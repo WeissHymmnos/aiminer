@@ -33,7 +33,10 @@ def compute_cross_sectional_factor_correlation(
 
     # Align on common (datetime, instrument)
     joined = pd.concat(
-        [new_factor_series.rename("new"), existing_factor_series.rename("exist")],
+        [
+            new_factor_series.rename("new"),
+            existing_factor_series.rename("exist"),
+        ],
         axis=1,
         join="inner",
     ).dropna()
@@ -41,10 +44,17 @@ def compute_cross_sectional_factor_correlation(
     if len(joined) < min_overlap:
         return None
 
-    if isinstance(joined.index, pd.MultiIndex) and "datetime" in joined.index.names:
+    if (
+        isinstance(joined.index, pd.MultiIndex)
+        and "datetime" in joined.index.names
+    ):
         daily_corrs = []
         for _, group in joined.groupby(level="datetime"):
-            if len(group) >= 3 and group["new"].nunique() > 1 and group["exist"].nunique() > 1:
+            if (
+                len(group) >= 3
+                and group["new"].nunique() > 1
+                and group["exist"].nunique() > 1
+            ):
                 r = group["new"].rank().corr(group["exist"].rank())
                 if pd.notna(r):
                     daily_corrs.append(r)
@@ -79,12 +89,25 @@ def compute_incremental_ic(
 
     if not existing_factors:
         # No existing factors to orthogonalize against: incremental IC equals raw IC
-        aligned = pd.concat([new_factor.rename("f"), labels.rename("l")], axis=1, join="inner").dropna()
+        aligned = pd.concat(
+            [new_factor.rename("f"), labels.rename("l")], axis=1, join="inner"
+        ).dropna()
         if len(aligned) < min_obs:
             return None, None
-        if isinstance(aligned.index, pd.MultiIndex) and "datetime" in aligned.index.names:
-            ic_series = aligned.groupby(level="datetime").apply(lambda x: x["f"].rank().corr(x["l"].rank())).dropna()
-            return (float(ic_series.mean()), float(ic_series.mean())) if not ic_series.empty else (None, None)
+        if (
+            isinstance(aligned.index, pd.MultiIndex)
+            and "datetime" in aligned.index.names
+        ):
+            ic_series = (
+                aligned.groupby(level="datetime")
+                .apply(lambda x: x["f"].rank().corr(x["l"].rank()))
+                .dropna()
+            )
+            return (
+                (float(ic_series.mean()), float(ic_series.mean()))
+                if not ic_series.empty
+                else (None, None)
+            )
         r = float(aligned["f"].rank().corr(aligned["l"].rank()))
         return r, r
 
@@ -97,7 +120,9 @@ def compute_incremental_ic(
     if len(df) < min_obs:
         return None, None
 
-    is_multi = isinstance(df.index, pd.MultiIndex) and "datetime" in df.index.names
+    is_multi = (
+        isinstance(df.index, pd.MultiIndex) and "datetime" in df.index.names
+    )
     base_cols = [c for c in df.columns if c.startswith("base_")]
 
     if not is_multi:
@@ -108,7 +133,11 @@ def compute_incremental_ic(
         try:
             beta, _, _, _ = np.linalg.lstsq(X, y, rcond=None)
             residual = y - X @ beta
-            inc_ic = float(pd.Series(residual).rank().corr(df["label"].reset_index(drop=True).rank()))
+            inc_ic = float(
+                pd.Series(residual)
+                .rank()
+                .corr(df["label"].reset_index(drop=True).rank())
+            )
             raw_ic = float(df["target"].rank().corr(df["label"].rank()))
             return inc_ic, raw_ic
         except Exception:
@@ -130,7 +159,9 @@ def compute_incremental_ic(
             res = y - X @ beta
             if np.std(res) > 1e-12 and np.std(l) > 1e-12:
                 r_inc = float(pd.Series(res).rank().corr(pd.Series(l).rank()))
-                r_raw = float(group["target"].rank().corr(group["label"].rank()))
+                r_raw = float(
+                    group["target"].rank().corr(group["label"].rank())
+                )
                 if pd.notna(r_inc):
                     inc_ics.append(r_inc)
                 if pd.notna(r_raw):

@@ -6,8 +6,11 @@ They do not encode target Sharpe or annualized return.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
+import pytest
 
 from aiminer.core.futures_exec import (
     apply_transaction_costs,
@@ -234,6 +237,13 @@ def test_ic_weighted_combo_differs_from_equal_weight():
     )
 
 
+@pytest.mark.skipif(
+    not (
+        Path("results/alpha_miner.db").exists()
+        or Path("results/alpha_pool.json").exists()
+    ),
+    reason="Requires live alpha factor pool on disk",
+)
 def test_stored_strategy_expressions_exist_in_live_pool():
     from aiminer.core.futures_super import _normalize_expr, load_pool_factors
 

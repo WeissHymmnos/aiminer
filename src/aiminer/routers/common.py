@@ -297,7 +297,7 @@ def _ensure_alpha_pool_schema(conn: sqlite3.Connection) -> None:
     _ensure_optional_columns(conn, "alpha_pool", _ALPHA_POOL_OPTIONAL_COLUMNS)
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_alpha_timestamp ON "
-            "alpha_pool(timestamp)"
+        "alpha_pool(timestamp)"
     )
     if "run_id" in _table_columns(conn, "alpha_pool"):
         conn.execute(
@@ -312,7 +312,7 @@ def _ensure_strategy_backtests_schema(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_strategy_backtests_ran_at ON "
-            "strategy_backtests(ran_at)"
+        "strategy_backtests(ran_at)"
     )
     if "run_id" in _table_columns(conn, "strategy_backtests"):
         conn.execute(
@@ -748,9 +748,9 @@ def _service_error(exc: Exception, fallback: str) -> HTTPException:
         return HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
-            "RiceQuant disconnected from the remote server. Retry later, "
-            "or switch Data Backend to local/qlib."
-        ),
+                "RiceQuant disconnected from the remote server. Retry later, "
+                "or switch Data Backend to local/qlib."
+            ),
         )
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=message
@@ -1819,8 +1819,7 @@ class BacktestRequest(RuntimeRequestModel):
     expression: str = Field(
         ...,
         description=(
-            "Raw Qlib-style factor expression, e.g. "
-            "'Rank(Delta($close, 5))'."
+            "Raw Qlib-style factor expression, e.g. 'Rank(Delta($close, 5))'."
         ),
     )
     start_date: str = "2017-01-01"

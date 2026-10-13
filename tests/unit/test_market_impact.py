@@ -201,4 +201,3 @@ def test_market_impact_zero_volume_illiquid_asset():
     assert len(drag) == 2
     assert not drag.isna().any()
     assert np.isfinite(drag.iloc[1])
-

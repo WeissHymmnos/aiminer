@@ -154,7 +154,10 @@ def test_crossover_selection_and_role():
 
 def test_persistence_helpers(tmp_path):
     assert _serialize_returns(None) == {}
-    s = pd.Series([0.1, 0.2], index=[pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-02")])
+    s = pd.Series(
+        [0.1, 0.2],
+        index=[pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-02")],
+    )
     serialized = _serialize_returns(s)
     assert "2024-01-01" in list(serialized.keys())[0]
 

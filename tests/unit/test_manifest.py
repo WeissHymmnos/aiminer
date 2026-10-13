@@ -1,5 +1,4 @@
-"""Unit tests for reproducible run manifest generation and environment capture.
-"""
+"""Unit tests for reproducible run manifest generation and environment capture."""
 
 from __future__ import annotations
 

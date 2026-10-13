@@ -104,9 +104,7 @@ def factor_result_view(final_state: dict) -> dict:
         "ic_direction_label": snapshot.get(
             "ic_direction_label", final_state.get("ic_direction_label")
         ),
-        "holdout_metrics": snapshot.get(
-            "holdout_metrics"
-        )
+        "holdout_metrics": snapshot.get("holdout_metrics")
         or final_state.get("holdout_metrics", {})
         or {},
     }

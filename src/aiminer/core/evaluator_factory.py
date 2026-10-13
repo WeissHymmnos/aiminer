@@ -96,9 +96,7 @@ def evaluation_config_from_mapping(
         .strip()
         .lower(),
         impact_gamma=float(
-            get("impact_gamma")
-            or os.environ.get("AIMINER_IMPACT_GAMMA")
-            or 0.1
+            get("impact_gamma") or os.environ.get("AIMINER_IMPACT_GAMMA") or 0.1
         ),
         portfolio_value=float(
             get("portfolio_value")
@@ -115,6 +113,7 @@ def build_evaluator(
     test_start_date: str | None = None,
     test_end_date: str | None = None,
     daily_normalize: bool = True,
+    skip_auth: bool = False,
 ) -> BacktestBackend:
     profile = get_market_profile(config.market_profile)
     start_date = test_start_date or config.market_start or "2018-01-01"
@@ -144,6 +143,7 @@ def build_evaluator(
             slippage_model=config.slippage_model,
             impact_gamma=config.impact_gamma,
             portfolio_value=config.portfolio_value,
+            skip_auth=skip_auth,
         )
 
     if config.data_backend == "qlib":

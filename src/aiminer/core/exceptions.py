@@ -29,7 +29,11 @@ class DataContractError(QuantError, ValueError):
     """Raised when market data violates a required schema or contract."""
 
     def __init__(
-        self, message: str, report: Optional[Any] = None, *args: Any, **kwargs: Any
+        self,
+        message: str,
+        report: Optional[Any] = None,
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
         super().__init__(message, *args, **kwargs)
         self.report = report

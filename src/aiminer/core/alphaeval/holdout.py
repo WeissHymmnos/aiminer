@@ -68,8 +68,10 @@ def resolve_split_dates(
     if valid_split_date is not None:
         valid = pd.Timestamp(valid_split_date)
         default_oos = pd.Timestamp(DEFAULT_OOS_SPLIT_DATE)
-        oos = default_oos if _inside(default_oos) and default_oos > valid else (
-            valid + (end - valid) / 2
+        oos = (
+            default_oos
+            if _inside(default_oos) and default_oos > valid
+            else (valid + (end - valid) / 2)
         )
         return _fmt(valid), _fmt(oos)
 
@@ -175,8 +177,6 @@ def segment_stats(
 
     if turnover_series is not None:
         to = turnover_series[_mask(turnover_series.index)].dropna()
-        stats["turnover"] = (
-            round(float(to.mean()), 4) if not to.empty else None
-        )
+        stats["turnover"] = round(float(to.mean()), 4) if not to.empty else None
 
     return stats

@@ -26,6 +26,10 @@ jobs:
       - name: Python syntax compilation check
         run: python -m compileall src/
       - name: Hermetic unit tests
+        env:
+          OPENAI_API_KEY: mock-openai-key-for-hermetic-ci
+          AIMINER_DISABLE_CHROMA: "1"
+          AIMINER_COST_BPS: "5.0"
         run: PYTHONPATH=src pytest tests/unit -m "unit and not external and not native" -q
 
   backend-external:

@@ -152,9 +152,7 @@ class SemanticMutator:
             ),
         }
 
-    def register_operator(
-        self, name: str, fn: Callable[..., str]
-    ) -> None:
+    def register_operator(self, name: str, fn: Callable[..., str]) -> None:
         """Register a custom semantic mutation operator."""
         self.operators[name] = fn
 

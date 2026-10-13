@@ -146,9 +146,7 @@ class ParticipationMarketImpactModel(MarketImpactModel):
                 ),
                 None,
             )
-            target_col = next(
-                (c for c in col_names if c in work.columns), None
-            )
+            target_col = next((c for c in col_names if c in work.columns), None)
             if inst_col and dt_col and target_col:
                 work[dt_col] = pd.to_datetime(work[dt_col])
                 matrix = (
@@ -179,9 +177,7 @@ class ParticipationMarketImpactModel(MarketImpactModel):
                 vol_mat = self._pivot_to_matrix(
                     raw_data, ["volume"], weights_df
                 )
-                px_mat = self._pivot_to_matrix(
-                    raw_data, ["close"], weights_df
-                )
+                px_mat = self._pivot_to_matrix(raw_data, ["close"], weights_df)
                 if vol_mat is not None and px_mat is not None:
                     adv_matrix = vol_mat * px_mat
 
@@ -207,9 +203,7 @@ class ParticipationMarketImpactModel(MarketImpactModel):
         """Extract or estimate rolling daily asset return volatility."""
         ret_matrix = None
         if raw_data is not None and not raw_data.empty:
-            close_mat = self._pivot_to_matrix(
-                raw_data, ["close"], weights_df
-            )
+            close_mat = self._pivot_to_matrix(raw_data, ["close"], weights_df)
             if close_mat is not None:
                 ret_matrix = close_mat.pct_change()
 

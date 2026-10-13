@@ -102,9 +102,7 @@ def _forward_worker_logs(worker_log_queue: Any, parent_log_queue: Any) -> None:
             break
 
 
-def _configured_worker_limit(
-    explicit_value: Any, env_name: str
-) -> int | None:
+def _configured_worker_limit(explicit_value: Any, env_name: str) -> int | None:
     raw = explicit_value if explicit_value is not None else os.getenv(env_name)
     if raw in (None, ""):
         return None
@@ -216,9 +214,7 @@ def _cancel_pending_futures(
     return len(pending)
 
 
-def _bounded_worker_count(
-    task_count: int, configured_limit: Any = None
-) -> int:
+def _bounded_worker_count(task_count: int, configured_limit: Any = None) -> int:
     if task_count <= 1:
         return 1
     cpu_limit = os.cpu_count() or 1
