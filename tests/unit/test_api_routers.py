@@ -75,11 +75,48 @@ def test_api_routers_backward_compatibility_namespace():
     assert hasattr(wiki, "router")
 
 
+def _extract_route_paths(app) -> set[str]:
+    paths: set[str] = set()
+
+    def _visit(item):
+        if item is None:
+            return
+        if hasattr(item, "routes") and item.routes is not None:
+            for sub in item.routes:
+                _visit(sub)
+            return
+
+        if hasattr(item, "effective_route_contexts") and callable(
+            item.effective_route_contexts
+        ):
+            try:
+                for ctx in item.effective_route_contexts():
+                    p = getattr(ctx, "path", getattr(ctx, "path_format", None))
+                    if p:
+                        paths.add(p)
+            except Exception:
+                pass
+
+        if hasattr(item, "original_router") and hasattr(
+            item.original_router, "routes"
+        ):
+            for sub in item.original_router.routes:
+                _visit(sub)
+
+        if hasattr(item, "app") and hasattr(item.app, "routes"):
+            for sub in item.app.routes:
+                _visit(sub)
+
+        path = getattr(item, "path", getattr(item, "path_format", None))
+        if path:
+            paths.add(path)
+
+    _visit(app)
+    return paths
+
+
 def test_app_includes_router_routes():
-    route_paths = {
-        getattr(r, "path", getattr(r, "path_format", None))
-        for r in api.app.routes
-    }
+    route_paths = _extract_route_paths(api.app)
 
     # Admin routes
     assert "/api/health" in route_paths
