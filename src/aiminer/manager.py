@@ -264,9 +264,7 @@ class PortfolioManager:
                 self.researchers.append(task_kwargs)
                 counter += 1
 
-    def record_trial(
-        self, sharpe_or_factor: float | dict[str, Any]
-    ) -> None:
+    def record_trial(self, sharpe_or_factor: float | dict[str, Any]) -> None:
         """Record an evaluated trial for multiple testing tracking."""
         self.n_trials += 1
         if isinstance(sharpe_or_factor, (int, float)):
@@ -319,7 +317,11 @@ class PortfolioManager:
             # Otherwise fall back to perf_metric (train IC or full IC).
             holdout = res.get("holdout_metrics") or {}
             val_ic = holdout.get("val_ic")
-            check_metric = val_ic if val_ic is not None else float(res.get("perf_metric", 0.0) or 0.0)
+            check_metric = (
+                val_ic
+                if val_ic is not None
+                else float(res.get("perf_metric", 0.0) or 0.0)
+            )
             perf = float(res.get("perf_metric", 0.0) or 0.0)
 
             if check_metric > threshold:
@@ -606,9 +608,7 @@ class PortfolioManager:
             )
             raise
         except Exception as exc:
-            self.execution_tracker.fail_run(
-                self.run_id, error_message=str(exc)
-            )
+            self.execution_tracker.fail_run(self.run_id, error_message=str(exc))
             raise
 
     def _run_swarm_impl(self, parallel=False, log_queue=None):
@@ -1348,6 +1348,9 @@ def cull_alpha_pool(results_list):
     """
     manager = PortfolioManager.__new__(PortfolioManager)
     manager.alpha_pool = []
+    manager.strategy_pool = []
+    manager.n_trials = 0
+    manager.trial_sharpes = []
     return PortfolioManager.evaluate_and_combine(manager, results_list)
 
 

@@ -176,12 +176,12 @@ async def shutdown_event() -> None:
         state.loop = None
 
 
-app.include_router(admin_router)
 app.include_router(backtest_router)
 app.include_router(strategy_router)
 app.include_router(swarm_router)
 app.include_router(wiki_router)
 app.include_router(websocket_router)
+app.include_router(admin_router)
 
 
 # --- Application Entry Point ---
