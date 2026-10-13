@@ -76,7 +76,10 @@ def test_api_routers_backward_compatibility_namespace():
 
 
 def test_app_includes_router_routes():
-    route_paths = [getattr(r, "path", None) for r in api.app.routes]
+    route_paths = {
+        getattr(r, "path", getattr(r, "path_format", None))
+        for r in api.app.routes
+    }
 
     # Admin routes
     assert "/api/health" in route_paths

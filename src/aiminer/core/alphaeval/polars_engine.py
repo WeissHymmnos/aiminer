@@ -513,18 +513,27 @@ class PolarsEngine:
         validate_factor_expression(expression)
         expression = _preprocess_expression(expression)
 
-        # 1. Try the Rust compiler first
-        compiled = lib.compile_alpha(expression)
-        use_fallback = False
-        if compiled.startswith("Error:"):
-            logger.warning(
-                f"Rust compiler failed for: {expression}. Error: {compiled}. Trying Python fallback..."
-            )
-            use_fallback = True
+        # 1. Try the Rust compiler first if available
+        compiled = None
+        use_fallback = True
+        if lib and hasattr(lib, "compile_alpha"):
+            try:
+                rust_compiled = lib.compile_alpha(expression)
+                if not rust_compiled.startswith("Error:"):
+                    compiled = rust_compiled
+                    use_fallback = False
+                else:
+                    logger.warning(
+                        f"Rust compiler failed for: {expression}. Error: {rust_compiled}. Trying Python fallback..."
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Rust compile_alpha exception: {e}. Trying Python fallback..."
+                )
 
         _ns = _ColFallback(self.context)
 
-        if not use_fallback:
+        if not use_fallback and compiled:
             try:
                 expr = eval(compiled, {"__builtins__": {}}, _ns)
                 if isinstance(expr, pl.Expr):
@@ -616,8 +625,15 @@ class PolarsEngine:
         # Strip '$' prefixes so the expression is valid Python for ast.parse().
         # The AST walker resolves unknown names to pl.col(name) via the
         # ast.Name fallback in _eval_ast_node — no string-level pl.col() needed.
-        compiled = lib.compile_alpha(expr_str)
-        if compiled.startswith("Error:"):
+        compiled = None
+        if lib and hasattr(lib, "compile_alpha"):
+            try:
+                rust_compiled = lib.compile_alpha(expr_str)
+                if not rust_compiled.startswith("Error:"):
+                    compiled = rust_compiled
+            except Exception:
+                pass
+        if not compiled:
             compiled = _python_compile_alpha(expr_str)
 
         try:

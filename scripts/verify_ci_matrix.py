@@ -7,6 +7,7 @@ import argparse
 import compileall
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -56,8 +57,21 @@ def check_ci_workflows(repo_root: Path) -> bool:
 def check_ruff_lint(repo_root: Path) -> bool:
     """Verify ruff lint and import formatting clean status."""
     print("[3/4] Running ruff check...")
+    ruff_bin = shutil.which("ruff")
+    if ruff_bin:
+        cmd = [ruff_bin, "check", "--no-cache", "src", "tests"]
+    else:
+        cmd = [
+            sys.executable,
+            "-m",
+            "ruff",
+            "check",
+            "--no-cache",
+            "src",
+            "tests",
+        ]
     res = subprocess.run(
-        ["/usr/bin/ruff", "check", "--no-cache", "src", "tests"],
+        cmd,
         cwd=str(repo_root),
         capture_output=True,
         text=True,

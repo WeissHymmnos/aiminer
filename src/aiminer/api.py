@@ -22,6 +22,8 @@ if "aiminer.routers.common" in sys.modules:
         _modname = f"aiminer.routers.{_sub}"
         if _modname in sys.modules:
             importlib.reload(sys.modules[_modname])
+    if "aiminer.routers" in sys.modules:
+        importlib.reload(sys.modules["aiminer.routers"])
 
 import aiminer.routers as routers
 from aiminer.routers import (
@@ -176,12 +178,12 @@ async def shutdown_event() -> None:
         state.loop = None
 
 
-app.include_router(backtest_router)
-app.include_router(strategy_router)
-app.include_router(swarm_router)
-app.include_router(wiki_router)
-app.include_router(websocket_router)
-app.include_router(admin_router)
+app.include_router(backtest.backtest_router)
+app.include_router(strategy.strategy_router)
+app.include_router(swarm.swarm_router)
+app.include_router(wiki.wiki_router)
+app.include_router(websocket.websocket_router)
+app.include_router(admin.admin_router)
 
 
 # --- Application Entry Point ---
