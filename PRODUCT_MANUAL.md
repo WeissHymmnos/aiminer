@@ -1,328 +1,113 @@
-# AI Alpha Miner 产品手册
+# AI Alpha Miner 产品与操作手册
 
-> **双轨产品线**：本项目提供 Python 参考实现（AI Alpha Miner）和 Rust 生产实现（RustMiner，位于 `~/Documents/finance/archive/rustminer`）。两者共享同一套数据格式、SQLite schema 和 JSON 契约，可根据场景选用或并行部署。详见第 12 章。
+> **双轨实现说明**：本项目提供 Python 实现（AI Alpha Miner，位于当前仓库）与原生 Rust 实现（RustMiner，位于 `~/Documents/finance/archive/rustminer`）。两者共享相同的数据目录布局、SQLite 表结构与 JSON 接口契约，可按场景单独或并行部署。关于 RustMiner 的对照说明见第 8 章。
 
+---
 
-## 1. 产品定位
+## 1. 系统概述
 
-AI Alpha Miner 是一套面向量化研究场景的多 Agent 因子挖掘与验证工作台。
+AI Alpha Miner 是一套面向公式化因子挖掘与量化策略验证的研究工作台。系统将因子假说构思、表达式编写、回测检验、相关性正交化、交易策略转化与研究文档归档整合在同一套本地可控的环境中，支持通过 Web 界面、终端界面（TUI）、命令行（CLI）和 HTTP API 四种方式操作。
 
-它把传统上分散在“想法讨论、因子表达、回测验证、组合筛选、策略落地、研究记录”中的工作串成一个闭环，核心目标是：
+各运行入口职责如下：
 
-- 让多个具备不同研究偏好的 AI 研究员并行工作
-- 把因子挖掘从“单次试错”升级为“持续迭代”
-- 把研究结果沉淀为可回看、可复盘、可筛选的资产
-- 同时提供 Web、API、TUI 三种操作面，适应不同使用习惯
+| 入口 | 启动方式 | 适用场景 |
+|---|---|---|
+| Web 工作台 | `./start_web.sh` 或 `./start_web.sh --prod` | 日常交互研究：发起并监控 Swarm、浏览因子池、执行手工/策略回测、查看知识图谱 |
+| Swarm 调度器 | `PYTHONPATH=src python -m aiminer.manager`（或 `aiminer-manager`） | 批量并发启动多个研究角色，自动执行多轮挖掘、去重与杂交 |
+| 单智能体入口 | `PYTHONPATH=src python -m aiminer.main`（或 `aiminer`） | 针对单一角色或单条研究链路做快速验证与调试 |
+| 终端工作台 (TUI) | `PYTHONPATH=src python -m aiminer.tui`（或 `aiminer-tui`） | 无浏览器服务器环境下的终端交互、因子查看与表达式回测 |
+| HTTP / WS 服务 | `PYTHONPATH=src python -m aiminer.api`（或 `aiminer-api`） | 向前端、TUI 或外部平台提供 REST 接口与实时日志流 |
 
-从产品形态上看，它是一整套研究平台，包含脚本入口、服务接口和交互式工作台：
+---
 
-- `manager.py`：Swarm 调度入口
-- `main.py`：单 Agent 工作流入口
-- `api.py`：HTTP API 与前端托管入口
-- `tui.py`：终端工作台入口
-- `frontend/`：Web 工作台
+## 2. 核心功能模块
 
-## 2. 适用对象
+### 2.1 多智能体并行挖掘（Swarm）
 
-这个项目主要适合以下几类用户：
+在一次 Swarm 运行中，顶层调度器 `PortfolioManager` 会根据用户设定的研究角色（如“量价反转”、“动量趋势”、“统计套利”、“波动率微结构”、“期限结构”等）启动多个 `AlphaResearcher` 子任务。每个子任务在独立的 LangGraph 状态图中循环执行以下步骤：
 
-- 量化研究员：希望快速生成、验证和筛选 Alpha 因子
-- 研究负责人：希望并行组织多个研究方向，并统一查看产出
-- 策略开发者：希望把因子进一步转为横截面或时序策略并评估
-- 需要本地化部署的团队：希望把数据、日志、结果与鉴权放在可控环境中
+1. **假说生成**：从 Chroma 向量库（学术文献、WorldQuant 101 因子、宏观与市场元数据）和 `LLMWiki` 检索上下文，提出本轮量化假说。
+2. **算子编码与语法检查**：将假说翻译为算子表达式，通过算子与字段白名单校验及 AST 安全重写，拦截非法语法或未授权变量。
+3. **因子回测与反馈反思**：计算 IC、Rank IC、ICIR、夏普比率与多空收益曲线；若指标未达标，结合评估反馈修正表达式进入下一轮迭代；若达到高显著性阈值（`|IC| >= 0.05`）或连续 3 轮无改善则提前收敛。
+4. **策略衍生与调优**：对有效因子自动生成多组横截面或时序交易策略候选，回测净值并由 `StrategyCritic` 根据分时段回撤与换手表现微调参数。
+5. **汇总筛选与遗传杂交**：主控层收集所有子任务产出，剔除模拟降级数据与低 IC 因子，按日收益率序列计算皮尔逊相关系数矩阵（默认剔除相关系数 `>= 0.7` 的同质化因子），对负 IC 因子自动翻转信号方向（`signal_multiplier = -1`），并选取头部父代因子执行遗传杂交（Crossover）。
 
-## 3. 产品核心价值
+同时，系统内置因子生命周期跟踪（`src/aiminer/core/lifecycle.py`）与可复现运行清单（`src/aiminer/core/manifest.py`），记录因子在后续评估中的衰减计数（Decay Streak）以及每次运行完整的数据集与环境元数据。
 
-### 3.1 多 Agent 协作，而不是单点问答
+### 2.2 因子池管理（Alpha Pool）
 
-系统允许一次启动多个“研究角色”，每个角色围绕不同风格进行因子探索，例如：
+通过主控筛选的因子统一存入 SQLite 数据库（`results/alpha_miner.db` 的 `alpha_pool` 表），并同步生成 `results/alpha_pool.json` 备份。每条因子记录包含因子 ID、所属 Run ID、角色来源、研究假说、算子表达式、核心指标（IC、Rank IC、夏普等）、每日收益率序列、净值曲线图路径、Markdown 评估报告路径，以及关联的最佳策略回测结果（`best_strategy`）。
 
-- 量价反转
-- 动量趋势
-- 统计套利
-- 宏观周期
-- 高频微结构
+研究员可在 Alpha Pool 页面对比不同因子的净值与指标，或一键将某条因子的表达式与最佳策略配置回填至策略回测台继续调参。
 
-这些角色可以并发运行，也可以串行运行。由管理器统一筛选、汇总、去重和沉淀。
+### 2.3 手工因子回测（Manual Backtest）
 
-### 3.2 研究闭环完整
+当研究员已有明确公式想法、仅需验证单个表达式而无需启动多智能体循环时，可通过手工回测模块直接测试。模块支持“先校验语法、再执行回测”的两步流程：
 
-系统覆盖的不是“生成一个表达式”，而是完整研究链路：
+- **语法校验（Validate）**：检查算子名称、参数个数与行情字段是否合法，秒级返回诊断信息。
+- **执行回测（Run）**：拉取指定市场与区间的行情数据，计算因子面板与前瞻收益，生成累计收益曲线与统计指标，并将结果存入手工回测历史。
 
-1. 形成研究假设
-2. 生成因子表达式或代码
-3. 发起回测与评估
-4. 判断有效性
-5. 进行自我反思和下一轮改进
-6. 汇总结果并形成报告
+### 2.4 策略回测（Strategy Backtest）
 
-### 3.3 因子池强调“质量 + 差异化”
+因子具备统计预测能力（IC 显著）并不直接等同于扣除交易成本后仍具备可执行收益。策略回测模块将二维因子信号面板转换为具体目标仓位，并在调仓周期、持仓上限、最短持有期与双边交易成本约束下核算净值。
 
-系统除了关注单个指标表现，还会通过收益相关性做正交化筛选，避免最终留下来的 Alpha 池过于同质化。对实际研究团队来说，这种方式更接近真实工作流。
+内置五种基础策略模板，支持在表单模式与 JSON 高级编辑模式间切换：
 
-### 3.4 一套系统，覆盖研究、验证、沉淀、展示
+| 模板标识 | 模式 | 方向与选股规则 | 适用信号特征 |
+|---|---|---|---|
+| `cs_top_bottom` | 横截面 (`cross_sectional`) | 多空对冲（做多 Top-N，做空 Bottom-N） | 截面区分度稳定、多空两端对称的选股因子 |
+| `cs_top_only` | 横截面 (`cross_sectional`) | 纯多头（仅做多 Top-N） | 空头受限（如融券成本高）或多头端超额显著的股票因子 |
+| `cs_threshold` | 横截面 (`cross_sectional`) | 阈值选股（信号突破阈值即入场） | 经过标准化或分位数映射的截面评分信号 |
+| `ts_long_flat` | 时序 (`time_series`) | 多头/空仓择时（突破上轨做多，跌破退出线平仓） | 趋势跟踪或波段择时信号 |
+| `ts_long_short` | 时序 (`time_series`) | 时序多空（突破上轨做多，跌破下轨做空） | 股指期货或具备双向交易条件的时序信号 |
 
-项目既有自动化挖掘，也有手工回测、策略回测、Wiki 知识页、运行日志、历史记录、图表与报告归档，因此它更接近“量化研究工作台”，而不是一个单点工具。
+可调参数涵盖：调仓频率（`daily` / `weekly` / `monthly`）、多空标的数量（`top_n` / `bottom_n`）、入场与退出阈值（`long_threshold` / `short_threshold` / `exit_threshold`）、最大持仓标的数（`max_positions`）、单票最大权重（`max_weight_per_position`）、最短持有天数（`min_holding_days`），以及佣金与滑点（`commission_bps` / `slippage_bps`）。
 
-## 4. 产品能力总览
+### 2.5 研究知识库与图谱（LLMWiki）
 
-### 4.1 自动挖掘 Swarm
+`data/wiki_vault/` 存放 Obsidian 风格的 Markdown 知识卡片。每次 Swarm 挖掘出的优质因子会自动生成带 YAML Frontmatter 与 `[[wikilink]]` 引用的卡片，并与基准市场状态页（`market_regime_base.md`）、策略分类页（`strategy_families_base.md`）及算子手册（`qlib_operator_guide.md`）建立关联。
 
-自动挖掘是本项目的主能力。用户可以在命令行、Web 工作台或 TUI 中发起一次 Swarm 研究任务，并配置：
+Web 工作台的 `/wiki` 页面支持：
 
-- 迭代次数
-- 研究角色
-- 是否并行
-- LLM Provider / Model
-- 数据后端
-- 市场配置
-- 回测引擎
+- 浏览与在线编辑 Markdown 页面（带未保存修改拦截与 GFM 渲染）
+- 切换全局关系图（Global Graph）与当前节点一跳邻居局部图（Local Graph）
+- 执行知识库格式检查（Lint）与旧版数据迁移（Migrate）
 
-Swarm 运行后，系统会：
+---
 
-- 调度多个子 Agent 执行研究循环
-- 收集每个角色的候选因子
-- 评估因子有效性
-- 执行相关性筛选
-- 生成摘要报告
-- 持久化到数据库和结果目录
+## 3. 操作界面说明
 
-### 4.2 Alpha Pool 因子池
+### 3.1 Web 工作台路由与视图
 
-Alpha Pool 是系统的“研究资产池”。它保存已经通过一轮筛选的因子成果，便于后续查看、对比、复用和转策略。
+启动 `./start_web.sh` 后，浏览器默认打开 Web 工作台，主要包含以下视图：
 
-因子池中通常会保留如下信息：
+- **`/`（Swarm Runs）**：配置并启动新的多智能体挖掘任务，查看当前活跃运行数、历史运行列表、有效因子产出统计，支持停止或清理历史运行。
+- **`/runs/:runId`（Run Detail）**：通过 WebSocket（`/ws`）实时订阅单次 Swarm 的事件流与节点状态，查看本次运行产出的因子与策略摘要。
+- **`/pool`（Alpha Pool）**：分页浏览全部入库因子，查看详情指标、净值缩略图（Sparkline）、完整评估报告，支持一键将因子带入策略回测页（Seed to Strategy）。
+- **`/manual`（Manual Backtest）**：输入算子表达式、选择市场与回测区间，执行语法校验、回测计算与历史对比。
+- **`/strategy`（Strategy Backtest）**：加载内置模板或自定义 JSON，执行横截面/时序策略回测，查看净值曲线、换手率曲线、最新持仓快照与交易统计（年化收益、夏普、最大回撤、胜率、平均持有期、成本拖累）。
+- **`/wiki`（Wiki & Graph）**：三栏式知识库浏览、编辑与力导向图谱交互。
+- **`/ops`（Workspace Ops）**：按作用域（`pool`、`memory`、`rag`、`runs`、`all`）预览并执行工作区清理，被清理文件安全移入 `results/.trash/<timestamp>/`。
 
-- 因子 ID
-- 角色来源
-- 假设描述
-- 因子代码/表达式
-- IC、Rank IC、绩效指标
-- 报告路径
-- 运行时间
-- 所属 Run ID
-- 是否有效
-- 策略回测关联结果
+### 3.2 终端工作台（TUI）
 
-它适合作为研究团队内部的“候选因子库”。
+在终端执行 `PYTHONPATH=src python -m aiminer.tui` 可进入基于 Textual 的全键盘交互界面（支持 Vim 风格方向键导航），提供因子池与策略表浏览、内置代码编辑器、手工与策略回测触发，以及后台 Swarm 进程的启动与停止。
 
-### 4.3 Manual Backtest 手工回测
+---
 
-除了自动挖掘，系统也支持人工输入表达式做快速验证。这个能力适合：
+## 4. 数据源、市场配置与期货工具链
 
-- 研究员已经有明确想法，只想先验证
-- 不想启动完整 Swarm，只想测单个表达式
-- 希望调试表达式写法或数据适配问题
+### 4.1 评估模式与数据后端
 
-系统支持先做表达式校验，再运行回测，并保留历史记录。
+系统将“评估协议（`evaluation_mode`）”与“底层数据源（`data_backend`）”解耦：
 
-### 4.4 Strategy Backtest 策略回测
+- **数据源（`data_backend`）**：支持 `ricequant`（米筐在线接口）、`qlib`（本地 Qlib 数据目录）和 `local`（本地 CSV/Parquet 文件）。
+- **市场配置（`market_profile`）**：内置 `cn_stock`（A 股）、`us_stock`（美股）和 `futures`（国内股指期货）。
+- **多市场执行模式（`market_mode`）**：支持 `single`（单市场）、`batch`（按 `--market-profiles` 列表依次为每个市场派发完整角色组）和 `mixed`（跨市场混合分配）。
 
-项目不仅停留在“因子有没有预测性”，还允许把因子转换为交易策略进行进一步验证。
+### 4.2 国内股指期货本地数据流
 
-当前支持的策略模板包括：
-
-- 横截面 Top/Bottom 多空
-- 横截面 Top-N 多头
-- 横截面阈值多头
-- 时序阈值 Long/Flat
-- 时序阈值 Long/Short
-
-可配置项覆盖：
-
-- 横截面或时序模式
-- 做多、做空或空仓逻辑
-- 选股规则
-- 调仓频率
-- 持仓数量
-- 单票权重上限
-- 最短持有期
-- 手续费
-- 滑点
-- 回测区间
-- 引擎选择
-
-这使得系统能够从“研究表达式”进一步推进到“策略可执行性评估”。
-
-### 4.5 Wiki / 知识沉淀
-
-项目内置 Wiki 相关能力，用于沉淀研究结论、页面内容和知识图谱关系。系统支持：
-
-- 查看 Wiki 索引
-- 查看单页内容
-- 编辑页面
-- Lint 校验
-- Wiki 迁移
-- 图谱关系查看
-
-这部分能力更偏“研究知识管理”，适合把阶段性成果变成长期资产。
-
-### 4.6 Web 工作台
-
-Web 工作台提供更完整的操作入口，当前页面结构包括：
-
-- `/`：Swarm Runs，查看和发起自动挖掘
-- `/runs/:runId`：单次 Swarm 运行详情
-- `/pool`：Alpha Pool 因子池
-- `/manual`：手工回测
-- `/strategy`：策略回测
-- `/wiki`：Wiki 页面与图谱
-- `/ops`：运维/管理页
-
-对多数用户而言，Web 工作台是最适合的日常入口。
-
-### 4.7 TUI 终端工作台
-
-项目同时提供 Textual 构建的 TUI，适合以下场景：
-
-- 服务器环境没有浏览器
-- 习惯在终端内完成研究操作
-- 想快速看日志、切换页面、编辑表达式、发起回测
-
-TUI 支持：
-
-- 自动探测 API 地址
-- 使用 Token 访问受保护接口
-- 查看 Swarm 状态与日志
-- 运行手工回测
-- 编辑代码/表达式
-- 读取数据库结果
-
-### 4.8 API 能力
-
-API 面向前端、TUI 或外部集成，主要接口能力包括：
-
-- 健康检查
-- 结果列表与单因子详情
-- 图表与报告读取
-- Wiki 读写与检查
-- 手工回测校验、执行、历史查询、删除
-- 策略回测执行、历史查询、详情读取、删除
-- Swarm 状态查询
-- Swarm 运行列表、创建、详情、日志、停止、删除
-- WebSocket 实时事件流
-- 静态前端托管
-
-如果团队需要把 AIMiner 嵌入自有平台，这一层是最直接的对接面。
-
-### 4.9 多数据后端与多市场配置
-
-系统支持的数据/评估模式不是单一的，当前可见能力包括：
-
-- `qlib`
-- `ricequant`
-- `local`
-
-市场配置支持：
-
-- `cn_stock`
-- `us_stock`
-- `futures`
-
-运行模式支持：
-
-- `single`
-- `batch`
-- `mixed`
-
-这意味着项目既可服务于标准股票因子研究，也支持本地数据或期货场景扩展。
-
-### 4.10 数据下载与本地化数据流
-
-项目包含 RiceQuant 国内股指期货数据下载 CLI，可下载：
-
-- 实际合约数据
-- 主力连续数据
-- 日线与分钟线
-
-默认覆盖：
-
-- `IF`
-- `IH`
-- `IC`
-- `IM`
-
-并以 Parquet 形式落入本地目录，适合本地回测与研究工作流。
-
-## 5. 典型使用案例
-
-### 案例 1：研究负责人组织多角色因子挖掘
-
-目标：在一个研究主题下，同时让多个不同风格的 Agent 探索可用因子。
-
-典型做法：
-
-1. 设定 3 到 5 个角色，例如反转、动量、统计套利、宏观周期。
-2. 设定迭代轮数，例如 3 到 5 轮。
-3. 选择数据后端，例如 `ricequant`。
-4. 通过 Web 或命令行发起 Swarm。
-5. 在运行过程中观察日志和阶段状态。
-6. 任务结束后在 Alpha Pool 中查看保留下来的正交化结果。
-
-适合的命令示例：
-
-```bash
-python manager.py --iterations 5 --mode ricequant \
-  --llm-provider glm --llm-model glm-4 \
-  --roles "专注量价反转的专家" "宏观周期对冲专家" "统计套利专家" \
-  --parallel
-```
-
-预期产出：
-
-- 多个候选因子
-- 汇总报告
-- 低相关性的因子池
-- 数据库与结果目录中的结构化记录
-
-### 案例 2：研究员快速验证一个手写表达式
-
-目标：不启动完整 Swarm，只验证单个表达式是否可算、是否有效。
-
-典型做法：
-
-1. 打开 Web 工作台中的 Manual Backtest 页面。
-2. 输入表达式，例如动量、反转或量价组合表达式。
-3. 先执行表达式校验。
-4. 通过后执行回测。
-5. 查看指标、曲线和历史记录。
-
-这个场景适合：
-
-- 日常研究中的快速试错
-- 校验想法是否值得进入大规模 Swarm
-- 比较多个表达式的初步表现
-
-### 案例 3：把因子进一步变成策略
-
-目标：验证“因子有效”是否能够进一步转化为“策略可执行”。
-
-典型做法：
-
-1. 在 Strategy Backtest 页面选择或输入因子表达式。
-2. 选择策略模板，例如 Top/Bottom Long-Short。
-3. 调整调仓频率、持仓数、成本、阈值等参数。
-4. 发起策略回测。
-5. 查看策略指标、持仓、收益曲线与历史记录。
-
-这个场景适合：
-
-- 从研究信号进入策略化验证
-- 比较不同执行模板对同一因子的影响
-- 识别“纸面上有效，但交易上不成立”的因子
-
-### 案例 4：用本地期货数据做扩展研究
-
-目标：将系统用于国内股指期货的本地研究流程。
-
-典型做法：
-
-1. 先通过数据下载 CLI 拉取本地期货数据。
-2. 将数据落到 `data/local_futures`。
-3. 运行时将数据后端切到 `local`，市场切到 `futures`。
-4. 用手工回测或 Swarm 方式进行研究。
-
-示例命令：
+针对股指期货研究，可使用 `scripts/download_rq_index_futures.py` 将 `IF`、`IH`、`IC`、`IM` 的历史日线（`1d`）与分钟线（`1m`）拉取至本地 Parquet 目录：
 
 ```bash
 python scripts/download_rq_index_futures.py \
@@ -333,393 +118,141 @@ python scripts/download_rq_index_futures.py \
   --underlyings IF,IH,IC,IM
 ```
 
-这个场景适合：
-
-- 不希望完全依赖在线数据接口
-- 需要分钟级或本地归档数据
-- 研究股票以外的市场
-
-### 案例 5：团队内网部署与权限控制
-
-目标：把系统作为团队内部研究平台部署，并对接口做简单鉴权。
-
-典型做法：
-
-1. 在 `.env` 或环境变量中设置 API Key、RiceQuant 凭证等。
-2. 设置 `AIMINER_AUTH_TOKEN` 作为访问令牌。
-3. 用 `./start_web.sh` 或 `docker compose up -d --build` 启动。
-4. 前端侧通过 Token 访问 API。
-5. 运维或管理人员通过 `/ops` 页面做清理与维护。
-
-这个场景适合：
-
-- 本地实验室服务器
-- 研究组共享环境
-- 对外网暴露前需要先做最低限度访问控制的场景
-
-## 6. 功能说明
-
-### 6.1 自动挖掘流程说明
-
-一次标准 Swarm 运行通常包含以下阶段：
-
-1. 初始化运行配置
-2. 组装多个研究角色
-3. 为每个角色启动研究任务
-4. 子 Agent 执行“研究 -> 代码 -> 回测 -> 反思”的微循环
-5. 管理器收集结果并进行筛选
-6. 对候选因子做相关性裁剪
-7. 生成摘要报告并持久化
-8. 在 Web/TUI/API 中暴露结果
-
-停止运行时，系统使用两阶段状态：
-
-- `stopping`
-- `stopped`
-
-因此点击停止后短暂看到 `Stopping...` 属于预期行为。
-
-### 6.2 结果持久化说明
-
-系统会把运行结果写入数据库和文件系统，典型产出包括：
-
-- 因子池记录
-- 策略回测记录
-- 图表文件
-- Markdown 报告
-- JSON 结果
-- Swarm 运行日志
-- Wiki 页面内容
-
-从产品使用角度看，这意味着研究结果不是“看完就没了”，而是可以长期沉淀与复用。
-
-### 6.3 运行管理说明
-
-系统支持对运行过程进行管理，包括：
-
-- 查看当前 Swarm 状态
-- 查看历史 Runs
-- 查看单次 Run 的详情与日志
-- 停止某次运行
-- 删除某次运行记录
-
-这类能力在多人共用环境中特别重要，因为它让系统从“会跑”升级为“可运营”。
-
-### 6.4 鉴权说明
-
-如果启用鉴权，需要设置：
+下载完成后，脚本默认会对合约连续性、字段完整性与时间轴顺序做本地校验。随后即可脱离在线接口，直接使用本地数据后端运行期货因子挖掘：
 
 ```bash
-export AIMINER_AUTH_TOKEN="your-token"
+PYTHONPATH=src python -m aiminer.manager \
+  --iterations 5 \
+  --mode ricequant \
+  --data-backend local \
+  --market-profile futures \
+  --local-data-path data/local_futures/dominant/1d \
+  --engine polars \
+  --parallel
 ```
 
-前端会通过以下方式附带令牌：
+此外，项目还提供专门的期货策略命令行入口 `aiminer-futures-strategy`（`src/aiminer/futures_strategy.py`），用于多品种期货面板合成与执行回测。
 
-- `Authorization: Bearer <token>`
-- `X-API-Key: <token>`
+---
 
-如果未配置 Token，系统可进入无鉴权模式，适合本机开发环境。
+## 5. 常用工作流示例
 
-## 7. 使用方式
+### 场景一：从单表达式试错到多角色并行挖掘
 
-### 7.1 本地环境安装
+初次接入新数据集或验证新研究方向时，建议按以下顺序推进：
 
-```bash
-conda env create -f environment.yml
-conda activate aiminer
-pip install -r requirements.txt
-```
+1. 启动 `./start_web.sh` 打开 Web 工作台，进入 `/manual` 页面，用 1～2 个基础算子表达式（如滚窗均值或横截面排名）执行回测，确认行情读取与算子计算正常。
+2. 命令行或 Web 首页发起小规模 Swarm（例如 2～3 个角色、每个角色迭代 3 轮），观察 `/runs/:runId` 实时日志流，确认假说生成与回测反馈闭环运转正常。
+3. 在 `/pool` 中挑选高 IC、低相关性的有效因子，点击“Seed to Strategy”跳转至 `/strategy`，测试不同调仓周期与费率假设下的净值表现。
+4. 将经过策略验证的因子结论补充至 `/wiki` 知识页，供后续 Swarm 检索复用。
 
-### 7.2 启动 Web 工作台
+### 场景二：团队内网共享部署
 
-开发模式：
+在实验室服务器或团队内网部署时，建议开启 API Token 鉴权并使用生产模式或 Docker 容器运行：
 
 ```bash
-./start_web.sh
-```
-
-生产模式：
-
-```bash
+export AIMINER_AUTH_TOKEN="team-shared-secret-token"
+export AIMINER_MAX_CONCURRENT_SWARMS=2
 ./start_web.sh --prod
 ```
 
-脚本会统一设置：
+团队成员在浏览器打开工作台后，于左侧边栏填入 `API Token` 即可正常发起回测与挖掘任务；未携带有效 Token 的写操作请求将被后端拒绝。
 
-- `AIMINER_DATA_DIR`
-- `AIMINER_RESULTS_DIR`
-- `AIMINER_LOG_DIR`
+---
 
-这样 API、Manager、手工回测和 Web 工作台会共用同一套数据与结果目录。
+## 6. 环境变量与配置参考
 
-### 7.3 启动 TUI
+| 变量名 | 说明 | 默认值 / 示例 |
+|---|---|---|
+| `ZHIPU_API_KEY` / `GLM_KEY` | 智谱 GLM 接口密钥 | - |
+| `KIMI_API_KEY` / `LLM_KEY` | Moonshot Kimi 接口密钥 | - |
+| `QWEN_API_KEY` | 通义千问接口密钥 | - |
+| `DEEPSEEK_API_KEY` | DeepSeek 接口密钥 | - |
+| `MIMO_API_KEY` / `MIMO_BASE_URL` | 小米 MiMo 接口密钥与地址 | `https://token-plan-cn.xiaomimimo.com/v1` |
+| `OPENAI_API_KEY` / `OpenAI_KEY` | OpenAI 兼容接口密钥 | - |
+| `ANTHROPIC_API_KEY` / `ClaudeCode_KEY` | Anthropic Claude 接口密钥 | - |
+| `OPENROUTER_API_KEY` / `GROQ_API_KEY` | OpenRouter / Groq 接口密钥 | - |
+| `AIMINER_CODEX_CMD` | 本地 Codex CLI 可执行文件路径 | `codex` |
+| `AIMINER_CODEX_TIMEOUT_SECONDS` | Codex 单次调用超时秒数 | `300` |
+| `AIMINER_CODEX_REASONING_EFFORT` | Codex 默认推理强度（`low`/`medium`/`high`/`xhigh`） | - |
+| `RQ_TOKEN` 或 `RQ_USER` + `RQ_PASS` | RiceQuant 行情凭证 | - |
+| `USE_LOCAL_EMBEDDING` | 是否使用本地模型计算 RAG 向量 | `false` |
+| `AIMINER_DATA_DIR` | 数据与知识库根目录 | `data` |
+| `AIMINER_RESULTS_DIR` | 数据库、图表、报告与运行记录目录 | `results` |
+| `AIMINER_LOGS_DIR` / `AIMINER_LOG_DIR` | 日志输出目录 | `logs` |
+| `AIMINER_AUTH_TOKEN` | HTTP / WebSocket 接口访问令牌 | 未设置时默认免鉴权 |
+| `AIMINER_DISABLE_AUTH` | 显式关闭接口鉴权 | `false` |
+| `AIMINER_CORS_ORIGINS` | 允许跨域访问的前端源列表（逗号分隔） | 本地 `8000` 与 `5173` 端口 |
+| `AIMINER_MAX_CONCURRENT_SWARMS` | 允许同时运行的 Swarm 任务上限 | `1` |
+| `AIMINER_SWARM_GLOBAL_TIMEOUT_SECONDS` | 并行 Swarm 全局超时秒数（`0` 表示不限制） | `600` |
 
-```bash
-python tui.py
+---
+
+## 7. 产物目录结构
+
+```text
+aiminer/
+  ├─ data/
+  │    ├─ rag_docs/          # 学术论文、WorldQuant 101、宏观新闻与市场元数据语料
+  │    ├─ wiki_vault/        # Obsidian 风格 Markdown 知识卡片
+  │    ├─ wiki_db/           # LLMWiki 向量索引 (ChromaDB)
+  │    ├─ chroma_db/         # RAG 文献向量索引 (ChromaDB)
+  │    └─ local_futures/     # 本地股指期货 Parquet 数据集
+  ├─ results/
+  │    ├─ alpha_miner.db     # 核心 SQLite 数据库（含 alpha_pool、strategy_backtests、agent_checkpoints 等表）
+  │    ├─ alpha_pool.json    # 因子池 JSON 镜像备份
+  │    ├─ swarm_runs/        # 单次 Swarm 运行的 Manifest (.json) 与事件流 (.jsonl)
+  │    ├─ strategies/        # 策略回测详情 JSON、缓存与净值/换手图表
+  │    ├─ charts/            # 因子回测净值曲线 PNG
+  │    ├─ reports/           # 因子评估 Markdown 报告
+  │    └─ .trash/            # reset_workspace.py 移入的可恢复历史产物
+  └─ logs/
+       ├─ backend.log        # Web API 后端日志
+       └─ frontend.log       # Vite 开发服日志
 ```
 
-### 7.4 启动单 Agent 工作流
+---
 
-```bash
-python main.py --iterations 1 --mode ricequant
-```
+## 8. RustMiner：原生 Rust 双轨实现
 
-### 7.5 启动多 Agent Swarm
+### 8.1 定位与架构差异
 
-```bash
-python manager.py --iterations 3 --mode ricequant --parallel
-```
-
-### 7.6 Docker / Compose 启动
-
-仅启动 API 服务：
-
-```bash
-docker compose up -d --build
-```
-
-启动一次性研究 Worker：
-
-```bash
-AIMINER_ITERATIONS=5 docker compose --profile research run --rm worker
-```
-
-启动 TUI 容器：
-
-```bash
-docker compose --profile tui run --rm tui
-```
-
-## 8. 关键配置项
-
-### 8.1 LLM 配置
-
-项目支持多种 LLM Provider，当前代码和文档中可见的选项包括：
-
-- `kimi`
-- `qwen`
-- `claude`
-- `glm`
-- `openai`
-- `deepseek`
-- `mimo`
-- `openrouter`
-- `groq`
-- `ollama`
-- `vllm`
-- `lmstudio`
-- `codex`
-
-示例环境变量：
-
-- `KIMI_API_KEY`
-- `QWEN_API_KEY`
-- `ZHIPU_API_KEY`
-- `MIMO_API_KEY`
-- `MIMO_BASE_URL`
-- `OpenAI_KEY`
-- `ClaudeCode_KEY`
-
-### 8.2 数据与账号配置
-
-RiceQuant 凭证可通过以下环境变量提供：
-
-- `RQ_USER`
-- `RQ_PASS`
-- `RQ_TOKEN`
-
-### 8.3 鉴权与访问配置
-
-- `AIMINER_AUTH_TOKEN`
-- `AIMINER_DISABLE_AUTH`
-- `AIMINER_CORS_ORIGINS`
-
-### 8.4 本地推理与嵌入配置
-
-- `USE_LOCAL_EMBEDDING`
-- `AIMINER_CODEX_CMD`
-- `AIMINER_CODEX_TIMEOUT_SECONDS`
-- `AIMINER_CODEX_REASONING_EFFORT`
-
-## 9. 产品输入与输出
-
-### 9.1 主要输入
-
-系统的输入通常包括：
-
-- 研究角色描述
-- 迭代次数
-- 因子表达式
-- 策略配置
-- 市场配置
-- 数据源配置
-- LLM 与嵌入配置
-- 本地数据目录或在线凭证
-
-### 9.2 主要输出
-
-系统的输出通常包括：
-
-- 因子候选与精选池
-- 回测指标
-- 收益曲线与图表
-- 策略回测结果
-- 研究报告
-- Wiki 页面
-- 数据库存档
-- 日志与运行记录
-
-### 9.3 典型目录
-
-- `data/`：原始数据、Wiki、向量库等
-- `results/`：研究结果、图表、数据库、运行记录
-- `logs/`：后端与前端日志
-
-## 10. 推荐使用流程
-
-对于第一次使用这个项目的团队，推荐流程如下：
-
-1. 先配置 `.env` 与基础凭证。
-2. 用 `./start_web.sh` 启动 Web 工作台。
-3. 先在 Manual Backtest 页面验证 1 到 3 个表达式。
-4. 再启动小规模 Swarm，例如 2 到 3 个角色、1 到 3 轮迭代。
-5. 到 Alpha Pool 查看沉淀结果。
-6. 对优质因子继续做 Strategy Backtest。
-7. 把有价值的结论整理到 Wiki。
-
-这个顺序的优点是：
-
-- 风险更低
-- 成本更可控
-- 更容易定位配置、数据或表达式问题
-- 更符合真实研究团队的试运行节奏
-
-## 11. 这个产品最适合怎样的团队
-
-如果团队符合以下特征，这个项目会比较合适：
-
-- 已经有一定量化研究基础
-- 想把 AI 从“聊天助手”升级为“研究执行者”
-- 需要同时保留自动化能力和人工干预空间
-- 需要可视化工作台，但又不想放弃命令行和 API
-- 希望研究成果长期积累，而不是一次性实验
-
-如果团队当前只需要“单个表达式能不能算”，那可以先只使用 Manual Backtest；如果团队已经在做多研究方向并行探索，Swarm 与 Alpha Pool 的价值会更明显。
-
-## 12. RustMiner —— 下一代 Rust 重写
-
-### 12.1 概述
-
-RustMiner（`~/Documents/finance/archive/rustminer`）是 AI Alpha Miner 的完整 Rust 重写版本，目标是在保持 Python 版本全部研究能力的同时，提供原生编译性能、单二进制分发和更强的工程可靠性。
-
-从产品演进角度，RustMiner 不是替代品，而是同一产品线的第二阶段——Python 版本侧重快速迭代和生态兼容，Rust 版本侧重生产部署和长期维护。
-
-### 12.2 架构对比
+`RustMiner`（位于 `~/Documents/finance/archive/rustminer`）是 AI Alpha Miner 的全量 Rust 原生实现。它与当前仓库的 Python 版本共享相同的目录结构、SQLite 表定义与 JSON 接口契约，可在同一工作区并行读写。两者的技术栈对照如下：
 
 | 维度 | AI Alpha Miner (Python) | RustMiner (Rust) |
 |---|---|---|
-| 语言运行时 | CPython 3.10+, GIL 受限 | Rust 编译原生二进制, 多线程 |
-| 代码规模 | ~50K+ Python | ~66K Rust (29 模块 + 7 模型子模块) |
-| 数据加载 | Polars/Pandas CSV/Parquet | Arrow/Parquet 原生列式读取 |
-| 因子求值 | Polars 引擎 / Qlib / RiceQuant | Rust 原生 Arrow 列式求值器 |
-| 工作流引擎 | LangGraph 状态图 | 自定义 WorkflowNode 枚举 + 纯函数路由 |
-| LLM 客户端 | httpx + LangChain | ureq (阻塞 HTTP) + 自研 JSON 解析 |
-| HTTP 服务 | FastAPI + uvicorn | Axum 0.7 (异步多线程) |
-| 图表渲染 | matplotlib | plotters (原生 PNG) |
-| 数据库 | Python sqlite3 | rusqlite (bundled libsqlite3) |
-| 分发方式 | conda 环境 + pip | 单静态二进制 (~20MB) |
-| 测试体系 | pytest | cargo test (679+ 内联测试) |
+| 运行时与并发 | CPython 3.10+（多进程绕过 GIL） | 原生编译二进制，多线程 + `mpsc` 通道 |
+| 行情与算子引擎 | Pandas / Polars + Qlib / RiceQuant | 原生 Arrow / Parquet 列式求值器（不依赖 Qlib 运行时） |
+| 工作流状态机 | LangGraph 状态图 | `WorkflowNode` 枚举状态机 + 纯函数路由 |
+| HTTP 服务 | FastAPI + Uvicorn | Axum 0.7 异步多线程服务 |
+| 图表绘制 | Matplotlib | Plotters 原生 PNG 渲染 |
+| 数据存储 | Python `sqlite3` | `rusqlite`（内置 bundled `libsqlite3`） |
+| 分发形态 | Conda 环境 + Python 包 | 单一静态可执行文件（约 20 MB） |
 
-### 12.3 RustMiner 独有能力
+Python 版本适合快速修改提示词、扩展实验算子、调用 RiceQuant Python SDK 或接入 PyData 科学计算生态；RustMiner 则适合追求高并发吞吐、零环境依赖分发、快速冷启动与大批量 Arrow 原生求值的生产环境。
 
-以下能力是 RustMiner 原生支持而 Python 版本不具备的：
+### 8.2 渐进切流与一致性校验（Parity & Cutover）
 
-**a. Phase 10 渐进切流框架**
+RustMiner 内置了从 Python 向 Rust 平滑迁移的校验与切流工具：
 
-一套形式化的迁移框架，支撑从 Python 到 Rust 的渐进式替换：
+1. **Plan / Execute 预演机制**：每个核心子命令均支持 `plan`（仅输出预期副作用 JSON 而不执行实际 I/O）与 `run`/`serve`（实际执行）两种模式，便于在 CI/CD 中验证执行计划。
+2. **输出一致性比对（Parity Compare）**：直接比对 Python 与 Rust 针对同一输入的输出 JSON，校验数值误差是否在容差范围内：
+   ```bash
+   rustminer parity compare python_output.json rust_output.json --tolerance 1e-6
+   ```
+3. **分阶段切流评估（Cutover Readiness）**：按 `cli` → `api` → `swarm_manager` 三个入口阶段与九道校验关卡评估切流就绪度及回滚能力：
+   ```bash
+   rustminer cutover readiness --switched cli,api,swarm_manager --rollback-ready --native-only
+   ```
 
-- `CutoverEntrypoint`：三个阶段 (`Cli`, `Api`, `SwarmManager`)，每个阶段有序前置依赖
-- `CutoverGate`：九个顺序关卡，包括 SharedFixturesParity、SelectedRealRunsParity、ParityMetrics、RollbackPath、NativeOnlyRuntime
-- `CutoverEvidence`：每关的结构化 JSON 证据，带 git SHA 锁定
-- `cutover readiness` CLI 命令：评估当前切流状态、已通过关卡、是否可回滚
-
-```bash
-rustminer cutover readiness --switched cli,api,swarm_manager --rollback-ready --native-only
-```
-
-**b. Plan/Execute 效果 DSL**
-
-15 种 `AdapterEffect` 变体，把所有副作用描述为数据：
-
-- 每个入口命令都有 `plan` 变体（返回 JSON 描述预期效果）和 `run`/`serve` 变体（实际执行）
-- `RecordingAdapterExecutor` 支持在不执行 I/O 的情况下测试副作用计划
-- 适合 CI/CD 流水线中的预演验证
-
-**c. Parity 一致性测试**
-
-`parity compare` CLI 命令对比 Python 与 Rust 产出的 JSON 文件：
+常用 RustMiner 命令速查：
 
 ```bash
-rustminer parity compare python_output.json rust_output.json --tolerance 1e-6
+rustminer help                                    # 查看命令列表
+rustminer cli plan|run [选项]                     # 单智能体工作流
+rustminer manager plan|run [选项]                 # 多智能体 Swarm 调度
+rustminer api plan|serve [选项]                   # 启动 Axum HTTP API 服务
+rustminer tui [snapshot]                          # 启动终端交互工作台
+rustminer parity compare <PYTHON> <RUST> [选项]   # 跨语言结果一致性比对
+rustminer cutover readiness                       # 切流就绪度评估
 ```
-
-五套 parity 套件覆盖 SharedFixtures、SelectedRealRuns、ApiResponses、CliArtifacts、SwarmArtifacts。
-
-**d. 原生二进制分发**
-
-编译为单一静态可执行文件，无需 Python 运行时、conda 环境或 pip 依赖。预构建二进制覆盖 Linux x86_64 和 macOS ARM64/Intel。
-
-**e. Qlib 策略差异**
-
-Python 版本完整支持 Qlib 作为数据后端和表达式运行时。RustMiner 明确拒绝 Qlib 运行时——Qlib 仅作为表达式语法参考保留兼容性。这意味着：
-
-- `--mode qlib` 在 RustMiner 中不可用
-- 所有因子求值走 Rust 原生 Arrow 引擎
-- 不需要安装 Qlib 或其 Python 依赖
-
-### 12.4 RustMiner CLI 命令参考
-
-```bash
-rustminer help                                    # 查看所有命令
-rustminer cutover readiness                       # 切流状态评估
-rustminer cli plan|run [选项]                     # CLI 工作流
-rustminer manager plan|run [选项]                 # Manager Swarm 调度
-rustminer api plan|serve [选项]                   # HTTP API 服务
-rustminer swarm plan [选项]                       # Swarm 执行计划
-rustminer tui [snapshot]                          # 终端工作台
-rustminer parity compare <PYTHON> <RUST> [选项]   # 一致性对比
-```
-
-### 12.5 迁移路径
-
-对于已经在使用 Python 版本的团队，推荐的迁移策略：
-
-1. **评估阶段**：运行 `rustminer cutover readiness` 了解当前切流就绪状态
-2. **验证阶段**：使用 `rustminer parity compare` 对比同一输入的 Python/Rust 产出
-3. **试运行阶段**：在 `--mode ricequant` 下用 RustMiner 跑相同的 Swarm 配置，对比 Alpha Pool 产出
-4. **切流阶段**：先切 CLI 入口，再切 API 服务，最后切 Swarm Manager
-5. **纯原生阶段**：`--native-only` 标志确认所有 Python 回退路径已移除
-
-两个版本共享同一套数据目录、结果目录和 SQLite schema，可以在同一研究环境中并行使用。
-
-### 12.6 性能特征
-
-基于架构差异，RustMiner 在以下场景有显著优势：
-
-- **批量因子求值**：原生 Arrow 列式引擎，无 Python GIL 开销
-- **并行 Agent 调度**：原生线程 + mpsc 通道，无 multiprocessing 序列化开销
-- **API 吞吐**：Axum 异步多线程，单实例可承载更高并发
-- **冷启动**：单二进制直接执行，无 Python 解释器 + 依赖加载延迟
-- **图表渲染**：plotters 原生渲染，不依赖 matplotlib C 扩展
-
-Python 版本在以下场景仍有优势：
-
-- **快速原型**：修改提示词、算子逻辑后即时生效，无需编译
-- **生态扩展**：可直接使用 pandas/polars/numpy 生态做 ad-hoc 分析
-- **RiceQuant API**：Python SDK 原生支持，Rust 版本通过 HTTP 桥接
-
-## 13. 总结
-
-AI Alpha Miner 是一套围绕量化研究闭环构建的工作平台。它把多 Agent 挖掘、手工验证、策略化评估、知识沉淀、运行管理和多入口使用方式整合到一起，适合从个人研究到小团队协作的多种场景。
-
-RustMiner 作为下一代 Rust 重写，在保持完整研究能力的同时，提供了原生编译性能、单二进制分发、形式化切流框架和更完善的测试体系，适合对部署可靠性、运行效率和长期维护有更高要求的团队。

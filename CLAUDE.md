@@ -1,109 +1,88 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides context and engineering guidelines for Claude Code and other AI coding agents working in this repository.
 
 ## Project Overview
 
-AI Alpha Miner is an automated quantitative factor discovery system. A **Manager-SubAgent swarm** of LLM-powered quant researchers autonomously generates, implements, backtests, and curates trading alpha factors. The system runs end-to-end: hypothesis → math formula → Python code → backtest → orthogonalization → final factor pool.
+AI Alpha Miner (`aiminer`) is a multi-agent quantitative factor discovery and strategy evaluation system. A `PortfolioManager` orchestrates multiple role-specialized `AlphaResearcher` workers, each running a LangGraph state machine (`IdeaAgent` → `FactorAgent` → `EvalAgent` → `StrategyAgent` / `StrategyCritic` → `LLMWiki` update). Proven factors are filtered by IC/Sharpe thresholds, deduplicated by daily return correlation, optionally recombined via genetic crossover, and persisted to SQLite (`results/alpha_miner.db`) alongside run manifests, charts, and Markdown reports.
 
-## Environment Setup
+## Environment & Installation
 
 ```bash
 conda env create -f environment.yml && conda activate aiminer
-pip install -r requirements.txt
-cp .env.example .env  # then fill in API keys
+pip install -e ".[all,test]"
+cp .env.example .env  # configure LLM API keys and RiceQuant credentials
 ```
 
-Required `.env` keys: `ZHIPU_API_KEY` (or any other LLM provider key), `RQ_USER`/`RQ_PASS`/`RQ_TOKEN` for RiceQuant backtesting.
+Optional Rust Polars native plugin build:
+
+```bash
+cd polars_plugins && maturin develop --release
+```
 
 ## Running the System
 
-**Multi-agent swarm (main mode):**
-```bash
-PYTHONPATH=src python -m aiminer.manager --iterations 5 --mode ricequant --llm-provider glm --llm-model glm-4 \
-  --roles "动量反转专家" "统计套利专家" --parallel --wiki-bootstrap
-```
-
-**Single-agent legacy mode:**
-```bash
-PYTHONPATH=src python -m aiminer.main --iterations 3 --mode ricequant --llm-provider glm --llm-model glm-5
-```
-
-Or, after `pip install -e .`, use the installed entry points: `aiminer-manager`, `aiminer`, `aiminer-tui`, `aiminer-api`.
-
-`--mode` is either `ricequant` (A-stock, requires RQ credentials) or `qlib` (Microsoft Qlib). `--rebuild-rag` forces re-embedding of docs in `data/rag_docs/`.
-
-## Running Tests
+Console script entry points (installed via `pip install -e .`) or module invocations with `PYTHONPATH=src`:
 
 ```bash
-python -m pytest tests/
-python -m pytest tests/test_numerical_consistency.py  # single test file
-python -m pytest tests/test_polars_ops_extensive.py -v
+# Multi-agent swarm CLI
+PYTHONPATH=src python -m aiminer.manager --iterations 5 --mode ricequant \
+  --llm-provider glm --llm-model glm-4 \
+  --roles "量价反转研究员" "统计套利研究员" --parallel --wiki-bootstrap
+
+# Single-agent workflow CLI
+PYTHONPATH=src python -m aiminer.main --iterations 3 --mode ricequant
+
+# Web workstation (FastAPI on :8000 + Vite dev server on :5173, or --prod for single-port SPA)
+./start_web.sh
+./start_web.sh --prod
+
+# Terminal UI (Textual)
+PYTHONPATH=src python -m aiminer.tui
 ```
 
-Standalone test scripts (not pytest):
+## Running Tests & Verification
+
 ```bash
-python scripts/manual_tests/test_eval.py
-python scripts/manual_tests/test_ctx.py
+# Hermetic unit tests (default CI gate — no network, credentials, or compiled Rust plugin required)
+PYTHONPATH=src pytest tests/unit -m "unit and not external and not native" -q
+
+# External dependency tests (requires RQ_TOKEN / RiceQuant credentials)
+PYTHONPATH=src pytest -m external -q
+
+# Native Rust Polars plugin tests
+PYTHONPATH=src pytest -m native -q
+
+# Full CI matrix check (bytecode compilation, CI workflow check, Ruff lint, pytest collection)
+python scripts/verify_ci_matrix.py
 ```
 
-## Architecture
+## Architecture & Module Map
 
-### Data Flow
+All Python package source lives under `src/aiminer/`:
 
+```text
+src/aiminer/
+  ├─ manager.py          : PortfolioManager top-level swarm orchestrator & CLI
+  ├─ scheduler.py        : Process/thread pool execution, worker limits, timeouts, log queue forwarding
+  ├─ selector.py         : Factor scoring, return-correlation culling, negative-IC orientation
+  ├─ crossover.py        : Genetic crossover of top parent factors
+  ├─ persistence.py      : SQLite schema initialization, atomic JSON backups, checkpoint recovery
+  ├─ sub_agent.py        : AlphaResearcher single-worker runner
+  ├─ main.py             : Single-agent CLI entry point
+  ├─ tui.py              : Textual terminal UI
+  ├─ api.py              : FastAPI application entry point & backward-compatible re-exports
+  ├─ routers/            : Modular FastAPI routers (admin, backtest, strategy, swarm, wiki, websocket, common)
+  ├─ app_workflow/       : LangGraph state machine (graph.py) and AlphaMinerState TypedDict (state.py)
+  ├─ agents/             : LLM agents (idea_agent, factor_agent, eval_agent, strategy_agent, strategy_critic, portfolio_agent, summary_agent)
+  ├─ core/               : Settings, LLM gateway, Codex CLI wrapper, RAG, LLMWiki, StrategyBacktester, local data loader, lifecycle & manifest tracking
+  │    └─ alphaeval/     : Factor evaluation engines (rq_eval.py, polars_engine.py, modeltester.py)
+  └─ schemas/            : Pydantic structured output models (messages.py)
 ```
-manager.py (PortfolioManager)
-  └─ spawns N SubAgents via ProcessPoolExecutor
-       └─ sub_agent.py (AlphaResearcher)
-            └─ app_workflow/graph.py (LangGraph state machine)
-                 ├─ idea_agent     → hypothesis generation (RAG + Wiki context)
-                 ├─ factor_agent   → math formula + Python code
-                 ├─ eval_agent     → backtest (RiceQuant or Qlib)
-                 ├─ wiki_update    → persist proven factors to LLMWiki
-                 └─ increment      → loop control / early stopping
-  └─ filters pool: IC > 0.01, Pearson correlation < 0.7
-  └─ optional genetic crossover of top-2 factors
-  └─ saves to SQLite (results/alpha_miner.db) + JSON
-```
 
-### Key Modules
+### Key Architectural Invariants
 
-| Module | Role |
-|---|---|
-| `app_workflow/state.py` | `AlphaMinerState` TypedDict — the single shared state object flowing through LangGraph |
-| `app_workflow/graph.py` | LangGraph graph definition; conditional routing based on validity, effectiveness, patience counter |
-| `agents/idea_agent.py` | Hypothesis generation using HybridKnowledge (RAG + Wiki) |
-| `agents/factor_agent.py` | Translates hypothesis → operator expression; whitelist validation + AST safety check |
-| `agents/eval_agent.py` | Runs backtest, extracts IC/RankIC/Sharpe; LLM effectiveness review |
-| `core/llm.py` | Multi-provider LLM gateway (Kimi, Qwen, GLM, Claude, OpenAI, DeepSeek, Groq, Ollama, vLLM) |
-| `core/rag.py` | ChromaDB vector store; BM25 + semantic hybrid retrieval |
-| `core/hybrid_knowledge.py` | Fuses RAG + LLMWiki; auto-updates wiki after successful backtests |
-| `core/wiki.py` | LLMWiki: structured card-based knowledge store for proven factors |
-| `core/alphaeval/rq_eval.py` | RiceQuant backtester; SafeEvalTransformer for safe expression execution |
-| `core/alphaeval/modeltester.py` | Qlib adapter |
-| `schemas/messages.py` | Pydantic output models for all LLM structured outputs |
-
-### LangGraph Early Stopping
-
-The workflow loops up to `max_iterations`. Early exit triggers when IC ≥ 0.05 (exceptional signal found) or `patience` counter reaches 3 (no improvement in IC over 3 consecutive iterations).
-
-### Factor Expression Safety
-
-`FactorAgent` validates code expressions against a whitelist of allowed operators (defined in the agent) before any execution. `SafeEvalTransformer` in `rq_eval.py` converts unknown AST names to string literals to prevent injection.
-
-### LLM Provider Selection
-
-`core/llm.py` auto-detects available API keys from environment and returns a `ChatOpenAI`-compatible client. Temperature varies by agent: 0.7 for idea generation, 0.1 for strict code validation, 0.3–0.4 for evaluation review.
-
-### Evaluation Fallback
-
-If the real backtest fails, `eval_agent` falls back to deterministic hash-based simulated metrics (flagged as `is_simulated=True` in state). Simulated factors are filtered out by the manager.
-
-## Output
-
-- `results/alpha_miner.db` — SQLite factor pool
-- `results/factor_pool.json` — JSON backup
-- `results/reports/` — Markdown reports per factor
-- `results/charts/` — Equity curve PNGs
-- `data/chroma_db/` — Persistent ChromaDB embeddings
-- `data/wiki_db/` — LLMWiki cards
+1. **Factor Expression Safety**: `FactorAgent` validates generated expressions against an explicit operator and field whitelist before evaluation. `SafeEvalTransformer` in `src/aiminer/core/alphaeval/rq_eval.py` rewrites AST nodes to prevent arbitrary code execution. Never introduce raw `eval()` on untrusted strings.
+2. **No Silent Simulation Contamination**: When real backtest evaluation fails, fallback simulated metrics are flagged with `is_simulated=True` and strictly excluded from the production alpha pool by `PortfolioManager`.
+3. **API Compatibility & State Consistency**: `src/aiminer/api.py` mounts modular routers from `src/aiminer/routers/` and syncs monkeypatched attributes across submodules for test compatibility. Swarm run status checks combine on-disk run manifests (`results/swarm_runs/*.json`) with OS process liveness (`psutil`) and use a two-phase stop transition (`stopping` → `stopped`).
+4. **Formatting & Lint**: Follow Google Python Style at 80 columns (`ruff check src tests`).
