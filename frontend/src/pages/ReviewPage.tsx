@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { deskFetch } from '../lib/api';
+import { TOKEN_CHANGED_EVENT, deskFetch } from '../lib/api';
 
 type Promo = {
   id: string;
@@ -14,7 +14,10 @@ export function ReviewPage() {
   const [items, setItems] = useState<Promo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const load = () => {
+  const load = (clearError = false) => {
+    if (clearError) {
+      setError(null);
+    }
     deskFetch('/api/v1/review')
       .then((r) => {
         if (!r.ok) throw new Error(`review ${r.status}`);
@@ -25,7 +28,10 @@ export function ReviewPage() {
   };
 
   useEffect(() => {
-    load();
+    const reload = () => load(true);
+    reload();
+    window.addEventListener(TOKEN_CHANGED_EVENT, reload);
+    return () => window.removeEventListener(TOKEN_CHANGED_EVENT, reload);
   }, []);
 
   const approve = (id: string) => {

@@ -1,6 +1,11 @@
-import { useState, type MouseEvent } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useEffect, useState, type MouseEvent } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
-import { getStoredToken, setStoredToken } from '../lib/api';
+import {
+  TOKEN_CHANGED_EVENT,
+  getStoredToken,
+  setStoredToken,
+} from '../lib/api';
 
 const links = [
   { to: '/', label: 'Catalog' },
@@ -21,6 +26,17 @@ type WikiDirtyWindow = Window & {
 
 export function Layout() {
   const [token, setToken] = useState(() => getStoredToken());
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const onTokenChanged = () => {
+      setToken(getStoredToken());
+      void queryClient.invalidateQueries();
+    };
+    window.addEventListener(TOKEN_CHANGED_EVENT, onTokenChanged);
+    return () => window.removeEventListener(TOKEN_CHANGED_EVENT, onTokenChanged);
+  }, [queryClient]);
+
   const confirmNavigation = (event: MouseEvent<HTMLAnchorElement>) => {
     const guard = (window as WikiDirtyWindow).__aiminerConfirmWikiDiscard;
     if (guard && !guard()) {
@@ -39,20 +55,22 @@ export function Layout() {
             agent need the desk token (`FINAINCE_DESK_TOKEN`).
           </p>
         </div>
-        <label className="field">
-          API Token
-          <input
-            type="password"
-            autoComplete="off"
-            placeholder="Bearer token or API key"
-            value={token}
-            onChange={(event) => {
-              const nextToken = event.target.value;
-              setToken(nextToken);
-              setStoredToken(nextToken);
-            }}
-          />
-        </label>
+        <form onSubmit={(event) => event.preventDefault()}>
+          <label className="field">
+            API Token
+            <input
+              type="password"
+              autoComplete="off"
+              placeholder="Bearer token or API key"
+              value={token}
+              onChange={(event) => {
+                const nextToken = event.target.value;
+                setToken(nextToken);
+                setStoredToken(nextToken);
+              }}
+            />
+          </label>
+        </form>
         <p className="muted">
           Stored in localStorage and sent as `Authorization` plus `X-API-Key`.
         </p>

@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { deskFetch } from '../lib/api';
+import { TOKEN_CHANGED_EVENT, deskFetch } from '../lib/api';
 
 type CatalogItem = {
   id: string;
@@ -29,25 +29,30 @@ export function CatalogPage() {
   const [direction, setDirection] = useState('to_pool');
 
   useEffect(() => {
-    setError(null);
-    if (id) {
-      deskFetch(`/api/v1/catalog/${id}`)
+    const load = () => {
+      setError(null);
+      if (id) {
+        deskFetch(`/api/v1/catalog/${id}`)
+          .then((r) => {
+            if (!r.ok) throw new Error(`catalog ${id} ${r.status}`);
+            return r.json();
+          })
+          .then((body) => setDetail(body))
+          .catch((err) => setError(String(err)));
+        return;
+      }
+      setDetail(null);
+      deskFetch('/api/v1/catalog')
         .then((r) => {
-          if (!r.ok) throw new Error(`catalog ${id} ${r.status}`);
+          if (!r.ok) throw new Error(`catalog ${r.status}`);
           return r.json();
         })
-        .then((body) => setDetail(body))
+        .then((body) => setItems(body.items || []))
         .catch((err) => setError(String(err)));
-      return;
-    }
-    setDetail(null);
-    deskFetch('/api/v1/catalog')
-      .then((r) => {
-        if (!r.ok) throw new Error(`catalog ${r.status}`);
-        return r.json();
-      })
-      .then((body) => setItems(body.items || []))
-      .catch((err) => setError(String(err)));
+    };
+    load();
+    window.addEventListener(TOKEN_CHANGED_EVENT, load);
+    return () => window.removeEventListener(TOKEN_CHANGED_EVENT, load);
   }, [id]);
 
   const promote = (event: FormEvent) => {
